@@ -7,10 +7,10 @@ from pathlib_next import Path, Pathname
 from .loader import ConfigLoader
 from .reader import Reader
 
-__all__ = ["Include", "YamlReader"]
+__all__ = ["YamlConfigLoader", "YamlReader"]
 
 
-class Include(ConfigLoader):
+class YamlConfigLoader(ConfigLoader):
     def __call__(self, loader: yaml.Loader, node: yaml.Node):
         args = ()
         kwargs = {}
