@@ -1,25 +1,20 @@
 from pathlib_next import Path, Pathname, LocalPath, PosixPathname, glob
 import typing
-
-import yaml
-
 import logging
 
 try:
-    from jinja2 import Template, Environment
-
-    JINJA_ENV = Environment(extensions=["jinja2.ext.do"])
+    from .jinja2 import _load_from_text
 except ImportError:
     ...
 
-from ..reader import Reader
+from .reader import Reader
 
-_LOGGER = logging.getLogger("yaconfiglib.yaml.include")
+_LOGGER = logging.getLogger("yaconfiglib")
 
 __all__ = ["Include"]
 
 
-class Include:
+class ConfigLoader:
 
     DEFAULT_PATH_GENERATOR = LocalPath
     DEFAULT_ENCODING = "utf-8"
@@ -38,7 +33,9 @@ class Include:
         self.encoding = encoding or self.DEFAULT_ENCODING
         self.recursive = False if recursive is None else recursive
         self.reader_factory = reader_factory or (
-            lambda path, *args, **kwargs: Reader.get_class_by_path(path)(path, *args, **kwargs)
+            lambda path, *args, **kwargs: Reader.get_class_by_path(path)(
+                path, *args, **kwargs
+            )
         )
 
     def _getpath(self, path: str | Path):
@@ -52,20 +49,16 @@ class Include:
     def base_dir(self, value: str | Path):
         self._base_dir = self._getpath(value)
 
-    def __call__(self, loader: yaml.Loader, node: yaml.Node):
-        args = ()
-        kwargs = {}
-        pathname: str | Pathname | typing.Sequence[str | Pathname]
-        if isinstance(node, yaml.nodes.ScalarNode):
-            pathname = loader.construct_scalar(node)
-        elif isinstance(node, yaml.nodes.SequenceNode):
-            pathname, *args = loader.construct_sequence(node, deep=True)
-        elif isinstance(node, yaml.nodes.MappingNode):
-            kwargs = loader.construct_mapping(node, deep=True)
-            pathname = kwargs.pop("pathname")
-        else:
-            raise TypeError(f"Un-supported YAML node {node!r}")
-
+    def _load(
+        self,
+        pathname: Path | typing.Sequence[Path],
+        *,
+        recursive: bool = None,
+        encoding: str = None,
+        reader: str = None,
+        transform: str = None,
+        **reader_args,
+    ):
         pathname = (
             [self.base_dir / path for path in pathname]
             if not isinstance(pathname, (str, Pathname))
@@ -73,18 +66,6 @@ class Include:
             else self.base_dir / pathname
         )
 
-        return self.load(loader, pathname, *args, **kwargs)
-
-    def _load(
-        self,
-        loader: yaml.Loader,
-        pathname: Path | typing.Sequence[Path],
-        recursive: bool = None,
-        encoding: str = None,
-        reader: str = None,
-        transform: str = None,
-        **reader_args,
-    ):
         encoding = encoding or self.encoding
         recursive = self.recursive if recursive is None else recursive
         reader_factory = (
@@ -100,7 +81,6 @@ class Include:
                 _reader = reader_factory(
                     path,
                     encoding=self.encoding,
-                    loader=loader,
                     path_factory=self.path_factory,
                     reader_factory=self.reader_factory,
                     base_dir=self.base_dir,
@@ -109,11 +89,8 @@ class Include:
                 value = _reader()
                 if transform:
                     _globals = {}
-                    code = JINJA_ENV.compile(
+                    _load_from_text(
                         "{% do _globals.__setitem__('result', " + transform + ") %}"
-                    )
-                    Template.from_code(
-                        JINJA_ENV, code, JINJA_ENV.make_globals(None)
                     ).render(
                         value=value,
                         _globals=_globals,
@@ -131,8 +108,8 @@ class Include:
 
     def load(
         self,
-        loader: yaml.Loader,
         pathname: Path | typing.Sequence[Path],
+        *,
         recursive: bool = None,
         encoding: str = None,
         reader: str = None,
@@ -141,7 +118,12 @@ class Include:
         **reader_args,
     ):
         results, single = self._load(
-            loader, pathname, recursive, encoding, reader, transform, **reader_args
+            pathname,
+            recursive=recursive,
+            encoding=encoding,
+            reader=reader,
+            transform=transform,
+            **reader_args,
         )
         if single:
             return results[0][1] if results else default
