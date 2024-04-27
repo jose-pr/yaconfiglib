@@ -4,7 +4,7 @@ import typing
 from pathlib_next import LocalPath, Path, Pathname, PosixPathname, glob
 
 try:
-    from .jinja2 import _load_from_text
+    from .jinja2 import jinja2_eval
 except ImportError:
     ...
 
@@ -87,15 +87,9 @@ class ConfigLoader:
                 )
                 value = _reader()
                 if transform:
-                    _globals = {}
-                    _load_from_text(
-                        "{% do _globals.__setitem__('result', " + transform + ") %}"
-                    ).render(
-                        value=value,
-                        _globals=_globals,
-                        pathname=PosixPathname(path.as_posix()),
+                    value = jinja2_eval(transform)(
+                        value=value, pathname=PosixPathname(path.as_posix())
                     )
-                    value = _globals["result"]
 
                 results.append((path, value))
 
@@ -132,19 +126,10 @@ class ConfigLoader:
         key_factory = key_factory or self.key_factory
         if not callable(key_factory):
             if key_factory.startswith("%"):
-                key_factory = key_factory.removeprefix("%")
-                template = _load_from_text(
-                    "{% do _globals.__setitem__('result', " + key_factory + ") %}"
-                )
+                _eval = jinja2_eval(key_factory.removeprefix("%"))
 
                 def _key(path: Path, value):
-                    _globals = {}
-                    template.render(
-                        value=value,
-                        _globals=_globals,
-                        pathname=PosixPathname(path.as_posix()),
-                    )
-                    return _globals["result"]
+                    return _eval(value=value, pathname=PosixPathname(path.as_posix()))
 
             else:
                 _keyname = key_factory

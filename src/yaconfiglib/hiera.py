@@ -13,6 +13,8 @@ from jinja2 import TemplateError
 from pathlib_next import Path
 from yaml import parser
 
+from yaconfiglib.jinja2 import jinja2_eval
+
 primitiveTypes = (int, str, bool, float)
 
 strTypes = (str,)
@@ -497,7 +499,7 @@ class HieraConfigLoader:
 
     def _interpolatestr(self, s):
         try:
-            si = jinja2env.from_string(s).render(self._data)
+            si = jinja2_eval(s)(**self.data)
         except TemplateError as e:
             # FIXME: this seems to be broken for unicode str?
             raise Exception(
