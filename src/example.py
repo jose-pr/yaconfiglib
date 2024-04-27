@@ -9,13 +9,13 @@ from yaconfiglib.yaml import *
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
-loader = Include()
+loader = YamlConfigLoader()
 
-yaml.SafeLoader.add_constructor("!include", loader)
+yaml.SafeLoader.add_constructor("!load", loader)
 
 
 config = yaml.safe_load(
-    "test: !include {pathname: examples/includeme.yaml, transform: '{ pathname.name: value.include }', key_factory: '%pathname.as_posix()', type: map }"
+    "test: !load {pathname: examples/includeme.yaml, transform: '{ pathname.name: value.include }', key_factory: '%pathname.as_posix()', type: map }"
 )
 
 jinjaconfig = loader.load("examples/jinja.yaml.j2")
