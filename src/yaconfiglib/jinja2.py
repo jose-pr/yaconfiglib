@@ -62,9 +62,7 @@ class Jinja2Reader(Reader):
         self, path: Path, encoding: str, reader_factory: type[Reader] = None, **kwargs
     ) -> None:
         self.kwargs = kwargs
-        self.reader_factory = reader_factory or (
-            lambda path, **kwargs: Reader.get_class_by_path(path)(path, **kwargs)
-        )
+        self.reader_factory = reader_factory or Reader
         super().__init__(path, encoding, **kwargs)
 
     def __call__(self):
@@ -75,7 +73,7 @@ class Jinja2Reader(Reader):
             _MemoryPath(
                 self.path.with_name(self.path.stem), rendered.encode(self.encoding)
             ),
-            self.encoding,
+            encoding=self.encoding,
             reader_factory=self.reader_factory,
             **self.kwargs,
         )()

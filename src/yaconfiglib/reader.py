@@ -8,6 +8,11 @@ class Reader:
 
     PATHNAME_REGEX: _re.Pattern = None
 
+    def __new__(cls, path: _Path, **kwargs):
+        if cls is Reader:
+            cls = cls.get_class_by_path(path)
+        return object.__new__(cls)
+
     def __init__(self, path: _Path, encoding: str, **kwargs) -> None:
         self.path = path
         self.encoding = encoding
