@@ -55,6 +55,25 @@ def _load_from_text(
     return Template.from_code(environment, code, environment.make_globals(globals))
 
 
+def jinja2_eval(
+    code: str,
+    environment: Environment = None,
+    globals: typing.MutableMapping = None,
+):
+    template = _load_from_text(
+        "{% do _meta.__setitem__('result', " + code + ") %}",
+        environment=environment,
+        globals=globals,
+    )
+
+    def eval_(**kwargs):
+        _meta = {}
+        template.render(_meta=_meta, **kwargs)
+        return _meta["result"]
+
+    return eval_
+
+
 class Jinja2Reader(Reader):
     PATHNAME_REGEX = re.compile(r".*\.((j2)|(jinja2))$", re.IGNORECASE)
 
