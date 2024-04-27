@@ -34,11 +34,7 @@ class ConfigLoader:
         self.base_dir = base_dir or ""
         self.encoding = encoding or self.DEFAULT_ENCODING
         self.recursive = False if recursive is None else recursive
-        self.reader_factory = reader_factory or (
-            lambda path, *args, **kwargs: Reader.get_class_by_path(path)(
-                path, *args, **kwargs
-            )
-        )
+        self.reader_factory = reader_factory or Reader
         self.key_factory = key_factory or (lambda path, value: path.stem)
 
     def _getpath(self, path: str | Path):
