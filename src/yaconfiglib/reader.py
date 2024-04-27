@@ -2,6 +2,7 @@ import re as _re
 import typing as _ty
 
 from pathlib_next import Path as _Path
+from pathlib_next import Pathname as _Pathname
 
 
 class Reader:
@@ -11,7 +12,10 @@ class Reader:
     def __new__(cls, path: _Path, encoding: str, **kwargs):
         if cls is Reader:
             try:
-                cls = cls.get_class_by_path(path)
+                filename = kwargs.get("filename", path)
+                if not isinstance(filename, _Pathname):
+                    filename = _Pathname(filename)
+                cls = cls.get_class_by_path(filename)
             except:
                 cls = GenericReader
         return object.__new__(cls)

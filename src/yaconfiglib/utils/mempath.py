@@ -1,8 +1,7 @@
 import io
 from io import IOBase
 
-from jinja2 import Environment, Template
-from pathlib_next import Path, PosixPathname, UriPath
+from pathlib_next import UriPath
 from pathlib_next.utils.stat import FileStat, FileStatLike
 
 
@@ -21,16 +20,13 @@ class MemBytesIO(io.BytesIO):
         return super().close()
 
 
-_BACKEND = MemPathBackend()
-
-
 class MemPath(UriPath):
 
     __SCHEMES = ("memview",)
     backend: MemPathBackend
 
     def _initbackend(self):
-        return _BACKEND
+        return MemPathBackend()
 
     def _parent_container(self) -> tuple[dict[str, bytearray], str]:
         parent = self.backend
