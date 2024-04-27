@@ -1,11 +1,12 @@
-from io import IOBase
-from pathlib_next import Path, PosixPathname
+import io
 import re
 import typing
+from io import IOBase
 
-from jinja2 import Template, Environment
+from jinja2 import Environment, Template
+from pathlib_next import Path, PosixPathname
+
 from .reader import Reader
-import io
 
 __all__ = ["Jinja2Reader"]
 

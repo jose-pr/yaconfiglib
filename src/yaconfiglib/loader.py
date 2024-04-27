@@ -1,6 +1,7 @@
-from pathlib_next import Path, Pathname, LocalPath, PosixPathname, glob
-import typing
 import logging
+import typing
+
+from pathlib_next import LocalPath, Path, Pathname, PosixPathname, glob
 
 try:
     from .jinja2 import _load_from_text
