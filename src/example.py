@@ -18,7 +18,8 @@ yaml.SafeLoader.add_constructor("!load", loader)
 hieraconf = HieraConfigLoader(
     interpolate=True,
 ).load(
-    """pathname:
+    """#!test.yaml
+pathname:
   stem: root
 """,
     "examples/hiera.yaml",
