@@ -21,11 +21,15 @@ config = yaml.safe_load(
 jinjaconfig = loader.load("examples/jinja.yaml.j2")
 pyproject = loader.load("pyproject.toml")
 
-from yaconfiglib.hiera import LogLevel, MergeMethod
+from yaconfiglib.hiera import HieraConfigLoader, LogLevel, MergeMethod
 
 a = MergeMethod(1)
 c = MergeMethod("SIMPLE")
 
 l = LogLevel("critical")
+
+hieraconf = HieraConfigLoader(
+    "examples/hiera.yaml", "examples/jinja.yaml.j2", interpolate=True
+).data
 
 pass
