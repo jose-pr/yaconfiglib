@@ -1,8 +1,10 @@
-from yaconfiglib.yaml import *
-from yaconfiglib.jinja2 import Jinja2Reader
-import yaml
 import logging
 import sys
+
+import yaml
+
+from yaconfiglib.jinja2 import Jinja2Reader
+from yaconfiglib.yaml import *
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
