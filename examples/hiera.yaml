@@ -1,2 +1,2 @@
-pathname:
-  stem: root
+'{{ pathname.stem }}': '{{ 10 }}'
+root2: '{{ dict(d=1) }}'
