@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 toml = ["toml"]
 yaml = ['pyyaml']
+transform = ['jinja2']
 
 
 [project.urls]
