@@ -56,6 +56,7 @@ class ConfigLoader:
         encoding: str = None,
         reader: str = None,
         transform: str = None,
+        key_factory: str | typing.Callable[[Path], str] = None,
         **reader_args,
     ):
         pathname = (
@@ -72,7 +73,25 @@ class ConfigLoader:
         )
 
         paths = [pathname] if isinstance(pathname, Path) else pathname
-        results = []
+        results: list[tuple[str, object]] = []
+        key_factory = key_factory or self.key_factory
+        if not callable(key_factory):
+            if key_factory.startswith("%"):
+                _eval = jinja2_eval(key_factory.removeprefix("%"))
+
+                def _key(path: Path, value):
+                    return _eval(value=value, pathname=PosixPathname(path.as_posix()))
+
+            else:
+                _keyname = key_factory
+
+                def _key(path: Path, value):
+                    val = getattr(path, _keyname)
+                    if callable(val):
+                        val = val()
+                    return str(val)
+
+            key_factory = _key
         for _pathname in paths:
             for path in _pathname.glob("", recursive=self.recursive):
                 _LOGGER.debug(f"Loading file: {path}")
@@ -91,7 +110,7 @@ class ConfigLoader:
                         value=value, pathname=PosixPathname(path.as_posix())
                     )
 
-                results.append((path, value))
+                results.append((key_factory(path, value), value))
 
         return (
             results,
@@ -119,31 +138,11 @@ class ConfigLoader:
             encoding=encoding,
             reader=reader,
             transform=transform,
+            key_factory=key_factory,
             **reader_args,
         )
         if not type:
             type = "single" if single else "list"
-        key_factory = key_factory or self.key_factory
-        if not callable(key_factory):
-            if key_factory.startswith("%"):
-                _eval = jinja2_eval(key_factory.removeprefix("%"))
-
-                def _key(path: Path, value):
-                    return _eval(value=value, pathname=PosixPathname(path.as_posix()))
-
-            else:
-                _keyname = key_factory
-
-                def _key(path: Path, value):
-                    val = getattr(path, _keyname)
-                    if callable(val):
-                        val = val()
-                    return str(val)
-
-            key_factory = _key
-
-        results = [(key_factory(path, result), result) for path, result in results]
-
         type = type.lower()
         match type:
             case "single" | "scalar":
