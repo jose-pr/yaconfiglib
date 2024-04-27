@@ -1,6 +1,7 @@
-import typing as _ty
-from pathlib_next import Path as _Path
 import re as _re
+import typing as _ty
+
+from pathlib_next import Path as _Path
 
 
 class Reader:

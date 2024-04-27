@@ -1,12 +1,11 @@
-from pathlib_next import Pathname, Path
-import typing
 import re
-import yaml
+import typing
 
+import yaml
+from pathlib_next import Path, Pathname
 
 from .loader import ConfigLoader
 from .reader import Reader
-
 
 __all__ = ["Include", "YamlReader"]
 
