@@ -39,7 +39,7 @@ class Reader:
         )
 
     @classmethod
-    def get_class_by_pathname(cls, path: _Path):
+    def get_class_by_path(cls, path: _Path):
         for scls in cls.__subclasses__(recursive=True):
             if scls.is_reader_for_path(path):
                 return scls

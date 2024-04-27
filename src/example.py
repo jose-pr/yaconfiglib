@@ -12,6 +12,6 @@ yaml.SafeLoader.add_constructor('!include', include)
 
 
 
-config = yaml.safe_load("test: !include examples/includeme.yaml ")
+config = yaml.safe_load("test: !include {pathname: examples/includeme.yaml, transform: value.include }")
 
 pass
