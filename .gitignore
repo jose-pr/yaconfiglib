@@ -1,0 +1,5 @@
+__pycache__
+/_*
+[a-zA-Z]*__
+[a-zA-Z]*__.*
+/dist
