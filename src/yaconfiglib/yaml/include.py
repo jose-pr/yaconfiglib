@@ -38,7 +38,7 @@ class Include:
         self.encoding = encoding or self.DEFAULT_ENCODING
         self.recursive = False if recursive is None else recursive
         self.reader_factory = reader_factory or (
-            lambda path, **kwargs: Reader.get_class_by_path(path)(path, **kwargs)
+            lambda path, *args, **kwargs: Reader.get_class_by_path(path)(path, *args, **kwargs)
         )
 
     def _getpath(self, path: str | Path):
