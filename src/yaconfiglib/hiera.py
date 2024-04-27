@@ -13,7 +13,7 @@ from jinja2 import TemplateError
 from pathlib_next import Path
 from yaml import parser
 
-from yaconfiglib.jinja2 import jinja2_eval
+from yaconfiglib.jinja2 import _load_from_text, jinja2_eval
 
 primitiveTypes = (int, str, bool, float)
 
@@ -35,7 +35,15 @@ class _IntEnum(_enum.IntEnum):
 @typing.runtime_checkable
 class MergeMethodProtocol(typing.Protocol):
 
-    def __call__(self, a: object, b: object, *, logger: logging.Logger) -> object:
+    def __call__(
+        self,
+        a: object,
+        b: object,
+        *,
+        logger: logging.Logger,
+        memo: dict = None,
+        **options,
+    ) -> object:
         raise NotImplementedError()
 
 
@@ -44,11 +52,27 @@ class MergeMethod(_IntEnum):
     Deep = 2
     Substitute = 3
 
-    def __call__(self, a: object, b: object, *, logger: logging.Logger):
+    def __call__(
+        self,
+        a: object,
+        b: object,
+        *,
+        logger: logging.Logger,
+        memo: dict = None,
+        **options,
+    ):
         method: MergeMethodProtocol = getattr(self, f"_{self.name.lower()}")
-        return method(a, b, logger=logger)
+        return method(a, b, logger=logger, memo=memo, **options)
 
-    def _simple(self, a: object, b: object, *, logger: logging.Logger):
+    def _simple(
+        self,
+        a: object,
+        b: object,
+        *,
+        logger: logging.Logger,
+        memo: dict = None,
+        **options,
+    ):
         logger.debug(
             "simplemerge %s (%s) and %s (%s)"
             % (
@@ -81,7 +105,9 @@ class MergeMethod(_IntEnum):
             if isinstance(a, listTypes):
                 for k, v in enumerate(b):
                     try:
-                        a[k] = self._simple(a[k], b[k])
+                        a[k] = self._simple(
+                            a[k], b[k], logger=logger, memo=memo, **options
+                        )
                     except IndexError:
                         a[k] = b[k]
             else:
@@ -126,7 +152,15 @@ class MergeMethod(_IntEnum):
             )
         return a
 
-    def _substitute(self, a: object, b: object, *, logger: logging.Logger):
+    def _substitute(
+        self,
+        a: object,
+        b: object,
+        *,
+        logger: logging.Logger,
+        memo: dict = None,
+        **options,
+    ):
         logger.debug(">" * 30)
         logger.debug(
             "substmerge %s and %s"
@@ -172,7 +206,9 @@ class MergeMethod(_IntEnum):
                                 b[k],
                             )
                         )
-                        a[k] = self._substitute(a[k], b[k])
+                        a[k] = self._substitute(
+                            a[k], b[k], logger=logger, memo=memo, **options
+                        )
                     else:
                         logger.debug("substmerge dict: set key %s" % k)
                         a[k] = b[k]
@@ -186,7 +222,7 @@ class MergeMethod(_IntEnum):
                 )
                 for bd in b:
                     if isinstance(bd, dict):
-                        a = self._substitute(a, bd)
+                        a = self._substitute(a, bd, logger=logger, memo=memo, **options)
                     else:
                         raise NotImplementedError(
                             "can not merge element from list of type %s to dict "
@@ -211,7 +247,16 @@ class MergeMethod(_IntEnum):
         logger.debug("<" * 30)
         return a
 
-    def _deep(self, a: object, b: object, *, logger: logging.Logger):
+    def _deep(
+        self,
+        a: object,
+        b: object,
+        *,
+        logger: logging.Logger,
+        memo: dict = None,
+        mergelists: bool = None,
+        **options,
+    ):
         logger.debug(">" * 30)
         logger.debug(
             "deepmerge %s and %s"
@@ -220,6 +265,7 @@ class MergeMethod(_IntEnum):
                 b,
             )
         )
+        mergelists = False if mergelists is None else bool(mergelists)
         # FIXME: make None usage configurable
         if b is None:
             logger.debug("pass as b is None")
@@ -263,7 +309,7 @@ class MergeMethod(_IntEnum):
                         if k in srcdicts:
                             # we merge only if at least one key in dict is matching
                             merge = False
-                            if self.mergelists:
+                            if mergelists:
                                 for ak in ad.keys():
                                     if ak in srcdicts[k].keys():
                                         merge = True
@@ -280,7 +326,14 @@ class MergeMethod(_IntEnum):
                                         srcdicts[k],
                                     )
                                 )
-                                a[k] = self._deep(ad, srcdicts[k])
+                                a[k] = self._deep(
+                                    ad,
+                                    srcdicts[k],
+                                    logger=logger,
+                                    memo=memo,
+                                    mergelists=mergelists,
+                                    **options,
+                                )
                                 del srcdicts[k]
                 logger.debug("deepmerge list: remaining srcdicts elems: %s" % srcdicts)
                 for k, v in srcdicts.items():
@@ -315,7 +368,14 @@ class MergeMethod(_IntEnum):
                                 b[k],
                             )
                         )
-                        a[k] = self._deep(a[k], b[k])
+                        a[k] = self._deep(
+                            a[k],
+                            b[k],
+                            logger=logger,
+                            memo=memo,
+                            mergelists=mergelists,
+                            **options,
+                        )
                     else:
                         logger.debug("deepmerge dict: set key %s" % k)
                         a[k] = b[k]
@@ -329,7 +389,14 @@ class MergeMethod(_IntEnum):
                 )
                 for bd in b:
                     if isinstance(bd, dict):
-                        a = self._deep(a, bd)
+                        a = self._deep(
+                            a,
+                            bd,
+                            logger=logger,
+                            memo=memo,
+                            mergelists=mergelists,
+                            **options,
+                        )
                     else:
                         raise NotImplementedError(
                             "can not merge element from list of type %s to dict "
@@ -375,8 +442,8 @@ class HieraConfigLoader:
     def __init__(
         self,
         *sources: str | Path,
-        method: MergeMethod | MergeMethodProtocol = MergeMethod.Simple,
-        mergelists=True,
+        merge: MergeMethod | MergeMethodProtocol = MergeMethod.Simple,
+        merge_options: dict[str] = None,
         interpolate=False,
         loader_cls: type[yaml.Loader] = None,
         encoding: str = None,
@@ -386,10 +453,10 @@ class HieraConfigLoader:
     ):
         self._data = None
 
-        self.method = (
-            method if isinstance(method, MergeMethodProtocol) else MergeMethod(method)
+        self.merge = (
+            merge if isinstance(merge, MergeMethodProtocol) else MergeMethod(merge)
         )
-        self.mergelists = True if mergelists is None else bool(mergelists)
+        self.merge_options = {} if merge_options is None else merge_options
         self.interpolate = True if interpolate is None else bool(interpolate)
         self.loader_cls = loader_cls or self.DEFAULT_LOADER
         self.dumper_cls = dumper_cls or self.DEFAULT_DUMPER
@@ -417,7 +484,7 @@ class HieraConfigLoader:
 
                 try:
                     with path.open("r", encoding=self.encoding) as f:
-                        logger.debug("open4reading: file %s" % f)
+                        self.logger.debug("open4reading: file %s" % f)
                         self._load_data(f)
                 except IOError as e:
                     if self.missingfiles_level >= LogLevel.Error:
@@ -440,7 +507,9 @@ class HieraConfigLoader:
             if self._data is None:
                 self._data = ydata
             else:
-                self._data = self.method(self._data, ydata, logger=self.logger)
+                self._data = self.merge(
+                    self._data, ydata, logger=self.logger, **self.merge_options
+                )
                 self.logger.debug("merged data: %s" % self._data)
 
     def _validate_sources(
@@ -487,9 +556,10 @@ class HieraConfigLoader:
                 d[k] = self._interpolate(v)
             return d
         if isinstance(d, dict):
+            _d = {}
             for k in d.keys():
-                d[k] = self._interpolate(d[k])
-            return d
+                _d[self._interpolate(k)] = self._interpolate(d[k])
+            return _d
         raise NotImplementedError(
             'can not interpolate "%s" of type %s'
             % (
@@ -498,9 +568,14 @@ class HieraConfigLoader:
             )
         )
 
-    def _interpolatestr(self, s):
+    def _interpolatestr(self, s: str):
         try:
-            si = jinja2_eval(s)(**self.data)
+            _s = s.removeprefix("{{").removesuffix("}}")
+            if not "{{" in _s and _s != s:
+                si = jinja2_eval(_s)(**self.data)
+            else:
+                si = _load_from_text(s).render(**self.data)
+
         except TemplateError as e:
             # FIXME: this seems to be broken for unicode str?
             raise Exception(
