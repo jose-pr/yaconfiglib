@@ -478,7 +478,7 @@ class HieraConfigLoader:
             if "\n" in source:
                 self.logger.debug("loading yaml doc from str ...")
                 f = source
-                self._load_data(self.loader_cls, source)
+                self._load_data(source)
             else:
                 path = Path(source) if not isinstance(source, Path) else source
 
