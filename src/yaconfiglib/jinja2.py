@@ -1,6 +1,7 @@
 from io import IOBase
 from pathlib_next import Path, PosixPathname
 import re
+import typing
 
 from jinja2 import Template, Environment
 from .reader import Reader
@@ -41,6 +42,18 @@ class _MemoryPath(Path):
         raise NotImplementedError()
 
 
+def _load_from_text(
+    source: str,
+    name: str = None,
+    filename: str = None,
+    environment: Environment = None,
+    globals: typing.MutableMapping = None,
+):
+    environment = environment or JINJA_ENV
+    code = environment.compile(source, name, filename)
+    return Template.from_code(environment, code, environment.make_globals(globals))
+
+
 class Jinja2Reader(Reader):
     PATHNAME_REGEX = re.compile(r".*\.((j2)|(jinja2))$", re.IGNORECASE)
 
@@ -54,11 +67,9 @@ class Jinja2Reader(Reader):
         super().__init__(path, encoding, **kwargs)
 
     def __call__(self):
-        code = JINJA_ENV.compile(self.read_text())
+        template = _load_from_text(self.read_text(), environment=JINJA_ENV)
         pathname = PosixPathname(self.path.as_posix())
-        rendered = Template.from_code(
-            JINJA_ENV, code, JINJA_ENV.make_globals(None)
-        ).render(pathname=pathname)
+        rendered = template.render(pathname=pathname)
         rendered = self.reader_factory(
             _MemoryPath(
                 self.path.with_name(self.path.stem), rendered.encode(self.encoding)
