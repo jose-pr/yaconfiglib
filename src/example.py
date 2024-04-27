@@ -1,5 +1,4 @@
-from yaconfiglib.yaml.include import Include
-from yaconfiglib.yaml.reader import Reader
+from yaconfiglib.yaml import *
 from yaconfiglib.jinja2 import Jinja2Reader
 import yaml
 import logging
