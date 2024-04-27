@@ -85,17 +85,19 @@ class HieraConfigLoader:
             self.logger.debug("source: %s ..." % source)
             if not source:
                 continue
-            if "\n" in source:
+            if source.startswith("#!"):
+                filename, source = source.split("\n", maxsplit=1)
                 self.logger.debug("loading config doc from str ...")
+                filename = filename.removeprefix("#!")
                 f = io.StringIO(source)
-                data = self._load_data(f, data)
+                data = self._load_data(f, data, filename=filename)
             else:
                 path = Path(source) if not isinstance(source, Path) else source
 
                 try:
                     with path.open("r", encoding=self.encoding) as f:
                         self.logger.debug("open4reading: file %s" % f)
-                        data = self._load_data(f, data)
+                        data = self._load_data(f, data, filename=path.name)
                 except IOError as e:
                     if self.missingfiles_level >= LogLevel.Error:
                         self.logger.log(self.missingfiles_level, e)
@@ -112,8 +114,8 @@ class HieraConfigLoader:
 
         return data
 
-    def _load_data(self, f: str | io.IOBase, data: object):
-        for ydata in self.backend.load_all(f):
+    def _load_data(self, f: str | io.IOBase, data: object, **load_options):
+        for ydata in self.backend.load_all(f, **load_options):
             if self.logger.isEnabledFor(LogLevel.Debug):
                 self.logger.debug("config data: %s" % ydata)
             if data is None:

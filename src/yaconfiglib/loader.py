@@ -85,7 +85,8 @@ class ConfigLoader:
             text = pathname.read()
             if isinstance(text, str):
                 text = text.encode()
-            pathname = MemPath("memview:/unknown")
+            filename = reader_args.get("filename", "unknown")
+            pathname = MemPath("memview:").with_path(filename)
             pathname.write_bytes(text)
 
         else:
@@ -196,8 +197,9 @@ class ConfigLoader:
     def load_all(
         self,
         pathname: Path | typing.Sequence[Path],
+        **reader_args,
     ):
-        return self.load(pathname, type="list", flatten=False)
+        return self.load(pathname, type="list", flatten=False, **reader_args)
         ...
 
 
