@@ -29,7 +29,11 @@ c = MergeMethod("SIMPLE")
 l = LogLevel("critical")
 
 hieraconf = HieraConfigLoader(
-    "examples/hiera.yaml", "examples/jinja.yaml.j2", interpolate=True
+    """pathname:
+  stem: root
+""",
+    "examples/hiera.yaml",
+    interpolate=True,
 ).data
 
 pass
