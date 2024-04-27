@@ -1,7 +1,10 @@
+import io
 import logging
 import typing
 
 from pathlib_next import LocalPath, Path, Pathname, PosixPathname, glob
+
+from yaconfiglib.utils.mempath import MemPath
 
 try:
     from .jinja2 import jinja2_eval
@@ -13,6 +16,18 @@ from .reader import Reader
 _LOGGER = logging.getLogger("yaconfiglib")
 
 __all__ = ["Include"]
+
+
+class ConfigBackend(typing.Protocol):
+
+    def load(self, source: io.IOBase | str, **options) -> object:
+        raise NotImplementedError()
+
+    def load_all(self, source: io.IOBase | str, **options) -> typing.Iterable[object]:
+        yield self.load(source, **options)
+
+    def dumps(self, data: str, **options) -> str:
+        raise NotImplementedError
 
 
 class ConfigLoader:
@@ -50,7 +65,7 @@ class ConfigLoader:
 
     def _load(
         self,
-        pathname: Path | typing.Sequence[Path],
+        pathname: Path | typing.Sequence[Path] | io.IOBase,
         *,
         recursive: bool = None,
         encoding: str = None,
@@ -59,18 +74,27 @@ class ConfigLoader:
         key_factory: str | typing.Callable[[Path], str] = None,
         **reader_args,
     ):
-        pathname = (
-            [self.base_dir / path for path in pathname]
-            if not isinstance(pathname, (str, Pathname))
-            and isinstance(pathname, typing.Sequence)
-            else self.base_dir / pathname
-        )
 
         encoding = encoding or self.encoding
         recursive = self.recursive if recursive is None else recursive
         reader_factory = (
             Reader.get_class_by_name(reader) if reader else self.reader_factory
         )
+
+        if isinstance(pathname, io.IOBase):
+            text = pathname.read()
+            if isinstance(text, str):
+                text = text.encode()
+            pathname = MemPath("memview:/unknown")
+            pathname.write_bytes(text)
+
+        else:
+            pathname = (
+                [self.base_dir / path for path in pathname]
+                if not isinstance(pathname, (str, Pathname))
+                and isinstance(pathname, typing.Sequence)
+                else self.base_dir / pathname
+            )
 
         paths = [pathname] if isinstance(pathname, Path) else pathname
         results: list[tuple[str, object]] = []
@@ -95,7 +119,6 @@ class ConfigLoader:
         for _pathname in paths:
             for path in _pathname.glob("", recursive=self.recursive):
                 _LOGGER.debug(f"Loading file: {path}")
-
                 _reader = reader_factory(
                     path,
                     encoding=self.encoding,
@@ -169,3 +192,13 @@ class ConfigLoader:
             result = results
 
         return result
+
+    def load_all(
+        self,
+        pathname: Path | typing.Sequence[Path],
+    ):
+        return self.load(pathname, type="list", flatten=False)
+        ...
+
+
+DEFAULT_LOADER = ConfigLoader()

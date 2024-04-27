@@ -8,9 +8,12 @@ class Reader:
 
     PATHNAME_REGEX: _re.Pattern = None
 
-    def __new__(cls, path: _Path, **kwargs):
+    def __new__(cls, path: _Path, encoding: str, **kwargs):
         if cls is Reader:
-            cls = cls.get_class_by_path(path)
+            try:
+                cls = cls.get_class_by_path(path)
+            except:
+                cls = GenericReader
         return object.__new__(cls)
 
     def __init__(self, path: _Path, encoding: str, **kwargs) -> None:
@@ -50,3 +53,19 @@ class Reader:
             if scls.is_reader_for_path(path):
                 return scls
         raise NotImplementedError(f"Not reader for {path}")
+
+
+class GenericReader(Reader):
+    def __init__(self, path, encoding, **kwargs) -> None:
+        self.kwargs = kwargs
+        super().__init__(path, encoding, **kwargs)
+
+    def __call__(self):
+        for scls in Reader.__subclasses__(recursive=True):
+            if scls is GenericReader or scls is Reader:
+                continue
+            try:
+                reader = scls(self.path, encoding=self.encoding, **self.kwargs)
+                return reader()
+            except Exception as e:
+                pass
