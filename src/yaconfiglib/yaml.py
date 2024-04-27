@@ -32,9 +32,9 @@ class YamlReader(Reader):
     PATHNAME_REGEX = re.compile(r".*\.((yaml)|(yml))$", re.IGNORECASE)
 
     def __init__(
-        self, path: Path, encoding: str, loader: yaml.Loader, **kwargs
+        self, path: Path, encoding: str, loader: yaml.Loader = None, **kwargs
     ) -> None:
-        self.master = loader
+        self.master = loader or yaml.SafeLoader("")
         super().__init__(path, encoding, **kwargs)
 
     def __call__(self):
