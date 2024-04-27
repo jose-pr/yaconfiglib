@@ -20,7 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 toml = ["toml"]
 yaml = ['pyyaml']
-transform = ['jinja2']
+transform = ['yaconfiglib[jinja2]']
+jinja2 = ['jinja2']
+
 
 
 [project.urls]
