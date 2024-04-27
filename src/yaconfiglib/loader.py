@@ -28,6 +28,7 @@ class ConfigLoader:
         path_factory: typing.Callable[[str], Path] = None,
         reader_factory: type[Reader] = None,
         recursive: bool = None,
+        key_factory: typing.Callable[[Path, object], str] = None,
     ) -> None:
         self.path_factory = path_factory or self.DEFAULT_PATH_GENERATOR
         self.base_dir = base_dir or ""
@@ -38,6 +39,7 @@ class ConfigLoader:
                 path, *args, **kwargs
             )
         )
+        self.key_factory = key_factory or (lambda path, value: path.stem)
 
     def _getpath(self, path: str | Path):
         return path if isinstance(path, Path) else self.path_factory(path)
@@ -116,6 +118,9 @@ class ConfigLoader:
         reader: str = None,
         transform: str = None,
         default: object = None,
+        type: str = None,
+        key_factory: str | typing.Callable[[Path], str] = None,
+        flatten: bool = False,
         **reader_args,
     ):
         results, single = self._load(
@@ -126,7 +131,61 @@ class ConfigLoader:
             transform=transform,
             **reader_args,
         )
-        if single:
-            return results[0][1] if results else default
+        if not type:
+            type = "single" if single else "list"
+        key_factory = key_factory or self.key_factory
+        if not callable(key_factory):
+            if key_factory.startswith("%"):
+                key_factory = key_factory.removeprefix("%")
+                template = _load_from_text(
+                    "{% do _globals.__setitem__('result', " + key_factory + ") %}"
+                )
+
+                def _key(path: Path, value):
+                    _globals = {}
+                    template.render(
+                        value=value,
+                        _globals=_globals,
+                        pathname=PosixPathname(path.as_posix()),
+                    )
+                    return _globals["result"]
+
+            else:
+                _keyname = key_factory
+
+                def _key(path: Path, value):
+                    val = getattr(path, _keyname)
+                    if callable(val):
+                        val = val()
+                    return str(val)
+
+            key_factory = _key
+
+        results = [(key_factory(path, result), result) for path, result in results]
+
+        type = type.lower()
+        match type:
+            case "single" | "scalar":
+                return results[-1][1] if results else default
+            case "list" | "array":
+                results: list[dict[str]] = [result[1] for result in results]
+            case "map" | "dict" | "hash":
+                results: dict[str, dict[str]] = {
+                    path: result for path, result in results
+                }
+            case _:
+                raise ValueError(type)
+
+        if flatten:
+            if type in ["list", "array"]:
+                result = [r for result in results for r in result]
+            else:
+                result = {
+                    prop: value
+                    for path, result in results.items()
+                    for prop, value in result.items()
+                }
         else:
-            return [result[1] for result in results]
+            result = results
+
+        return result

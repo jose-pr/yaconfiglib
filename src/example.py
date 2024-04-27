@@ -10,11 +10,12 @@ logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 include = Include()
 
-yaml.SafeLoader.add_constructor('!include', include)
+yaml.SafeLoader.add_constructor("!include", include)
 
 
-
-config = yaml.safe_load("test: !include {pathname: examples/includeme.yaml, transform: '{ pathname.name: value.include }' }")
+config = yaml.safe_load(
+    "test: !include {pathname: examples/includeme.yaml, transform: '{ pathname.name: value.include }', key_factory: '%pathname.as_posix()', type: map }"
+)
 
 jinjaconfig = yaml.safe_load("test: !include examples/jinja.yaml.j2")
 
