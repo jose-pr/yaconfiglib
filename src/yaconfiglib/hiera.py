@@ -32,13 +32,14 @@ class _IntEnum(_enum.IntEnum):
         super()._missing_(value)
 
 
+@typing.runtime_checkable
 class MergeMethodProtocol(typing.Protocol):
 
     def __call__(self, a: object, b: object, *, logger: logging.Logger) -> object:
         raise NotImplementedError()
 
 
-class MergeMethod(_IntEnum, MergeMethodProtocol):
+class MergeMethod(_IntEnum):
     Simple = 1
     Deep = 2
     Substitute = 3
