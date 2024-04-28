@@ -107,7 +107,6 @@ class HieraConfigLoader:
                         )
                         raise FileNotFoundError(source)
                     self.logger.log(self.missingfiles_level, e)
-                    self._sources.remove(source)
                     continue
         if self.interpolate:
             data = interpolate(data, data, self.logger)

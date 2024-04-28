@@ -19,11 +19,11 @@ __all__ = ["Include"]
 
 class ConfigBackend(typing.Protocol):
 
-    def load(self, source: io.IOBase | str, **options) -> object:
+    def load(self, stream: io.IOBase, **options) -> object:
         raise NotImplementedError()
 
-    def load_all(self, source: io.IOBase | str, **options) -> typing.Iterable[object]:
-        yield self.load(source, **options)
+    def load_all(self, stream: io.IOBase, **options) -> typing.Iterable[object]:
+        yield self.load(stream, **options)
 
     def dumps(self, data: str, **options) -> str:
         raise NotImplementedError
@@ -85,7 +85,7 @@ class ConfigLoader:
             if isinstance(text, str):
                 text = text.encode()
             filename = reader_args.get("filename", "unknown")
-            pathname = MemPath("memview:").with_segments(filename)
+            pathname = MemPath(filename)
             pathname.write_bytes(text)
 
         else:
