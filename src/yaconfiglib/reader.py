@@ -3,6 +3,7 @@ import typing as _ty
 
 from pathlib_next import Path as _Path
 from pathlib_next import Pathname as _Pathname
+from pathlib_next import PosixPathname as _Posix
 
 
 class Reader:
@@ -14,9 +15,9 @@ class Reader:
             try:
                 filename = kwargs.get("filename", path)
                 if not isinstance(filename, _Pathname):
-                    filename = _Pathname(filename)
+                    filename = _Posix(filename)
                 cls = cls.get_class_by_path(filename)
-            except:
+            except Exception as _e:
                 cls = GenericReader
         return object.__new__(cls)
 
