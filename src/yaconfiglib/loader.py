@@ -3,8 +3,7 @@ import logging
 import typing
 
 from pathlib_next import LocalPath, Path, Pathname, PosixPathname, glob
-
-from yaconfiglib.utils.mempath import MemPath
+from pathlib_next.mempath import MemPath
 
 try:
     from .jinja2 import jinja2_eval
@@ -86,7 +85,7 @@ class ConfigLoader:
             if isinstance(text, str):
                 text = text.encode()
             filename = reader_args.get("filename", "unknown")
-            pathname = MemPath("memview:").with_path(filename)
+            pathname = MemPath("memview:").with_segments(filename)
             pathname.write_bytes(text)
 
         else:

@@ -5,9 +5,9 @@ from io import IOBase
 
 from jinja2 import Environment, Template
 from pathlib_next import Path, PosixPathname
+from pathlib_next.mempath import MemPath
 
 from .reader import Reader
-from .utils.mempath import MemPath
 
 __all__ = ["Jinja2Reader"]
 
