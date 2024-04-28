@@ -4,7 +4,7 @@ import typing
 from pathlib_next import Path
 from pathlib_next.mempath import MemPath
 
-from yaconfiglib.utils.jinja2 import compile, eval
+from yaconfiglib.utils import jinja2
 
 from . import loader
 from .utils import Logger, LogLevel, getLogger
@@ -15,6 +15,7 @@ LOGGER = getLogger(LogLevel.Warning, __name__)
 
 def interpolate(data: object, globals: dict = None, logger: Logger = None):
     globals = {} if globals is None else globals
+    logger = logger or LOGGER
     logger.debug(
         'interpolate "%s" of type %s ...'
         % (
@@ -25,9 +26,9 @@ def interpolate(data: object, globals: dict = None, logger: Logger = None):
     if isinstance(data, str):
         _template = data.removeprefix("{{").removesuffix("}}")
         if not "{{" in _template and _template != data:
-            template = eval(_template)
+            template = jinja2.eval(_template)
         else:
-            template = compile(data)
+            template = jinja2.compile(data)
 
         _data = template(**globals)
         if not data == _data:
