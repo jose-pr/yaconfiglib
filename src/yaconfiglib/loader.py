@@ -10,11 +10,11 @@ try:
 except ImportError:
     ...
 
-from .backends.base import ConfigBackend
+from .backends import ConfigBackend
 
 _LOGGER = logging.getLogger("yaconfiglib")
 
-__all__ = ["Include"]
+__all__ = ["ConfigLoader"]
 
 
 class ConfigLoader:
