@@ -9,10 +9,10 @@ from pathlib_next import Path
 
 from yaconfiglib.backends.base import ConfigBackend
 
-__all__ = ["TomlConfigLoader"]
+__all__ = ["TomlConfig"]
 
 
-class TomlConfigLoader(ConfigBackend):
+class TomlConfig(ConfigBackend):
     PATHNAME_REGEX = re.compile(r".*\.toml$", re.IGNORECASE)
 
     def load(self, path: Path, encoding: str, **kwargs):

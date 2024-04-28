@@ -4,10 +4,7 @@ from dataclasses import dataclass
 
 import yaml
 
-from yaconfiglib import hiera
-from yaconfiglib.backends.jinja2 import Jinja2ConfigLoader
-from yaconfiglib.backends.toml import TomlConfigLoader
-from yaconfiglib.backends.yaml import YamlConfigLoader
+from yaconfiglib import YamlConfig, hiera
 from yaconfiglib.hiera import LogLevel, MergeMethod
 from yaconfiglib.loader import ConfigLoader
 from yaconfiglib.utils.merge import typed_merge
@@ -35,7 +32,7 @@ merged = typed_merge(
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
-loader = YamlConfigLoader()
+loader = YamlConfig()
 
 yaml.SafeLoader.add_constructor("!load", loader)
 

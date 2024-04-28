@@ -6,10 +6,10 @@ from pathlib_next import Path, Pathname
 
 from yaconfiglib.backends.base import ConfigBackend
 
-__all__ = ["YamlConfigLoader"]
+__all__ = ["YamlConfig"]
 
 
-class YamlConfigLoader(ConfigBackend):
+class YamlConfig(ConfigBackend):
     PATHNAME_REGEX = re.compile(r".*\.((yaml)|(yml))$", re.IGNORECASE)
     DEFAULT_LOADER_CLS = yaml.SafeLoader
     PATH_FACTORY = Path
