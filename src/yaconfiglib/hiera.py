@@ -2,6 +2,7 @@ import io
 import typing
 
 from pathlib_next import Path
+from pathlib_next.mempath import MemPath
 
 from yaconfiglib.jinja2 import jinja2_compile, jinja2_eval
 
@@ -57,6 +58,9 @@ def interpolate(data: object, globals: dict = None, logger: Logger = None):
     return data
 
 
+_interpolate = interpolate
+
+
 class HieraConfigLoader:
 
     DEFAULT_ENCODING: str = "utf-8"
@@ -83,85 +87,66 @@ class HieraConfigLoader:
         self,
         *sources: str | Path,
         config_backend: loader.ConfigBackend = None,
+        interpolate: bool = None,
         **backend_args,
     ):
         data = None
-        for source in self._validate_sources(sources):
-            self.logger.debug("source: %s ..." % source)
-            if not source:
-                continue
-            if source.startswith("#!"):
-                filename, source = source.split("\n", maxsplit=1)
-                self.logger.debug("loading config doc from str ...")
-                filename = filename.removeprefix("#!")
-                f = io.StringIO(source)
-                data = self._load_data(
-                    f,
-                    data,
-                    filename=filename,
-                    config_backend=config_backend,
-                    **backend_args,
-                )
-            else:
-                path = Path(source) if not isinstance(source, Path) else source
-
-                try:
-                    with path.open("r", encoding=self.encoding) as f:
-                        self.logger.debug("open4reading: file %s" % f)
-                        data = self._load_data(
-                            f,
-                            data,
-                            filename=path.name,
-                            config_backend=config_backend,
-                            **backend_args,
-                        )
-                except IOError as e:
-                    if self.missingfiles_level >= LogLevel.Error:
-                        self.logger.log(self.missingfiles_level, e)
-                        self.logger.log(
-                            self.missingfiles_level,
-                            "file not found: %s" % source,
-                        )
-                        raise FileNotFoundError(source)
-                    self.logger.log(self.missingfiles_level, e)
-                    continue
-        if self.interpolate:
-            data = interpolate(data, data, self.logger)
-
-        return data
-
-    def _load_data(
-        self,
-        f: str | io.IOBase,
-        data: object,
-        config_backend: loader.ConfigBackend = None,
-        **load_options,
-    ):
         backend = config_backend or self.backend
-        for ydata in backend.load_all(f, **load_options):
-            if self.logger.isEnabledFor(LogLevel.Debug):
-                self.logger.debug("config data: %s" % ydata)
-            if data is None:
-                data = ydata
-            else:
-                data = self.merge(data, ydata, logger=self.logger, **self.merge_options)
-                self.logger.debug("merged data: %s" % data)
-        return data
+        interpolate = self.interpolate if interpolate is None else interpolate
+        if interpolate:
+            interpolate = _interpolate
+
+        for source in self._validate_sources(sources):
+            try:
+                self.logger.debug("source: %s ..." % source)
+                for ydata in backend.load_all(source, **backend_args):
+                    if self.logger.isEnabledFor(LogLevel.Debug):
+                        self.logger.debug("config data: %s" % ydata)
+                    if data is None:
+                        data = ydata
+                    else:
+                        data = self.merge(
+                            data, ydata, logger=self.logger, **self.merge_options
+                        )
+                        self.logger.debug("merged data: %s" % data)
+            except IOError as e:
+                if self.missingfiles_level >= LogLevel.Error:
+                    self.logger.log(self.missingfiles_level, e)
+                    self.logger.log(
+                        self.missingfiles_level,
+                        "file not found: %s" % source,
+                    )
+                    raise FileNotFoundError(source)
+                self.logger.log(self.missingfiles_level, e)
+                continue
+
+        return interpolate(data, data, self.logger) if interpolate else data
 
     def _validate_sources(
         self,
         sources: typing.Sequence[str | Path | typing.Sequence[str | Path]],
         *,
         memo: list[str | Path] = None,
-    ) -> typing.Iterator[str | Path]:
+    ) -> typing.Iterator[Path]:
         if memo is None:
             memo = []
         for source in sources:
+            if not source:
+                continue
             if isinstance(source, (str, Path)):
                 if source in memo:
                     self.logger.warning("ignoring duplicated file %s" % source)
                     continue
-                yield source
+                if source.startswith("#!"):
+                    filename, source = source.split("\n", maxsplit=1)
+                    self.logger.debug("loading config doc from str ...")
+                    filename = filename.removeprefix("#!")
+                    path = MemPath(filename)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(source, encoding=self.encoding)
+                else:
+                    path = Path(source) if not isinstance(source, Path) else source
+                yield path
             elif isinstance(source, typing.Sequence):
                 yield from self._validate_sources(source, memo=memo)
             else:

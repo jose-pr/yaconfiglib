@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import yaml
 
+from yaconfiglib import hiera
 from yaconfiglib.hiera import HieraConfigLoader, LogLevel, MergeMethod
 from yaconfiglib.jinja2 import *
 from yaconfiglib.toml import *
@@ -38,14 +39,13 @@ loader = YamlConfigLoader()
 yaml.SafeLoader.add_constructor("!load", loader)
 
 
-hieraconf = HieraConfigLoader(
-    interpolate=True,
-).load(
+hieraconf = hiera.load(
     """#!test.yaml
 pathname:
   stem: root
 """,
     "examples/hiera.yaml",
+    interpolate=True,
 )
 
 config = yaml.safe_load(
