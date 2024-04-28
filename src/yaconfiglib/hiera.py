@@ -1,68 +1,19 @@
-import io
 import typing
 
 from pathlib_next import Path
 from pathlib_next.mempath import MemPath
 
-from yaconfiglib.utils import jinja2
-
 from . import loader
+from .backends import ConfigBackend
 from .utils import Logger, LogLevel, getLogger
 from .utils.merge import Merge, MergeMethod
 
 LOGGER = getLogger(LogLevel.Warning, __name__)
 
-
-def interpolate(data: object, globals: dict = None, logger: Logger = None):
-    globals = {} if globals is None else globals
-    logger = logger or LOGGER
-    logger.debug(
-        'interpolate "%s" of type %s ...'
-        % (
-            data,
-            type(data),
-        )
-    )
-    if isinstance(data, str):
-        _template = data.removeprefix("{{").removesuffix("}}")
-        if not "{{" in _template and _template != data:
-            template = jinja2.eval(_template)
-        else:
-            template = jinja2.compile(data)
-
-        _data = template(**globals)
-        if not data == _data:
-            logger.debug(
-                'interpolated "%s" to "%s" (type: %s)'
-                % (
-                    data,
-                    _data,
-                    type(data),
-                )
-            )
-        data = _data
-    elif isinstance(data, typing.Mapping):
-        if not isinstance(data, typing.MutableMapping):
-            data = {**data}
-        keys = list(data.keys())
-        for key in keys:
-            value = data.pop(key)
-            key = interpolate(key, globals, logger)
-            data[key] = interpolate(value, globals, logger)
-
-    elif isinstance(data, typing.Iterable):
-        if not isinstance(data, typing.MutableSequence):
-            data = [*data]
-        for idx, value in enumerate(data):
-            data[idx] = interpolate(value, globals, logger)
-
-    return data
+__all__ = ["HieraConfigLoader"]
 
 
-_interpolate = interpolate
-
-
-class HieraConfigLoader:
+class HieraConfigLoader(ConfigBackend):
 
     DEFAULT_ENCODING: str = "utf-8"
 
@@ -71,7 +22,7 @@ class HieraConfigLoader:
         merge: MergeMethod | Merge = MergeMethod.Simple,
         merge_options: dict[str] = None,
         interpolate=False,
-        backend: loader.ConfigBackend = None,
+        backend: ConfigBackend = None,
         encoding: str = None,
         logger: int | LogLevel | Logger = LogLevel.Warning,
         missingfiles_level: int | LogLevel = LogLevel.Error,
@@ -87,15 +38,13 @@ class HieraConfigLoader:
     def load(
         self,
         *sources: str | Path,
-        config_backend: loader.ConfigBackend = None,
+        config_backend: ConfigBackend = None,
         interpolate: bool = None,
         **backend_args,
     ):
         data = None
         backend = config_backend or self.backend
         interpolate = self.interpolate if interpolate is None else interpolate
-        if interpolate:
-            interpolate = _interpolate
 
         for source in self._validate_sources(sources):
             try:
@@ -120,8 +69,11 @@ class HieraConfigLoader:
                     raise FileNotFoundError(source)
                 self.logger.log(self.missingfiles_level, e)
                 continue
+        if interpolate:
+            from yaconfiglib.utils import jinja2
 
-        return interpolate(data, data, self.logger) if interpolate else data
+            return jinja2.interpolate(data, data, self.logger)
+        return data
 
     def _validate_sources(
         self,
@@ -159,9 +111,7 @@ class HieraConfigLoader:
                     )
                 )
 
-    def dump(
-        self, data: object, *, config_backend: loader.ConfigBackend = None, **kwds
-    ):
+    def dump(self, data: object, *, config_backend: ConfigBackend = None, **kwds):
         """dump the data as string"""
         backend = config_backend or self.backend
         return backend.dumps(data, **kwds)

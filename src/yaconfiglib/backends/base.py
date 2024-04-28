@@ -31,7 +31,9 @@ class ConfigBackend(_ty.Protocol):
         for scls in cls.__subclasses__(recursive=True):
             _name = getattr(scls, "NAME", None)
             if not _name:
-                _name = scls.__name__.lower().removesuffix("configloader")
+                _name = (
+                    scls.__name__.lower().removesuffix("loader").removesuffix("config")
+                )
             if _name == name:
                 return scls
 
