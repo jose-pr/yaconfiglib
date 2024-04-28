@@ -5,11 +5,12 @@ from dataclasses import dataclass
 import yaml
 
 from yaconfiglib import hiera
-from yaconfiglib.hiera import HieraConfigLoader, LogLevel, MergeMethod
-from yaconfiglib.jinja2 import *
-from yaconfiglib.toml import *
+from yaconfiglib.backends.jinja2 import Jinja2ConfigLoader
+from yaconfiglib.backends.toml import TomlConfigLoader
+from yaconfiglib.backends.yaml import YamlConfigLoader
+from yaconfiglib.hiera import LogLevel, MergeMethod
+from yaconfiglib.loader import ConfigLoader
 from yaconfiglib.utils.merge import typed_merge
-from yaconfiglib.yaml import *
 
 
 @dataclass
@@ -47,13 +48,20 @@ pathname:
     "examples/hiera.yaml",
     interpolate=True,
 )
+print(yaml.dump(hieraconf, indent=2))
 
 config = yaml.safe_load(
     "test: !load {pathname: examples/includeme.yaml, transform: '{ pathname.name: value.include }', key_factory: '%pathname.as_posix()', type: map }"
 )
+print(yaml.dump(config, indent=2))
 
-jinjaconfig = loader.load("examples/jinja.yaml.j2")
-pyproject = loader.load("pyproject.toml")
+configloader = ConfigLoader()
+
+jinjaconfig = loader.load("examples/jinja.yaml.j2", configloader=configloader)
+print(yaml.dump(jinjaconfig, indent=2))
+
+pyproject = configloader.load("pyproject.toml")
+print(yaml.dump(pyproject, indent=2))
 
 
 a = MergeMethod(1)
