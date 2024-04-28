@@ -1,12 +1,32 @@
 import logging
+import types
 import typing
+from argparse import Namespace
+from dataclasses import is_dataclass
 
 from .enum import IntEnum
 
-primitiveTypes = (int, str, bool, float)
+SCALAR = int | str | bool | float | types.NoneType | bytes
 
-strTypes = (str,)
-listTypes = (list, tuple)
+
+def is_scalar(obj) -> typing.TypeGuard[SCALAR]:
+    return isinstance(obj, typing.get_args(SCALAR))
+
+
+@typing.overload
+def is_array(
+    obj, mutable: typing.Literal[True]
+) -> typing.TypeGuard[typing.MutableSequence]: ...
+@typing.overload
+def is_array(
+    obj, mutable: typing.Literal[False] = False
+) -> typing.TypeGuard[typing.Sequence]: ...
+def is_array(obj, mutable=False) -> typing.TypeGuard[typing.Sequence]:
+    return (
+        isinstance(obj, typing.MutableSequence)
+        if mutable
+        else isinstance(obj, typing.Sequence)
+    ) and not isinstance(obj, typing.Mapping)
 
 
 @typing.runtime_checkable
@@ -62,7 +82,7 @@ class MergeMethod(IntEnum):
         if b is None:
             logger.debug("pass as b is None")
             pass
-        elif isinstance(b, primitiveTypes):
+        elif is_scalar(b):
             logger.debug(
                 'simplemerge: primitiveTypes replace a "%s"  w/ b "%s"'
                 % (
@@ -71,7 +91,7 @@ class MergeMethod(IntEnum):
                 )
             )
             a = b
-        elif isinstance(b, listTypes):
+        elif is_array(b):
             logger.debug(
                 'simplemerge: listTypes a "%s"  w/ b "%s"'
                 % (
@@ -79,7 +99,7 @@ class MergeMethod(IntEnum):
                     b,
                 )
             )
-            if isinstance(a, listTypes):
+            if is_array(a):
                 for k, v in enumerate(b):
                     try:
                         a[k] = self._simple(
@@ -96,8 +116,8 @@ class MergeMethod(IntEnum):
                     )
                 )
                 a = b
-        elif isinstance(b, dict):
-            if isinstance(a, dict):
+        elif isinstance(b, typing.Mapping):
+            if isinstance(a, typing.Mapping):
                 logger.debug(
                     'simplemerge: update %s:"%s" by %s:"%s"'
                     % (
@@ -107,7 +127,10 @@ class MergeMethod(IntEnum):
                         b,
                     )
                 )
-                a.update(b)
+                if isinstance(a, typing.MutableMapping):
+                    a.update(b)
+                else:
+                    a = type(a)(**a, **b)
             else:
                 logger.debug(
                     "simplemerge: replace %s w/ dict %s"
@@ -154,7 +177,7 @@ class MergeMethod(IntEnum):
         # treat listTypes as primitiveTypes in merge
         # subsititues list, don't merge them
 
-        if a is None or isinstance(b, primitiveTypes) or isinstance(b, listTypes):
+        if a is None or is_scalar(b) or is_array(b):
             logger.debug(
                 'substmerge: replace a "%s"  w/ b "%s"'
                 % (
@@ -164,8 +187,8 @@ class MergeMethod(IntEnum):
             )
             a = b
 
-        elif isinstance(a, dict):
-            if isinstance(b, dict):
+        elif isinstance(a, typing.Mapping):
+            if isinstance(b, typing.Mapping):
                 logger.debug(
                     'substmerge: dict ... "%s" and "%s"'
                     % (
@@ -189,7 +212,7 @@ class MergeMethod(IntEnum):
                     else:
                         logger.debug("substmerge dict: set key %s" % k)
                         a[k] = b[k]
-            elif isinstance(b, listTypes):
+            elif isinstance(b, typing.Sequence):
                 logger.debug(
                     'substmerge: dict <- list ... "%s" <- "%s"'
                     % (
@@ -198,7 +221,7 @@ class MergeMethod(IntEnum):
                     )
                 )
                 for bd in b:
-                    if isinstance(bd, dict):
+                    if isinstance(bd, typing.Mapping):
                         a = self._substitute(a, bd, logger=logger, memo=memo, **options)
                     else:
                         raise NotImplementedError(
@@ -247,7 +270,7 @@ class MergeMethod(IntEnum):
         if b is None:
             logger.debug("pass as b is None")
             pass
-        if a is None or isinstance(b, primitiveTypes):
+        if a is None or is_scalar(b):
             logger.debug(
                 'deepmerge: replace a "%s"  w/ b "%s"'
                 % (
@@ -256,8 +279,8 @@ class MergeMethod(IntEnum):
                 )
             )
             a = b
-        elif isinstance(a, listTypes):
-            if isinstance(b, listTypes):
+        elif is_array(a):
+            if is_array(b):
                 logger.debug(
                     'deepmerge: lists extend %s:"%s" by %s:"%s"'
                     % (
@@ -267,22 +290,23 @@ class MergeMethod(IntEnum):
                         b,
                     )
                 )
-                a.extend(
-                    be
-                    for be in b
-                    if be not in a
-                    and (isinstance(be, primitiveTypes) or isinstance(be, listTypes))
+                iter_ = (
+                    be for be in b if be not in a and (is_scalar(be) or is_array(be))
                 )
-                srcdicts = {}
+                if isinstance(a, typing.MutableSequence):
+                    a.extend(iter_)
+                else:
+                    a = type(a)([*a, *iter_])
+                srcdicts: dict[int, typing.Mapping] = {}
                 for k, bd in enumerate(b):
-                    if isinstance(bd, dict):
+                    if isinstance(bd, typing.Mapping):
                         srcdicts.update({k: bd})
                 logger.debug("srcdicts: %s" % srcdicts)
                 for k, ad in enumerate(a):
                     logger.debug(
                         'deepmerge ad "%s" w/ k "%s" of type %s' % (ad, k, type(ad))
                     )
-                    if isinstance(ad, dict):
+                    if isinstance(ad, typing.Mapping):
                         if k in srcdicts:
                             # we merge only if at least one key in dict is matching
                             merge = False
@@ -326,8 +350,8 @@ class MergeMethod(IntEnum):
                         b,
                     )
                 )
-        elif isinstance(a, dict):
-            if isinstance(b, dict):
+        elif isinstance(a, typing.Mapping):
+            if isinstance(b, typing.Mapping):
                 logger.debug(
                     'deepmerge: dict ... "%s" and "%s"'
                     % (
@@ -356,7 +380,7 @@ class MergeMethod(IntEnum):
                     else:
                         logger.debug("deepmerge dict: set key %s" % k)
                         a[k] = b[k]
-            elif isinstance(b, listTypes):
+            elif is_array(b):
                 logger.debug(
                     'deepmerge: dict <- list ... "%s" <- "%s"'
                     % (
@@ -365,7 +389,7 @@ class MergeMethod(IntEnum):
                     )
                 )
                 for bd in b:
-                    if isinstance(bd, dict):
+                    if isinstance(bd, typing.Mapping):
                         a = self._deep(
                             a,
                             bd,
@@ -397,3 +421,95 @@ class MergeMethod(IntEnum):
         logger.debug('end deepmerge part: return: "%s"' % a)
         logger.debug("<" * 30)
         return a
+
+
+T = typing.TypeVar("T")
+
+
+def typed_merge(cls: type[T], *objects: object, init=True) -> T:
+    # we assume all sequence can be init from iterable
+    # all mapping and namespace/dataclass can be init with their props
+    if not objects:
+        return None
+
+    merge = getattr(cls, "__merge__", None)
+    if merge:
+        return merge(*objects, init=init)
+
+    hints: dict[str, type]
+    child_cls: type = None
+    cls_opts = ()
+
+    while True:
+        origin = getattr(cls, "__origin__", cls)
+        if origin is typing.Union or origin is types.UnionType:
+            cls_opts = typing.get_args(cls)
+            cls = cls_opts[0]
+            continue
+        break
+
+    try:
+        hints = typing.get_type_hints(cls)
+    except:
+        hints = {}
+    try:
+        args = typing.get_args(cls)
+    except:
+        args = ()
+
+    if issubclass(origin, typing.Mapping):
+        if len(args) > 1:
+            child_cls = args[1]
+    elif issubclass(origin, typing.Sequence):
+        if args:
+            child_cls = args[0]
+
+    if is_array(origin) and not is_scalar(origin):
+        value = objects[-1]
+        return cls(
+            (typed_merge(child_cls or type(child), child, init=init) for child in value)
+        )
+
+    if issubclass(origin, (typing.Mapping, Namespace)) or is_dataclass(origin):
+        fields: dict[str, list] = {}
+        for obj in objects:
+            props = obj if isinstance(obj, typing.Mapping) else vars(obj)
+            for prop, value in props.items():
+                parser = getattr(obj, f"_parse_{prop}", None)
+                if parser:
+                    value = parser(value)
+                fields.setdefault(prop, []).append(value)
+
+        merged: dict[str] = {}
+        for name, values in fields.items():
+            hint = type(values[-1])
+            hint = hints.get(name, child_cls or hint)
+            if not hint:
+                value = values[-1]
+            else:
+                value = typed_merge(hint, *values, init=init)
+            merged[name] = value
+
+        if init:
+            return cls(**merged)
+        else:
+            inst = cls.__new__(origin)
+            if issubclass(origin, typing.MutableMapping):
+
+                def setfield(prop, value):
+                    inst[prop] = value
+
+            else:
+
+                def setfield(prop, value):
+                    setattr(inst, prop, value)
+
+            for prop, value in merged.items():
+                setfield(prop, value)
+            return inst
+
+    value = objects[-1]
+    if isinstance(value, origin):
+        return value
+    else:
+        return cls(value)
