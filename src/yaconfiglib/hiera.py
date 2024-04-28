@@ -49,7 +49,7 @@ def interpolate(data: object, globals: dict = None, logger: Logger = None):
             data[key] = interpolate(value, globals, logger)
 
     elif isinstance(data, typing.Iterable):
-        if not isinstance(data, list):
+        if not isinstance(data, typing.MutableSequence):
             data = [*data]
         for idx, value in enumerate(data):
             data[idx] = interpolate(value, globals, logger)
@@ -79,7 +79,12 @@ class HieraConfigLoader:
         self.encoding = encoding or self.DEFAULT_ENCODING
         self.logger = getLogger(logger)
 
-    def load(self, *sources: str | Path):
+    def load(
+        self,
+        *sources: str | Path,
+        config_backend: loader.ConfigBackend = None,
+        **backend_args,
+    ):
         data = None
         for source in self._validate_sources(sources):
             self.logger.debug("source: %s ..." % source)
@@ -90,14 +95,26 @@ class HieraConfigLoader:
                 self.logger.debug("loading config doc from str ...")
                 filename = filename.removeprefix("#!")
                 f = io.StringIO(source)
-                data = self._load_data(f, data, filename=filename)
+                data = self._load_data(
+                    f,
+                    data,
+                    filename=filename,
+                    config_backend=config_backend,
+                    **backend_args,
+                )
             else:
                 path = Path(source) if not isinstance(source, Path) else source
 
                 try:
                     with path.open("r", encoding=self.encoding) as f:
                         self.logger.debug("open4reading: file %s" % f)
-                        data = self._load_data(f, data, filename=path.name)
+                        data = self._load_data(
+                            f,
+                            data,
+                            filename=path.name,
+                            config_backend=config_backend,
+                            **backend_args,
+                        )
                 except IOError as e:
                     if self.missingfiles_level >= LogLevel.Error:
                         self.logger.log(self.missingfiles_level, e)
@@ -113,8 +130,15 @@ class HieraConfigLoader:
 
         return data
 
-    def _load_data(self, f: str | io.IOBase, data: object, **load_options):
-        for ydata in self.backend.load_all(f, **load_options):
+    def _load_data(
+        self,
+        f: str | io.IOBase,
+        data: object,
+        config_backend: loader.ConfigBackend = None,
+        **load_options,
+    ):
+        backend = config_backend or self.backend
+        for ydata in backend.load_all(f, **load_options):
             if self.logger.isEnabledFor(LogLevel.Debug):
                 self.logger.debug("config data: %s" % ydata)
             if data is None:
@@ -149,9 +173,12 @@ class HieraConfigLoader:
                     )
                 )
 
-    def dump(self, data: object, **kwds):
+    def dump(
+        self, data: object, *, config_backend: loader.ConfigBackend = None, **kwds
+    ):
         """dump the data as string"""
-        return self.backend.dumps(data, **kwds)
+        backend = config_backend or self.backend
+        return backend.dumps(data, **kwds)
 
 
 DEFAULT_LOADER = HieraConfigLoader()
