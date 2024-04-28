@@ -6,27 +6,15 @@ from pathlib_next import LocalPath, Path, Pathname, PosixPathname, glob
 from pathlib_next.mempath import MemPath
 
 try:
-    from .jinja2 import jinja2_eval
+    from .utils import jinja2
 except ImportError:
     ...
 
-from .reader import Reader
+from .backends.base import ConfigBackend
 
 _LOGGER = logging.getLogger("yaconfiglib")
 
 __all__ = ["Include"]
-
-
-class ConfigBackend(typing.Protocol):
-
-    def load(self, path: Path, **options) -> object:
-        raise NotImplementedError()
-
-    def load_all(self, path: Path, **options) -> typing.Iterable[object]:
-        yield self.load(path, **options)
-
-    def dumps(self, data: str, **options) -> str:
-        raise NotImplementedError
 
 
 class ConfigLoader:
@@ -40,7 +28,7 @@ class ConfigLoader:
         *,
         encoding: str = None,
         path_factory: typing.Callable[[str], Path] = None,
-        reader_factory: type[Reader] = None,
+        configloader_factory: type[ConfigBackend] = None,
         recursive: bool = None,
         key_factory: typing.Callable[[Path, object], str] = None,
     ) -> None:
@@ -48,7 +36,9 @@ class ConfigLoader:
         self.base_dir = base_dir or ""
         self.encoding = encoding or self.DEFAULT_ENCODING
         self.recursive = False if recursive is None else recursive
-        self.reader_factory = reader_factory or Reader
+        self.configloader_factory = configloader_factory or (
+            lambda path: ConfigBackend.get_class_by_path(path)()
+        )
         self.key_factory = key_factory or (lambda path, value: path.stem)
 
     def _getpath(self, path: str | Path):
@@ -68,21 +58,30 @@ class ConfigLoader:
         *,
         encoding: str,
         recursive: bool = None,
-        reader: str = None,
+        configloader: str = None,
         transform: str = None,
         key_factory: str | typing.Callable[[Path], str] = None,
         **reader_args,
     ) -> typing.Iterator[tuple[str, object]]:
 
         recursive = self.recursive if recursive is None else recursive
-        reader_factory = (
-            Reader.get_class_by_name(reader) if reader else self.reader_factory
-        )
+
+        if isinstance(configloader, str):
+            configloader_factory = lambda path: ConfigBackend.get_class_by_name(
+                configloader
+            )(path)
+        elif callable(getattr(configloader, "load", None)):
+            configloader_factory = lambda path: configloader
+        else:
+            configloader_factory = configloader or self.configloader_factory
+
+        if configloader is self:
+            configloader_factory = self.configloader_factory
 
         key_factory = key_factory or self.key_factory
         if not callable(key_factory):
             if key_factory.startswith("%"):
-                _eval = jinja2_eval(key_factory.removeprefix("%"))
+                _eval = jinja2.eval(key_factory.removeprefix("%"))
 
                 def _key(path: Path, value):
                     return _eval(value=value, pathname=PosixPathname(path.as_posix()))
@@ -100,17 +99,18 @@ class ConfigLoader:
         for _pathname in paths:
             for path in _pathname.glob("", recursive=self.recursive):
                 _LOGGER.debug(f"Loading file: {path}")
-                _reader = reader_factory(
-                    path,
+                _configloader = configloader_factory(path)
+                _options = dict(
                     encoding=encoding,
                     path_factory=self.path_factory,
-                    reader_factory=self.reader_factory,
+                    configloader=self,
                     base_dir=self.base_dir,
-                    **reader_args,
                 )
-                value = _reader()
+                _options.update(reader_args)
+
+                value = _configloader.load(path, **_options)
                 if transform:
-                    value = jinja2_eval(transform)(
+                    value = jinja2.eval(transform)(
                         value=value, pathname=PosixPathname(path.as_posix())
                     )
 
@@ -122,7 +122,7 @@ class ConfigLoader:
         *,
         recursive: bool = None,
         encoding: str = None,
-        reader: str = None,
+        configloader: str = None,
         transform: str = None,
         default: object = None,
         type: str = None,
@@ -168,7 +168,7 @@ class ConfigLoader:
                 paths,
                 recursive=recursive,
                 encoding=encoding,
-                reader=reader,
+                configloader=configloader,
                 transform=transform,
                 key_factory=key_factory,
                 **reader_args,
