@@ -17,7 +17,7 @@ from .utils.source import SourceLike, parse_sources
 
 _LOGGER = logging.getLogger("yaconfiglib")
 
-__all__ = ["ConfigLoader"]
+__all__ = ["ConfigLoader", "ConfigLoaderMergeMethod"]
 
 
 class _ConfigLoaderMergeMethod(IntEnum):
@@ -93,10 +93,7 @@ else:
     )
 
 
-class ConfigLoader:
-
-    DEFAULT_PATH_GENERATOR = LocalPath
-    DEFAULT_ENCODING = "utf-8"
+class ConfigLoader(ConfigBackend):
 
     def __init__(
         self,
@@ -118,7 +115,7 @@ class ConfigLoader:
         self.merge_options = {} if merge_options is None else merge_options
         self.interpolate = False if interpolate is None else bool(interpolate)
         self.logger = getLogger(logger)
-        self.path_factory = path_factory or self.DEFAULT_PATH_GENERATOR
+        self.path_factory = path_factory or self.DEFAULT_PATH_FACTORY
         self.base_dir = base_dir or ""
         self.encoding = encoding or self.DEFAULT_ENCODING
         self.recursive = False if recursive is None else recursive
