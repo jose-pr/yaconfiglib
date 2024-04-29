@@ -3,7 +3,7 @@ import re
 try:
     import tomllib as toml
 except ImportError:
-    import toml
+    import toml  # type: ignore
 
 from pathlib_next import Path
 

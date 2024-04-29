@@ -2,8 +2,7 @@ import io
 import logging
 import typing
 
-from pathlib_next import LocalPath, Path, Pathname, PosixPathname, glob
-from pathlib_next.mempath import MemPath
+from pathlib_next import LocalPath, Path, Pathname, PosixPathname
 
 try:
     from .utils import jinja2
@@ -11,10 +10,87 @@ except ImportError:
     ...
 
 from .backends import ConfigBackend
+from .utils.enum import IntEnum
+from .utils.log import Logger, LogLevel, getLogger
+from .utils.merge import Merge, MergeMethod, is_array
+from .utils.source import SourceLike, parse_sources
 
 _LOGGER = logging.getLogger("yaconfiglib")
 
 __all__ = ["ConfigLoader"]
+
+
+class _ConfigLoaderMergeMethod(IntEnum):
+    Last = 4
+    List = 5
+    Hash = 6
+
+    def init(
+        self,
+        initial: object,
+        configloaderkey: str,
+        logger: Logger,
+        memo: dict = None,
+        **options,
+    ):
+        match self:
+            case ConfigLoaderMergeMethod.List:
+                return [initial]
+            case ConfigLoaderMergeMethod.Hash:
+                return {configloaderkey: initial}
+            case _:
+                return initial
+
+    def _last(
+        self,
+        a: object,
+        b: object,
+        *,
+        configloaderkey: str,
+        logger: Logger,
+        memo: dict = None,
+        **options,
+    ):
+        return b
+
+    def _list(
+        self,
+        a: list,
+        b: object,
+        *,
+        configloaderkey: str,
+        logger: Logger,
+        memo: dict = None,
+        **options,
+    ):
+        a.append(b)
+        return a
+
+    def _hash(
+        self,
+        a: dict,
+        b: object,
+        *,
+        configloaderkey: str,
+        logger: Logger,
+        memo: dict = None,
+        **options,
+    ):
+        a[configloaderkey] = b
+        return a
+
+
+if typing.TYPE_CHECKING:
+
+    class ConfigLoaderMergeMethod(
+        _ConfigLoaderMergeMethod, MergeMethod, typing.Protocol
+    ): ...
+
+else:
+    ConfigLoaderMergeMethod = MergeMethod.extend(
+        _ConfigLoaderMergeMethod,
+        name=_ConfigLoaderMergeMethod.__name__.removeprefix("_"),
+    )
 
 
 class ConfigLoader:
@@ -31,7 +107,17 @@ class ConfigLoader:
         configloader_factory: type[ConfigBackend] = None,
         recursive: bool = None,
         key_factory: typing.Callable[[Path, object], str] = None,
+        logger: int | LogLevel | Logger = LogLevel.Warning,
+        interpolate: bool = None,
+        merge: ConfigLoaderMergeMethod | Merge = ConfigLoaderMergeMethod.Simple,
+        merge_options: dict[str] = None,
     ) -> None:
+        self.merge = (
+            merge if isinstance(merge, Merge) else ConfigLoaderMergeMethod(merge)
+        )
+        self.merge_options = {} if merge_options is None else merge_options
+        self.interpolate = False if interpolate is None else bool(interpolate)
+        self.logger = getLogger(logger)
         self.path_factory = path_factory or self.DEFAULT_PATH_GENERATOR
         self.base_dir = base_dir or ""
         self.encoding = encoding or self.DEFAULT_ENCODING
@@ -54,7 +140,7 @@ class ConfigLoader:
 
     def _load(
         self,
-        paths: typing.Iterable[Path],
+        path: Path,
         *,
         encoding: str,
         recursive: bool = None,
@@ -62,7 +148,7 @@ class ConfigLoader:
         transform: str = None,
         key_factory: str | typing.Callable[[Path], str] = None,
         **reader_args,
-    ) -> typing.Iterator[tuple[str, object]]:
+    ) -> tuple[str, object]:
 
         recursive = self.recursive if recursive is None else recursive
 
@@ -96,76 +182,64 @@ class ConfigLoader:
                     return str(val)
 
             key_factory = _key
-        for _pathname in paths:
-            for path in _pathname.glob("", recursive=self.recursive):
-                _LOGGER.debug(f"Loading file: {path}")
-                _configloader = configloader_factory(path)
-                _options = dict(
-                    encoding=encoding,
-                    path_factory=self.path_factory,
-                    configloader=self,
-                    base_dir=self.base_dir,
-                )
-                _options.update(reader_args)
+        self.logger.debug(f"Loading file: {path}")
+        _configloader = configloader_factory(path)
+        _options = dict(
+            encoding=encoding,
+            path_factory=self.path_factory,
+            configloader=self,
+            base_dir=self.base_dir,
+        )
+        _options.update(reader_args)
 
-                value = _configloader.load(path, **_options)
-                if transform:
-                    value = jinja2.eval(transform)(
-                        value=value, pathname=PosixPathname(path.as_posix())
-                    )
+        value = _configloader.load(path, **_options)
+        if transform:
+            value = jinja2.eval(transform)(
+                value=value, pathname=PosixPathname(path.as_posix())
+            )
 
-                yield key_factory(path, value), value
+        return key_factory(path, value), value
 
     def load(
         self,
-        pathname: Path | typing.Sequence[Path],
-        *,
+        *pathname: SourceLike,
         recursive: bool = None,
         encoding: str = None,
         configloader: str = None,
         transform: str = None,
         default: object = None,
-        type: str = None,
         key_factory: str | typing.Callable[[Path], str] = None,
         flatten: bool = False,
+        interpolate: bool = False,
+        merge: ConfigLoaderMergeMethod | Merge = None,
+        merge_options: dict[str] = None,
         **reader_args,
     ):
         encoding = encoding or self.encoding
-        paths: list[Path] = []
-        is_list = not isinstance(pathname, (str, Pathname)) and isinstance(
-            pathname, typing.Iterable
+        interpolate = self.interpolate if interpolate is None else interpolate
+        merge = (
+            merge
+            if isinstance(merge, Merge)
+            else (MergeMethod(merge) if merge else self.merge)
         )
-        for path in pathname if is_list else [pathname]:
-            if isinstance(path, io.IOBase):
-                filename = reader_args.get("filename", "unknown")
-                content = path.read()
-                path = MemPath(filename)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                if isinstance(content, str):
-                    path.write_text(content, encoding=encoding)
-                else:
-                    path.write_bytes(content)
-            elif isinstance(path, Path):
-                try:
-                    path = self.base_dir / path
-                except Exception as _e:
-                    ...
-            else:
-                path = self.base_dir / path
-            paths.append(path)
+        if not merge:
+            merge = self.merge
+        self.merge_options = (
+            self.merge_options if merge_options is None else merge_options
+        )
 
-        single = (
-            not is_list
-            or pathname
-            and glob.WILCARD_PATTERN.match(paths[0].as_posix()) is None
-        )
-        if not is_list:
-            pathname = paths[0]
-        else:
-            pathname = paths
-        results = list(
-            self._load(
-                paths,
+        results = default
+        _join_init = False
+
+        for path in parse_sources(
+            pathname,
+            base_dir=self.base_dir,
+            logger=self.logger,
+            encoding=encoding,
+            path_factory=self.path_factory,
+        ):
+            name, result = self._load(
+                path,
                 recursive=recursive,
                 encoding=encoding,
                 configloader=configloader,
@@ -173,43 +247,60 @@ class ConfigLoader:
                 key_factory=key_factory,
                 **reader_args,
             )
-        )
-        if not type:
-            type = "single" if single else "list"
-        type = type.lower()
-        match type:
-            case "single" | "scalar":
-                return results[-1][1] if results else default
-            case "list" | "array":
-                results: list[dict[str]] = [result[1] for result in results]
-            case "map" | "dict" | "hash":
-                results: dict[str, dict[str]] = {
-                    path: result for path, result in results
-                }
-            case _:
-                raise ValueError(type)
+            if _join_init:
+                results = merge(
+                    results, result, logger=self.logger, configloaderkey=name
+                )
+            else:
+                try:
+                    results = merge.init(
+                        initial=result, logger=self.logger, configloaderkey=name
+                    )
+                except AttributeError:
+                    results = result
+                _join_init = True
 
         if flatten:
-            if type in ["list", "array"]:
-                result = [r for result in results for r in result]
-            else:
+            if isinstance(results, typing.Mapping):
                 result = {
                     prop: value
-                    for path, result in results.items()
+                    for _key, result in results.items()
                     for prop, value in result.items()
                 }
+            elif is_array(results):
+                result = [r for result in results for r in result]
         else:
             result = results
+
+        if interpolate:
+            result = jinja2.interpolate(result, result, self.logger)
 
         return result
 
     def load_all(
         self,
-        pathname: Path | typing.Sequence[Path],
+        *pathname: Path | typing.Sequence[Path],
+        encoding: str = None,
+        interpolate: bool = None,
         **reader_args,
     ):
-        return self.load(pathname, type="list", flatten=False, **reader_args)
-        ...
+        interpolate = self.interpolate if interpolate is None else interpolate
+        encoding = encoding or self.encoding
+        for path in parse_sources(
+            pathname,
+            base_dir=self.base_dir,
+            logger=self.logger,
+            encoding=encoding,
+            path_factory=self.path_factory,
+        ):
+            key, value = self._load(
+                path,
+                encoding=encoding,
+                **reader_args,
+            )
+            if interpolate:
+                value = jinja2.interpolate(value, value, self.logger)
+            yield value
 
 
 DEFAULT_LOADER = ConfigLoader()
