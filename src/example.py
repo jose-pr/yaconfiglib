@@ -4,9 +4,10 @@ from dataclasses import dataclass
 
 import yaml
 
-from yaconfiglib import YamlConfig, hiera
-from yaconfiglib.hiera import LogLevel, MergeMethod
+from yaconfiglib import YamlConfig
 from yaconfiglib.loader import ConfigLoader
+from yaconfiglib.loader import ConfigLoaderMergeMethod as MergeMethod
+from yaconfiglib.utils.log import LogLevel
 from yaconfiglib.utils.merge import typed_merge
 
 
@@ -36,14 +37,16 @@ loader = YamlConfig()
 
 yaml.SafeLoader.add_constructor("!load", loader)
 
+configloader = ConfigLoader()
 
-hieraconf = hiera.load(
+hieraconf = configloader.load(
     """#!test.yaml
 pathname:
   stem: root
 """,
     "examples/hiera.yaml",
     interpolate=True,
+    merge=MergeMethod.Deep,
 )
 print(yaml.dump(hieraconf, indent=2))
 
@@ -52,7 +55,6 @@ config = yaml.safe_load(
 )
 print(yaml.dump(config, indent=2))
 
-configloader = ConfigLoader()
 
 jinjaconfig = loader.load("examples/jinja.yaml.j2", configloader=configloader)
 print(yaml.dump(jinjaconfig, indent=2))
