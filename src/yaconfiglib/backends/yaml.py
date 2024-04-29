@@ -12,23 +12,7 @@ __all__ = ["YamlConfig"]
 class YamlConfig(ConfigBackend):
     PATHNAME_REGEX = re.compile(r".*\.((yaml)|(yml))$", re.IGNORECASE)
     DEFAULT_LOADER_CLS = yaml.SafeLoader
-    PATH_FACTORY = Path
-
-    def __call__(self, loader: yaml.Loader, node: yaml.Node):
-        args = ()
-        kwargs = {}
-        pathname: str | Pathname | typing.Sequence[str | Pathname]
-        if isinstance(node, yaml.nodes.ScalarNode):
-            pathname = loader.construct_scalar(node)
-        elif isinstance(node, yaml.nodes.SequenceNode):
-            pathname, *args = loader.construct_sequence(node, deep=True)
-        elif isinstance(node, yaml.nodes.MappingNode):
-            kwargs = loader.construct_mapping(node, deep=True)
-            pathname = kwargs.pop("pathname")
-        else:
-            raise TypeError(f"Un-supported YAML node {node!r}")
-
-        return self.load(pathname, *args, **kwargs, loader=loader)
+    DEFAULT_DUMPER_CLS = yaml.Dumper
 
     def load(
         self,
@@ -40,9 +24,10 @@ class YamlConfig(ConfigBackend):
         configloader: type[ConfigBackend] = None,
         **options,
     ) -> object:
+        encoding = encoding or self.DEFAULT_ENCODING
 
         if path_factory is None:
-            path_factory = self.PATH_FACTORY
+            path_factory = self.DEFAULT_PATH_FACTORY
         if isinstance(path, str):
             path = path_factory(path)
         if master and not loader_cls:
@@ -61,3 +46,7 @@ class YamlConfig(ConfigBackend):
             return data
         finally:
             loader.dispose()
+
+    def dumps(self, data: str, dumper_cls: yaml.Dumper, **options) -> str:
+        options.setdefault("Dumper", dumper_cls or self.DEFAULT_DUMPER_CLS)
+        return yaml.dump(data, **options)

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import yaml
 
-from yaconfiglib import YamlConfig
 from yaconfiglib.loader import ConfigLoader
 from yaconfiglib.loader import ConfigLoaderMergeMethod as MergeMethod
 from yaconfiglib.utils.log import LogLevel
@@ -33,11 +32,9 @@ merged = typed_merge(
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
-loader = YamlConfig()
-
-yaml.SafeLoader.add_constructor("!load", loader)
 
 configloader = ConfigLoader()
+yaml.SafeLoader.add_constructor("!load", configloader)
 
 hieraconf = configloader.load(
     """#!test.yaml
@@ -56,7 +53,7 @@ config = yaml.safe_load(
 print(yaml.dump(config, indent=2))
 
 
-jinjaconfig = loader.load("examples/jinja.yaml.j2", configloader=configloader)
+jinjaconfig = configloader.load("examples/jinja.yaml.j2")
 print(yaml.dump(jinjaconfig, indent=2))
 
 pyproject = configloader.load("pyproject.toml")
