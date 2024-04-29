@@ -16,4 +16,4 @@ class TomlConfig(ConfigBackend):
     PATHNAME_REGEX = re.compile(r".*\.toml$", re.IGNORECASE)
 
     def load(self, path: Path, encoding: str, **kwargs):
-        return toml.loads(path.read_text(encoding=encoding))
+        return toml.loads(path.read_text(encoding=encoding or self.DEFAULT_ENCODING))
