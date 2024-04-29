@@ -21,6 +21,7 @@ class Jinja2ConfigLoader(ConfigBackend):
         envoriment: Environment = None,
         **kwargs,
     ) -> None:
+        encoding = encoding or self.DEFAULT_ENCODING
         template = jinja2.load_template(
             path.read_text(encoding=encoding),
             environment=envoriment or jinja2.DEFAULT_ENV,

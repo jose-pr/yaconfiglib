@@ -1,12 +1,50 @@
 import re as _re
 import typing as _ty
 
+from pathlib_next import LocalPath as _LocalPath
 from pathlib_next import Path as _Path
+from pathlib_next import Pathname as _Pathname
+
+if _ty.TYPE_CHECKING:
+    import yaml as _yaml
+else:
+
+    try:
+        import yaml as _yaml
+    except ImportError:
+        _yaml = None
+        ...
 
 
 class ConfigBackend(_ty.Protocol):
     PATHNAME_REGEX: _re.Pattern = None
     NAME: str = None
+    DEFAULT_ENCODING = "utf-8"
+    DEFAULT_PATH_FACTORY = _LocalPath
+
+    def __call__(self, *args, **kwds):
+        if (
+            len(args) == 2
+            and _yaml is not None
+            and isinstance(args[0], _yaml.constructor.BaseConstructor)
+        ):
+            return self._yaml_tag_constructor(*args, **kwds)
+
+    def _yaml_tag_constructor(self, loader: "_yaml.Loader", node: "_yaml.Node"):
+        args = ()
+        kwargs = {}
+        pathname: str | _Pathname | _ty.Sequence[str | _Pathname]
+        if isinstance(node, _yaml.nodes.ScalarNode):
+            pathname = loader.construct_scalar(node)
+        elif isinstance(node, _yaml.nodes.SequenceNode):
+            pathname, *args = loader.construct_sequence(node, deep=True)
+        elif isinstance(node, _yaml.nodes.MappingNode):
+            kwargs = loader.construct_mapping(node, deep=True)
+            pathname = kwargs.pop("pathname")
+        else:
+            raise TypeError(f"Un-supported YAML node {node!r}")
+
+        return self.load(pathname, *args, **kwargs, master=loader)
 
     def load(self, path: _Path, **options) -> object:
         raise NotImplementedError()
