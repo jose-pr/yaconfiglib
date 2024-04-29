@@ -2,7 +2,7 @@ import io
 import logging
 import typing
 
-from pathlib_next import LocalPath, Path, Pathname, PosixPathname
+from pathlib_next import Path, PosixPathname
 
 try:
     from .utils import jinja2
