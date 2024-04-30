@@ -1,5 +1,3 @@
-import io
-import logging
 import typing
 
 from pathlib_next import Path, PosixPathname
@@ -14,8 +12,6 @@ from .utils.enum import IntEnum
 from .utils.log import Logger, LogLevel, getLogger
 from .utils.merge import Merge, MergeMethod, is_array
 from .utils.source import SourceLike, parse_sources
-
-_LOGGER = logging.getLogger("yaconfiglib")
 
 __all__ = ["ConfigLoader", "ConfigLoaderMergeMethod"]
 
@@ -144,6 +140,7 @@ class ConfigLoader(ConfigBackend):
         configloader: str = None,
         transform: str = None,
         key_factory: str | typing.Callable[[Path], str] = None,
+        interpolate: bool = None,
         **reader_args,
     ) -> tuple[str, object]:
 
@@ -186,6 +183,9 @@ class ConfigLoader(ConfigBackend):
             path_factory=self.path_factory,
             configloader=self,
             base_dir=self.base_dir,
+            interpolate=(
+                False if (configloader == self and self.interpolate) else interpolate
+            ),
         )
         _options.update(reader_args)
 
@@ -217,7 +217,7 @@ class ConfigLoader(ConfigBackend):
         merge = (
             merge
             if isinstance(merge, Merge)
-            else (MergeMethod(merge) if merge else self.merge)
+            else (ConfigLoaderMergeMethod(merge) if merge else self.merge)
         )
         if not merge:
             merge = self.merge
