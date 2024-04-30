@@ -22,6 +22,7 @@ toml = ["toml"]
 yaml = ['pyyaml']
 transform = ['yaconfiglib[jinja2]']
 jinja2 = ['jinja2']
+dev=['pytest','build','hatchling','twine']
 
 
 
