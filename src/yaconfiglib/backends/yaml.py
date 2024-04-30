@@ -21,7 +21,6 @@ class YamlConfig(ConfigBackend):
         master: yaml.Loader = None,
         loader_cls: type[yaml.Loader] = None,
         path_factory: type[Path] = None,
-        configloader: type[ConfigBackend] = None,
         **options,
     ) -> object:
         encoding = encoding or self.DEFAULT_ENCODING
@@ -34,9 +33,6 @@ class YamlConfig(ConfigBackend):
             loader_cls = type(master)
         if loader_cls is None:
             loader_cls = self.DEFAULT_LOADER_CLS
-
-        if configloader and not self.can_load_path(path):
-            return configloader.load(path, loader_cls=loader_cls, encoding=encoding)
 
         loader = loader_cls(path.read_text(encoding=encoding))
         try:
