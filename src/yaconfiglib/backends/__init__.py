@@ -1,4 +1,6 @@
 from .base import ConfigBackend as ConfigBackend
+from .ini import IniConfig as IniConfig
+from .json import JsonConfig as JsonConfig
 
 try:
     from .jinja2 import Jinja2ConfigLoader as Jinja2ConfigLoader
