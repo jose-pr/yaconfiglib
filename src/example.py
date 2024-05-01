@@ -40,6 +40,8 @@ hieraconf = configloader.load(
     """#!test.yaml
 pathname:
   stem: root
+vscode_settings: !load examples/settings.json
+iniconfig: !load examples/test.ini
 """,
     "examples/hiera.yaml",
     interpolate=True,
