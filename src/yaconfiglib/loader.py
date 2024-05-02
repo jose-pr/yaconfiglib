@@ -89,6 +89,10 @@ else:
     )
 
 
+class _IgnoreError(typing.Protocol):
+    def __call__(self, error: Exception, *args, **kwargs) -> bool: ...
+
+
 class ConfigLoader(ConfigBackend):
 
     def __init__(
@@ -104,6 +108,7 @@ class ConfigLoader(ConfigBackend):
         interpolate: bool = None,
         merge: ConfigLoaderMergeMethod | Merge = ConfigLoaderMergeMethod.Simple,
         merge_options: dict[str] = None,
+        ignore_error: _IgnoreError | bool = False,
     ) -> None:
         self.merge = (
             merge if isinstance(merge, Merge) else ConfigLoaderMergeMethod(merge)
@@ -119,6 +124,11 @@ class ConfigLoader(ConfigBackend):
             lambda path: ConfigBackend.get_class_by_path(path)()
         )
         self.key_factory = key_factory or (lambda path, value: path.stem)
+        self.ignore_error = (
+            ignore_error
+            if callable(ignore_error)
+            else lambda error, *args, **kwargs: bool(ignore_error)
+        )
 
     def _getpath(self, path: str | Path):
         return path if isinstance(path, Path) else self.path_factory(path)
@@ -235,27 +245,32 @@ class ConfigLoader(ConfigBackend):
             encoding=encoding,
             path_factory=self.path_factory,
         ):
-            name, result = self._load(
-                path,
-                recursive=recursive,
-                encoding=encoding,
-                configloader=configloader,
-                transform=transform,
-                key_factory=key_factory,
-                **reader_args,
-            )
-            if _join_init:
-                results = merge(
-                    results, result, logger=self.logger, configloaderkey=name
+            try:
+                name, result = self._load(
+                    path,
+                    recursive=recursive,
+                    encoding=encoding,
+                    configloader=configloader,
+                    transform=transform,
+                    key_factory=key_factory,
+                    **reader_args,
                 )
-            else:
-                try:
-                    results = merge.init(
-                        initial=result, logger=self.logger, configloaderkey=name
+                if _join_init:
+                    results = merge(
+                        results, result, logger=self.logger, configloaderkey=name
                     )
-                except AttributeError:
-                    results = result
-                _join_init = True
+                else:
+                    try:
+                        results = merge.init(
+                            initial=result, logger=self.logger, configloaderkey=name
+                        )
+                    except AttributeError:
+                        results = result
+                    _join_init = True
+            except Exception as error:
+                if self.ignore_error(error, path=path, configloader=self):
+                    continue
+                raise
 
         if flatten:
             if isinstance(results, typing.Mapping):
@@ -270,7 +285,11 @@ class ConfigLoader(ConfigBackend):
             result = results
 
         if interpolate:
-            result = jinja2.interpolate(result, result, self.logger)
+            try:
+                result = jinja2.interpolate(result, result, self.logger)
+            except Exception as error:
+                if not self.ignore_error(error, result=result, configloader=self):
+                    raise
 
         return result
 
@@ -290,14 +309,21 @@ class ConfigLoader(ConfigBackend):
             encoding=encoding,
             path_factory=self.path_factory,
         ):
-            key, value = self._load(
-                path,
-                encoding=encoding,
-                **reader_args,
-            )
-            if interpolate:
-                value = jinja2.interpolate(value, value, self.logger)
-            yield value
+            try:
+                key, value = self._load(
+                    path,
+                    encoding=encoding,
+                    **reader_args,
+                )
+                if interpolate:
+                    value = jinja2.interpolate(value, value, self.logger)
+                yield value
+
+            except Exception as error:
+                if not self.ignore_error(
+                    error, path=path, value=value, configloader=self
+                ):
+                    raise
 
 
 DEFAULT_LOADER = ConfigLoader()
