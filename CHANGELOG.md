@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-07-11
+
+### Changed
+- **Performance**: Optimized `utils/source.py` by precompiling command matching regex at the module level and avoiding path splitting allocations in `has_glob_pattern` (yielding a ~58% speedup in glob checks).
+- **Performance**: Optimized `loader.py` and `utils/jinja2.py` by caching compiled templates/expressions and reusing the Jinja Environment in `load_all` (up to 30x faster template interpolation and 8x faster `load_all` sequential loads).
+- **Performance**: Optimized `utils/merge.py` by fast-pathing standard collection types in `is_array` and bypassing positional dictionary comprehensions in `_deep_lists` when positional merging is disabled (yielding a ~19-35% speedup in deep merges).
+
+### Fixed
+- Fixed `UnboundLocalError` inside `load_all` error handling path when a load failure occurred before the local variable `value` was bound.
+
 ## [0.9.3] - 2026-07-11
 
 ### Fixed
@@ -49,7 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Legacy references and code blocks tied to `hiyapyco`.
 
-[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.4
 [0.9.3]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.3
 [0.9.2]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.2
 [0.9.1]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.1
