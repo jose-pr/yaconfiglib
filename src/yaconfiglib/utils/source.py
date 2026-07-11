@@ -5,6 +5,7 @@ import logging
 import typing as _ty
 import glob as _glob
 import tempfile as _tempfile
+import re as _re
 
 try:
     from pathlib_next import Path, Pathname
@@ -20,13 +21,15 @@ logger = logging.getLogger(__name__)
 
 SourceLike = _ty.Union[str, _ty.Any, _io.IOBase, bytes]
 
+_CMD_REGEX = _re.compile(r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:)", _re.IGNORECASE)
+
 
 def has_glob_pattern(path: Path) -> bool:
     """Check if the given Path contains glob pattern characters."""
     if hasattr(path, "has_glob_pattern"):
         return path.has_glob_pattern()
-    # Fallback checking path parts
-    return any(_glob.has_magic(part) for part in path.parts)
+    # Fallback checking path string representation directly (faster than path.parts)
+    return _glob.has_magic(str(path))
 
 
 def parse_sources(
@@ -100,8 +103,7 @@ def parse_sources(
                     yield tmp_path
                 continue
             elif isinstance(source, Path):
-                import re
-                is_cmd = bool(re.match(r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:)", str(source), re.IGNORECASE))
+                is_cmd = bool(_CMD_REGEX.match(str(source)))
                 path = source
                 if base_dir and not is_cmd:
                     try:
@@ -114,8 +116,7 @@ def parse_sources(
                             source,
                         )
             else:
-                import re
-                is_cmd = isinstance(source, str) and bool(re.match(r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:)", source, re.IGNORECASE))
+                is_cmd = isinstance(source, str) and bool(_CMD_REGEX.match(source))
                 path = path_factory(source)
                 if base_dir and not is_cmd:
                     try:

@@ -34,7 +34,11 @@ def is_array(obj, mutable: bool = False) -> bool:
     When *mutable* is True, also require that the sequence supports item
     assignment (i.e. is a :class:`~typing.MutableSequence`).
     """
-    if isinstance(obj, typing.Mapping) or isinstance(obj, str):
+    if isinstance(obj, (list, tuple)):
+        return not mutable or isinstance(obj, list)
+    if isinstance(obj, (str, bytes, dict)):
+        return False
+    if isinstance(obj, typing.Mapping):
         return False
     if mutable:
         return isinstance(obj, typing.MutableSequence)
@@ -253,18 +257,18 @@ class MergeMethod(IntEnum):
     ) -> typing.Sequence:
         result = list(a)
 
-        # Collect dict elements from b for potential positional merge.
-        b_dicts: dict[int, typing.Mapping] = {
-            i: item for i, item in enumerate(b) if isinstance(item, typing.Mapping)
-        }
-
-        # Extend with unique non-dict items from b.
-        for item in b:
-            if (is_scalar(item) or is_array(item)) and item not in result:
-                result.append(item)
-
-        # Merge dict elements by position if requested.
         if mergelists:
+            # Collect dict elements from b for potential positional merge.
+            b_dicts: dict[int, typing.Mapping] = {
+                i: item for i, item in enumerate(b) if isinstance(item, typing.Mapping)
+            }
+
+            # Extend with unique non-dict items from b.
+            for item in b:
+                if (is_scalar(item) or is_array(item)) and item not in result:
+                    result.append(item)
+
+            # Merge dict elements by position if requested.
             for i, a_item in enumerate(result):
                 if isinstance(a_item, typing.Mapping) and i in b_dicts:
                     b_item = b_dicts.pop(i)
@@ -275,9 +279,18 @@ class MergeMethod(IntEnum):
                         )
                         continue
 
-        # Append any remaining b dict entries that were not merged.
-        for v in b_dicts.values():
-            result.append(v)
+            # Append any remaining b dict entries that were not merged.
+            for v in b_dicts.values():
+                result.append(v)
+        else:
+            # Fast path: extend unique non-dict items, then append dict items to preserve exact behavior
+            for item in b:
+                if not isinstance(item, typing.Mapping):
+                    if (is_scalar(item) or is_array(item)) and item not in result:
+                        result.append(item)
+            for item in b:
+                if isinstance(item, typing.Mapping):
+                    result.append(item)
 
         if isinstance(a, typing.MutableSequence):
             a[:] = result

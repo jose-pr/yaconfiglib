@@ -26,6 +26,18 @@ __all__ = ["ConfigLoader", "ConfigLoaderMergeMethod", "load", "loads", "dump", "
 logger = logging.getLogger(__name__)
 
 
+_JINJA_ENVS = {}
+
+def _get_jinja_env(strict: bool) -> object:
+    if strict not in _JINJA_ENVS:
+        from jinja2 import Environment, StrictUndefined
+        env_kwargs = {}
+        if strict:
+            env_kwargs["undefined"] = StrictUndefined
+        _JINJA_ENVS[strict] = Environment(extensions=["jinja2.ext.do"], **env_kwargs)
+    return _JINJA_ENVS[strict]
+
+
 class _ConfigLoaderMergeMethod(IntEnum):
     Last = 4
     List = 5
@@ -299,12 +311,7 @@ class ConfigLoader(ConfigBackend):
 
         if interpolate:
             import os
-            from jinja2 import Environment, StrictUndefined
-            # Set up a Jinja environment if options require custom behavior
-            env_kwargs = {}
-            if self.strict:
-                env_kwargs["undefined"] = StrictUndefined
-            custom_env = Environment(extensions=["jinja2.ext.do"], **env_kwargs)
+            custom_env = _get_jinja_env(self.strict)
 
             # Auto-inject env context if requested
             globals_dict = {}
@@ -372,12 +379,14 @@ class ConfigLoader(ConfigBackend):
     ):
         interpolate = self.interpolate if interpolate is None else interpolate
         encoding = encoding or self.encoding
+        custom_env = _get_jinja_env(self.strict) if interpolate else None
         for path in parse_sources(
             pathname,
             base_dir=self.base_dir,
             encoding=encoding,
             path_factory=self.path_factory,
         ):
+            value = None
             try:
                 key, value = self._load(
                     path,
@@ -391,11 +400,6 @@ class ConfigLoader(ConfigBackend):
                     if self.inject_env:
                         import os
                         globals_dict["env"] = os.environ
-                    from jinja2 import Environment, StrictUndefined
-                    env_kwargs = {}
-                    if self.strict:
-                        env_kwargs["undefined"] = StrictUndefined
-                    custom_env = Environment(extensions=["jinja2.ext.do"], **env_kwargs)
                     value = jinja2.interpolate(value, globals_dict, environment=custom_env)
                 if isinstance(value, dict):
                     value = DotAccessibleDict(value)
