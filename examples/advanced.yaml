@@ -1,0 +1,29 @@
+# examples/advanced.yaml
+
+# 1. Basic properties
+app_name: "Yaconfiglib Demo"
+version: "1.0.0"
+
+# 2. Jinja Interpolation
+# This will be resolved dynamically if interpolate=True is passed to load()
+welcome_message: "Welcome to {{ app_name }} v{{ version }}"
+
+# 3. Dynamic loading via !load tag
+# The !load tag (when bound to ConfigLoader) allows you to recursively load 
+# other configuration files directly from within YAML.
+database_config: !load examples/settings.json
+
+# 4. Transform and Key Factory capabilities
+# You can pass a dictionary to !load to specify advanced options:
+# - pathname: The file to load
+# - transform: A Jinja expression to transform the loaded data
+# - key_factory: A Jinja expression to dynamically generate the key
+dynamic_includes: !load {
+  pathname: "examples/includeme.yaml",
+  transform: "{ pathname.name: value.include }",
+  key_factory: "%pathname.as_posix()"
+}
+
+# 5. Using environment variables (if injected during load)
+# Requires env to be passed or auto-injected (see v2 roadmap)
+# system_user: "{{ env.USER }}"
