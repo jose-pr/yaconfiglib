@@ -34,6 +34,7 @@ logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 
 configloader = ConfigLoader()
+yaml.SafeLoader.add_constructor("!include", configloader)
 yaml.SafeLoader.add_constructor("!load", configloader)
 
 hieraconf = configloader.load(

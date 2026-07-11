@@ -5,11 +5,12 @@ from yaconfiglib.loader import ConfigLoaderMergeMethod as MergeMethod
 # Initialize the loader
 loader = ConfigLoader()
 
-# Register the loader as the handler for the !load tag in PyYAML
+# Register the loader as the handler for the !include and !load tags in PyYAML
+yaml.SafeLoader.add_constructor("!include", loader)
 yaml.SafeLoader.add_constructor("!load", loader)
 
 def main():
-    print("=== Loading Advanced YAML with Interpolation & !load ===")
+    print("=== Loading Advanced YAML with Interpolation & !include ===")
     
     # Load the advanced configuration file, enabling Jinja interpolation 
     # and deep merging of any nested includes.
