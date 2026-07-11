@@ -1,3 +1,4 @@
+import logging
 import typing
 
 from pathlib_next import Path, PosixPathname
@@ -5,7 +6,7 @@ from pathlib_next import Path, PosixPathname
 try:
     from .utils import jinja2
 except ImportError:
-    ...
+    jinja2 = None
 
 from .backends import ConfigBackend
 from .utils.enum import IntEnum
@@ -14,6 +15,8 @@ from .utils.merge import Merge, MergeMethod, is_array
 from .utils.source import SourceLike, parse_sources
 
 __all__ = ["ConfigLoader", "ConfigLoaderMergeMethod"]
+
+logger = logging.getLogger(__name__)
 
 
 class _ConfigLoaderMergeMethod(IntEnum):
@@ -25,7 +28,6 @@ class _ConfigLoaderMergeMethod(IntEnum):
         self,
         initial: object,
         configloaderkey: str,
-        logger: Logger,
         memo: dict = None,
         **options,
     ):
@@ -43,7 +45,6 @@ class _ConfigLoaderMergeMethod(IntEnum):
         b: object,
         *,
         configloaderkey: str,
-        logger: Logger,
         memo: dict = None,
         **options,
     ):
@@ -55,7 +56,6 @@ class _ConfigLoaderMergeMethod(IntEnum):
         b: object,
         *,
         configloaderkey: str,
-        logger: Logger,
         memo: dict = None,
         **options,
     ):
@@ -68,7 +68,6 @@ class _ConfigLoaderMergeMethod(IntEnum):
         b: object,
         *,
         configloaderkey: str,
-        logger: Logger,
         memo: dict = None,
         **options,
     ):
@@ -104,7 +103,7 @@ class ConfigLoader(ConfigBackend):
         configloader_factory: type[ConfigBackend] = None,
         recursive: bool = None,
         key_factory: typing.Callable[[Path, object], str] = None,
-        logger: int | LogLevel | Logger = LogLevel.Warning,
+        log_level: int | LogLevel = LogLevel.Warning,
         interpolate: bool = None,
         merge: ConfigLoaderMergeMethod | Merge = ConfigLoaderMergeMethod.Simple,
         merge_options: dict[str] = None,
@@ -115,7 +114,8 @@ class ConfigLoader(ConfigBackend):
         )
         self.merge_options = {} if merge_options is None else merge_options
         self.interpolate = False if interpolate is None else bool(interpolate)
-        self.logger = getLogger(logger)
+        self._log_level = LogLevel(log_level or LogLevel.Warning)
+        logger.setLevel(self._log_level)
         self.path_factory = path_factory or self.DEFAULT_PATH_FACTORY
         self.base_dir = base_dir or ""
         self.encoding = encoding or self.DEFAULT_ENCODING
@@ -186,7 +186,7 @@ class ConfigLoader(ConfigBackend):
                     return str(val)
 
             key_factory = _key
-        self.logger.debug(f"Loading file: {path}")
+        logger.debug(f"Loading file: {path}")
         _configloader = configloader_factory(path)
         _options = dict(
             encoding=encoding,
@@ -241,7 +241,6 @@ class ConfigLoader(ConfigBackend):
         for path in parse_sources(
             pathname,
             base_dir=self.base_dir,
-            logger=self.logger,
             encoding=encoding,
             path_factory=self.path_factory,
         ):
@@ -257,12 +256,12 @@ class ConfigLoader(ConfigBackend):
                 )
                 if _join_init:
                     results = merge(
-                        results, result, logger=self.logger, configloaderkey=name
+                        results, result, configloaderkey=name
                     )
                 else:
                     try:
                         results = merge.init(
-                            initial=result, logger=self.logger, configloaderkey=name
+                            initial=result, configloaderkey=name
                         )
                     except AttributeError:
                         results = result
@@ -286,7 +285,7 @@ class ConfigLoader(ConfigBackend):
 
         if interpolate:
             try:
-                result = jinja2.interpolate(result, result, self.logger)
+                result = jinja2.interpolate(result, result)
             except Exception as error:
                 if not self.ignore_error(error, result=result, configloader=self):
                     raise
@@ -305,7 +304,6 @@ class ConfigLoader(ConfigBackend):
         for path in parse_sources(
             pathname,
             base_dir=self.base_dir,
-            logger=self.logger,
             encoding=encoding,
             path_factory=self.path_factory,
         ):
@@ -316,7 +314,7 @@ class ConfigLoader(ConfigBackend):
                     **reader_args,
                 )
                 if interpolate:
-                    value = jinja2.interpolate(value, value, self.logger)
+                    value = jinja2.interpolate(value, value)
                 yield value
 
             except Exception as error:
