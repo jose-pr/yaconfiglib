@@ -1,7 +1,10 @@
 import json
 import re
 
-from pathlib_next import Path
+try:
+    from pathlib_next import Path
+except ImportError:
+    from pathlib import Path
 
 from yaconfiglib.backends.base import ConfigBackend
 

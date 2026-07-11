@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import typing as _ty
 from enum import IntEnum as _IntEnum
 from itertools import chain as _chain
