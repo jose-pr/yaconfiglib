@@ -8,17 +8,17 @@ version: "1.0.0"
 # This will be resolved dynamically if interpolate=True is passed to load()
 welcome_message: "Welcome to {{ app_name }} v{{ version }}"
 
-# 3. Dynamic loading via !load tag
-# The !load tag (when bound to ConfigLoader) allows you to recursively load 
+# 3. Dynamic loading via !include tag
+# The !include tag allows you to recursively load 
 # other configuration files directly from within YAML.
-database_config: !load examples/settings.json
+database_config: !include examples/settings.json
 
 # 4. Transform and Key Factory capabilities
-# You can pass a dictionary to !load to specify advanced options:
+# You can pass a dictionary to !include to specify advanced options:
 # - pathname: The file to load
 # - transform: A Jinja expression to transform the loaded data
 # - key_factory: A Jinja expression to dynamically generate the key
-dynamic_includes: !load {
+dynamic_includes: !include {
   pathname: "examples/includeme.yaml",
   transform: "{ pathname.name: value.include }",
   key_factory: "%pathname.as_posix()"
