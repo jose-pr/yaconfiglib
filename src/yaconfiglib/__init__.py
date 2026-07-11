@@ -6,6 +6,7 @@ from .loader import (
     ConfigLoaderMergeMethod as ConfigLoaderMergeMethod,
     load as load,
     loads as loads,
+    dump as dump,
     dumps as dumps,
 )
 from .utils.merge import MergeMethod as MergeMethod
@@ -17,5 +18,6 @@ __all__ = [
     "ConfigBackend",
     "load",
     "loads",
+    "dump",
     "dumps",
 ]

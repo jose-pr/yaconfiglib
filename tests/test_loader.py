@@ -207,3 +207,24 @@ class TestTopLevelAPI:
         data = {"foo": "bar"}
         result = dumps(data)
         assert "foo: bar" in result
+
+    def test_dump_file_path(self, tmp_path):
+        from yaconfiglib import dump, load
+        data = {"key": "val"}
+        f = tmp_path / "output.yaml"
+        dump(data, str(f))
+        
+        # Load it back to verify
+        loaded = load(str(f))
+        assert loaded == {"key": "val"}
+
+    def test_dump_file_pointer(self, tmp_path):
+        import io
+        from yaconfiglib import dump
+        data = {"a": 1, "b": 2}
+        fp = io.StringIO()
+        dump(data, fp)
+        content = fp.getvalue()
+        assert "a: 1" in content
+        assert "b: 2" in content
+

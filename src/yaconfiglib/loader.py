@@ -21,7 +21,7 @@ from .utils.log import Logger, LogLevel, getLogger
 from .utils.merge import Merge, MergeMethod, is_array
 from .utils.source import SourceLike, parse_sources
 
-__all__ = ["ConfigLoader", "ConfigLoaderMergeMethod", "load", "loads", "dumps"]
+__all__ = ["ConfigLoader", "ConfigLoaderMergeMethod", "load", "loads", "dump", "dumps"]
 
 logger = logging.getLogger(__name__)
 
@@ -481,6 +481,16 @@ def loads(s: str | bytes, **kwargs) -> object:
     else:
         content = marker + s
     return loader_inst.load(content, **load_kwargs)
+
+
+def dump(obj: object, fp: typing.Any, **kwargs) -> None:
+    """Dump configuration object to a file pointer or file path."""
+    content = dumps(obj, **kwargs)
+    if hasattr(fp, "write"):
+        fp.write(content)
+    else:
+        with open(fp, "w", encoding="utf-8") as f:
+            f.write(content)
 
 
 def dumps(obj: object, **kwargs) -> str:
