@@ -5,6 +5,8 @@ Provides helpers to compile, evaluate, and interpolate Jinja2 templates
 within configuration data structures (strings, mappings, sequences).
 """
 
+from __future__ import annotations
+
 import logging
 import typing as _ty
 
@@ -56,12 +58,17 @@ def eval(
     def _eval(**kwargs) -> object:
         _meta: dict = {}
         template.render(_meta=_meta, **kwargs)
-        return _meta["result"]
+        res = _meta["result"]
+        from jinja2 import Undefined
+        if isinstance(res, Undefined):
+            str(res)  # Forces UndefinedError if strict
+            return None
+        return res
 
     return _eval
 
 
-def interpolate(data: object, globals: dict | None = None) -> object:
+def interpolate(data: object, globals: dict | None = None, environment: Environment | None = None) -> object:
     """Recursively interpolate Jinja2 templates within *data*.
 
     * **Strings**: rendered as Jinja2 templates.  A bare ``{{ expr }}``
@@ -81,10 +88,10 @@ def interpolate(data: object, globals: dict | None = None) -> object:
         if stripped.startswith("{{") and stripped.endswith("}}"):
             inner = stripped[2:-2].strip()
             if "{{" not in inner:
-                result = eval(inner)(**globals)
+                result = eval(inner, environment=environment)(**globals)
                 logger.debug("interpolated expression %r -> %r", data, result)
                 return result
-        result = compile(data)(**globals)
+        result = compile(data, environment=environment)(**globals)
         if result != data:
             logger.debug("interpolated template %r -> %r", data, result)
         return result
@@ -94,15 +101,17 @@ def interpolate(data: object, globals: dict | None = None) -> object:
             data = dict(data)
         for key in list(data.keys()):
             value = data.pop(key)
-            new_key = interpolate(key, globals)
-            data[new_key] = interpolate(value, globals)
+            new_key = interpolate(key, globals, environment=environment)
+            data[new_key] = interpolate(value, globals, environment=environment)
         return data
 
     if isinstance(data, _ty.Iterable) and not isinstance(data, (str, bytes)):
         if not isinstance(data, _ty.MutableSequence):
             data = list(data)
         for idx, value in enumerate(data):
-            data[idx] = interpolate(value, globals)
+            data[idx] = interpolate(value, globals, environment=environment)
         return data
+
+    return data
 
     return data
