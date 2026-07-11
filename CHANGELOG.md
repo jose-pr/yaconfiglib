@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-07-11
+
+### Fixed
+- Replaced Python 3.10+ `match`/`case` statement in `loader.py` with `if`/`elif` for Python 3.9 compatibility.
+- Replaced runtime `|` pipe union syntax in `utils/source.py` (`SourceLike`) with `typing.Union` for Python 3.9 compatibility.
+
 ## [0.9.1] - 2026-07-11
 
 ### Fixed
@@ -38,8 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Legacy references and code blocks tied to `hiyapyco`.
 
-[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.2
 [0.9.1]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.1
 [0.9.0]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.0
-
-
