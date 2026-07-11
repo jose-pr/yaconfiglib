@@ -1,8 +1,10 @@
 # yaconfiglib
 
-[![PyPI version](https://badge.fury.io/py/yaconfiglib.svg)](https://badge.fury.io/py/yaconfiglib)
+[![PyPI version](https://img.shields.io/pypi/v/yaconfiglib.svg)](https://pypi.org/project/yaconfiglib/)
 [![Python versions](https://img.shields.io/pypi/pyversions/yaconfiglib.svg)](https://pypi.org/project/yaconfiglib/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://jose-pr.github.io/yaconfiglib/)
+[![CI](https://img.shields.io/github/actions/workflow/status/jose-pr/yaconfiglib/test.yml)](https://github.com/jose-pr/yaconfiglib/actions/workflows/test.yml)
 
 **yaconfiglib** is a modern, extensible configuration parser library for Python. It allows you to seamlessly load, merge, and interpolate multiple configurations in a variety of formats (YAML, TOML, JSON, INI, `.env`), or execute scripts/commands directly to retrieve configuration objects dynamically.
 
@@ -104,22 +106,19 @@ secrets: !include 'cmd+json://python -c "import json; print(json.dumps({\"token\
 
 ## Development
 
-Set up a virtual environment and run the test suite:
+See `AGENTS.md` (and the language-specific directive it points to, e.g. `PYTHON.md`)
+for environment setup, dependency install, and test commands.
 
-```bash
-python -m venv .venv
-.venv/Scripts/pip install -e ".[dev,yaml,toml,jinja2]"
-.venv/Scripts/pytest
-```
+### Releasing
 
----
+This project follows [Semantic Versioning](https://semver.org/) and keeps a
+[`CHANGELOG.md`](CHANGELOG.md). Pushing a tag matching `v*` triggers the release
+workflow: test gate → build → publish → docs deploy (see `AGENTS.md`'s "Repository
+Structure" section and the language-specific CI/CD notes for the concrete jobs).
 
-## Releasing
+### Documentation site
 
-Pushing a version tag matching `v*` (e.g., `v2.0.0`) triggers the CI release pipeline to run tests, bundle the build (wheel and sdist), publish to PyPI, and compile+upload the documentation.
-
-### Documentation Site
-API reference docs are generated using MkDocs. To preview locally:
+MkDocs builds the API reference from `docs/`, published on every release. To preview locally:
 
 ```bash
 .venv/Scripts/pip install -e ".[docs]"
