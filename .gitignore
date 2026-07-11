@@ -3,3 +3,7 @@ __pycache__
 [a-zA-Z]*__
 [a-zA-Z]*__.*
 /dist
+.venv
+.agents
+CLAUDE*
+AGENTS.md
