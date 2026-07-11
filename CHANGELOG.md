@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-07-11
+
+### Fixed
+- Fixed false-positive glob pattern detection for `cmd://` and `exec://` sources whose command arguments contained glob metacharacters (e.g. `[`, `]`). Paths identified as command sources now bypass the glob check and are yielded directly.
+
 ## [0.9.2] - 2026-07-11
 
 ### Fixed
@@ -44,7 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Legacy references and code blocks tied to `hiyapyco`.
 
-[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.3
 [0.9.2]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.2
 [0.9.1]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.1
 [0.9.0]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.0
