@@ -1,8 +1,15 @@
+from __future__ import annotations
+
 import re
 
 from jinja2 import Environment
-from pathlib_next import Path, PosixPathname
-from pathlib_next.mempath import MemPath
+try:
+    from pathlib_next import Path, PosixPathname
+    from pathlib_next.mempath import MemPath
+except ImportError:
+    from pathlib import Path
+    from pathlib import PurePosixPath as PosixPathname  # type: ignore[no-redef]
+    MemPath = None  # type: ignore[assignment,misc]
 
 from yaconfiglib.backends.base import ConfigBackend
 from yaconfiglib.utils import jinja2
@@ -17,7 +24,7 @@ class Jinja2ConfigLoader(ConfigBackend):
         self,
         path: Path,
         encoding: str = None,
-        configloader: ConfigBackend = None,
+        loader: ConfigBackend = None,
         envoriment: Environment = None,
         **kwargs,
     ) -> None:
@@ -33,12 +40,12 @@ class Jinja2ConfigLoader(ConfigBackend):
         )
         mempath.parent.mkdir(parents=True, exist_ok=True)
         mempath.write_text(rendered, encoding=encoding)
-        configloader = configloader or ConfigBackend.get_class_by_path(mempath)
+        loader = loader or ConfigBackend.get_class_by_path(mempath)
 
-        rendered = configloader.load(
+        rendered = loader.load(
             mempath,
             encoding=encoding,
-            configloader=configloader,
+            loader=loader,
             **kwargs,
         )
         return rendered

@@ -91,3 +91,20 @@ class TestLoadTemplate:
         env = Environment()
         t = j2.load_template("{{ x }}", environment=env)
         assert t.render(x="ok") == "ok"
+
+
+class TestLoaderInterpolationFeatures:
+    def test_jinja_env_auto_injection(self, monkeypatch):
+        from yaconfiglib import ConfigLoader
+        from yaconfiglib.backends.python_backend import PythonBackend
+        monkeypatch.setenv("MY_APP_VAR", "production")
+        loader = ConfigLoader(interpolate=True, inject_env=True)
+        result = loader.load(loader=PythonBackend({"mode": "{{ env.MY_APP_VAR }}"}))
+        assert result == {"mode": "production"}
+
+    def test_strict_interpolation_raises(self):
+        from yaconfiglib import ConfigLoader
+        from yaconfiglib.backends.python_backend import PythonBackend
+        loader = ConfigLoader(interpolate=True, strict=True)
+        with pytest.raises(Exception):
+            loader.load(loader=PythonBackend({"value": "{{ missing_var }}"}))

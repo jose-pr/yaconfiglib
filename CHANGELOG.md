@@ -8,10 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Comprehensive test suite in `tests/` directory ensuring coverage across merge methods, Jinja interpolation, and configuration loading.
-- Automated CI and Release workflows (`.github/workflows/ci.yml`, `release.yml`) testing on multiple OS environments (Ubuntu, Windows, macOS) and Python versions, plus OIDC Trusted Publishing.
+- Pluggable backend registry with custom backends: `DotenvBackend` (parsing `.env` files), `EnvVarBackend` (querying `os.environ` with prefix filtering), and `PythonBackend` (direct dict injection).
+- New `CommandBackend` supporting command and shell script execution (`cmd://`, `exec://`, `.sh`, `.bat`, etc.) with format overrides and shebang-based routing (`#!json` / `#!yaml`).
+- Top-level standard library API parity (`load`, `loads`, `dump`, `dumps`).
+- Optional Pydantic model validation (`load_as`) with fallback support to dataclasses.
+- Dot-notation dictionary access wrapper (`DotAccessibleDict`) for deep configuration values.
+- Jinja2 environment features: environment auto-injection (`env.KEY`) and strict interpolation mode (`strict=True`).
+- Comprehensive unit tests in `tests/test_v2_features.py`.
 
 ### Changed
+- **API Modernization**: Renamed `configloader` argument to `loader` across the public API surface (`load`, `loads`, and backends).
+- **YAML Inclusion**: Idempotent auto-registration of `!include` and `!load` constructor tags in SafeLoader, now dynamically delegating to the parent `ConfigLoader` instance to support nested TOML/JSON/command loads.
+- **Compatibility**: Replaced Python 3.10+ specific features to support Python 3.9+, and updated pyproject.toml / CI workflows.
+- **pathlib_next**: Made `pathlib_next` an optional dependency with standard library pathlib, tempfile, and glob fallback behaviors.
+- **Code Organization**: Decoupled `typed_merge` logic into its own `utils/typing_merge.py` module.
 - **License**: Changed the license from GNU GPLv3 to MIT License.
 - **Refactoring**: Completely rewrote `utils/merge.py` and `utils/jinja2.py` in a clean-room implementation, removing all legacy code dependencies (GPL3 taint from `hiyapyco` and `yamlinclude`).
 - **Error Handling**: Improved error handling across `loader.py` and `utils/source.py`, replacing bare `except Exception:` blocks with targeted exception capturing.

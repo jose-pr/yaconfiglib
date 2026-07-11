@@ -1,12 +1,22 @@
+from __future__ import annotations
+
 import re
 import typing
 
 import yaml
-from pathlib_next import Path, Pathname
+try:
+    from pathlib_next import Path, Pathname
+except ImportError:
+    from pathlib import Path
+    Pathname = Path
 
 from yaconfiglib.backends.base import ConfigBackend
 
 __all__ = ["YamlConfig"]
+
+# Tags automatically registered on SafeLoader so users can write !include / !load
+# without manual loader setup.
+_INCLUDE_TAGS = ("!include", "!load")
 
 
 class YamlConfig(ConfigBackend):
@@ -21,6 +31,7 @@ class YamlConfig(ConfigBackend):
         master: yaml.Loader = None,
         loader_cls: type[yaml.Loader] = None,
         path_factory: type[Path] = None,
+        loader=None,
         **options,
     ) -> object:
         encoding = encoding or self.DEFAULT_ENCODING
@@ -34,15 +45,54 @@ class YamlConfig(ConfigBackend):
         if loader_cls is None:
             loader_cls = self.DEFAULT_LOADER_CLS
 
-        loader = loader_cls(path.read_text(encoding=encoding))
+        # Auto-register !include / !load tags if a loader is provided
+        # and the tags haven't already been registered on this loader class.
+        if loader is not None:
+            self._register_include_tags(loader_cls, loader, path_factory)
+
+        loader_instance = loader_cls(path.read_text(encoding=encoding))
         try:
             if master:
-                loader.anchors = master.anchors
-            data = loader.get_single_data()
+                loader_instance.anchors = master.anchors
+            data = loader_instance.get_single_data()
             return data
         finally:
-            loader.dispose()
+            loader_instance.dispose()
 
-    def dumps(self, data: str, dumper_cls: yaml.Dumper, **options) -> str:
+    @staticmethod
+    def _register_include_tags(
+        loader_cls: type[yaml.Loader],
+        loader,
+        path_factory,
+    ) -> None:
+        """Register ``!include`` and ``!load`` constructors on *loader_cls*.
+
+        Idempotent — safe to call multiple times; only registers once per class.
+        """
+        if getattr(loader_cls, "_yaconfiglib_include_registered", False):
+            return
+
+        def _construct(ldr: yaml.Loader, node: yaml.Node) -> object:
+            args = ()
+            kwargs = {}
+            if isinstance(node, yaml.nodes.ScalarNode):
+                pathname = ldr.construct_scalar(node)
+            elif isinstance(node, yaml.nodes.SequenceNode):
+                pathname, *args = ldr.construct_sequence(node, deep=True)
+            elif isinstance(node, yaml.nodes.MappingNode):
+                kwargs = ldr.construct_mapping(node, deep=True)
+                pathname = kwargs.pop("pathname")
+            else:
+                raise TypeError(f"Un-supported YAML node {node!r}")
+
+            kwargs.setdefault("master", ldr)
+            return loader.load(pathname, *args, **kwargs)
+
+        for tag in _INCLUDE_TAGS:
+            loader_cls.add_constructor(tag, _construct)
+
+        loader_cls._yaconfiglib_include_registered = True  # type: ignore[attr-defined]
+
+    def dumps(self, data: str, dumper_cls: yaml.Dumper = None, **options) -> str:
         options.setdefault("Dumper", dumper_cls or self.DEFAULT_DUMPER_CLS)
         return yaml.dump(data, **options)

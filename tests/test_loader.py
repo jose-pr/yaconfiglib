@@ -141,3 +141,69 @@ class TestLoadAll:
         loader = ConfigLoader(base_dir=tmp_path)
         results = list(loader.load_all("a.yaml", "b.yaml"))
         assert results == [{"a": 1}, {"b": 2}]
+
+
+# ---------------------------------------------------------------------------
+# DX features (DotAccessibleDict, load_as, Top-level API)
+# ---------------------------------------------------------------------------
+
+class TestDXFeatures:
+    def test_dot_accessible_dict(self):
+        from yaconfiglib.backends.python_backend import PythonBackend
+        loader = ConfigLoader()
+        result = loader.load(loader=PythonBackend({"db": {"host": "localhost", "port": 3306}}))
+        assert result.db.host == "localhost"
+        assert result.db.port == 3306
+        assert result.get("db.host") == "localhost"
+        assert result.get("db.missing", "default") == "default"
+
+    def test_dot_accessible_dict_dig_false(self):
+        from yaconfiglib.backends.python_backend import PythonBackend
+        loader = ConfigLoader()
+        result = loader.load(loader=PythonBackend({"db": {"host": "localhost", "port": 3306}}))
+        # dig=False prevents deep traversal
+        assert result.get("db.host", "default", dig=False) == "default"
+
+    def test_dot_accessible_dict_exact_match(self):
+        from yaconfiglib.backends.python_backend import PythonBackend
+        loader = ConfigLoader()
+        # Dotted key matches exactly, outranking traversal
+        data = {"db.host": "exact-value", "db": {"host": "traversed-value"}}
+        result = loader.load(loader=PythonBackend(data))
+        assert result.get("db.host") == "exact-value"
+        assert result.get("db.host", dig=False) == "exact-value"
+
+    def test_load_as_dataclass(self):
+        from dataclasses import dataclass
+        from yaconfiglib.backends.python_backend import PythonBackend
+
+        @dataclass
+        class MyConfig:
+            host: str
+            port: int
+
+        loader = ConfigLoader()
+        result = loader.load_as(MyConfig, loader=PythonBackend({"host": "localhost", "port": 80, "extra": "ignored"}))
+        assert isinstance(result, MyConfig)
+        assert result.host == "localhost"
+        assert result.port == 80
+
+
+class TestTopLevelAPI:
+    def test_load_file(self, tmp_path):
+        from yaconfiglib import load
+        f = tmp_path / "conf.json"
+        f.write_text('{"foo": "bar"}')
+        result = load(str(f))
+        assert result == {"foo": "bar"}
+
+    def test_loads_string(self):
+        from yaconfiglib import loads
+        result = loads('{"hello": "world"}', loader="json")
+        assert result == {"hello": "world"}
+
+    def test_dumps_obj(self):
+        from yaconfiglib import dumps
+        data = {"foo": "bar"}
+        result = dumps(data)
+        assert "foo: bar" in result
