@@ -38,13 +38,12 @@ class _ConfigLoaderMergeMethod(IntEnum):
         memo: dict = None,
         **options,
     ):
-        match self:
-            case ConfigLoaderMergeMethod.List:
-                return [initial]
-            case ConfigLoaderMergeMethod.Hash:
-                return {configloaderkey: initial}
-            case _:
-                return initial
+        if self is ConfigLoaderMergeMethod.List:
+            return [initial]
+        elif self is ConfigLoaderMergeMethod.Hash:
+            return {configloaderkey: initial}
+        else:
+            return initial
 
     def _last(
         self,
