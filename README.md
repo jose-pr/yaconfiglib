@@ -1,21 +1,53 @@
 # yaconfiglib
-Another Configuration Parser library for python.
 
-Goal was to not worry about the format and being able to load and merge multiple configs in different formats.
+[![PyPI version](https://badge.fury.io/py/yaconfiglib.svg)](https://badge.fury.io/py/yaconfiglib)
+[![Python versions](https://img.shields.io/pypi/pyversions/yaconfiglib.svg)](https://pypi.org/project/yaconfiglib/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Currently implemented backends for toml, yaml as a starting point, really easy to add more.
+**yaconfiglib** is a modern, extensible configuration parser library for Python. It allows you to seamlessly load, merge, and interpolate multiple configurations in a variety of formats (TOML, YAML, JSON, INI).
 
-Wanted the option to generate a config with jinja and then load the config from the generate template.
+## Features
 
-Wanted a function like hiera in puppet to reference values already declared in the document, and expanded it to support basic functions allowed in a single jinja {%do %} statement. While preserving the type of the produced value. 
+- **Format Agnostic**: Built-in support for TOML, YAML, JSON, and INI, with an extensible architecture to easily add more backends.
+- **Advanced Templating**: Interleave configurations with Jinja2. Generate configuration blocks dynamically or reference previously declared values using Jinja's `{% do %}` statements.
+- **Chain Loading & Merging**: Intelligently merge multiple config files into one, utilizing customizable merge strategies (e.g., deep merge dictionaries, append lists).
+- **Path Agnostic**: Integrates with [pathlib_next](https://github.com/jose-pr/pathlib_next) to allow configuration loading from any URI (e.g., local paths, HTTP, SFTP, etc.) exactly like standard `pathlib.Path` objects.
 
-Wanted the ability to merge multiple configs into one with user configurable methods.
+## Installation
 
-Wanted to load files from any arbitrary path that didnt need to be local filesystem path, but liked the api of pathlib.Path so ended up also writing another package: pathlib_next to extend pathlib to work with custom Path implementation like URI/SFTP/HTTP etc. WIP
+Install using `pip`:
 
-# Based on the following libraries
-Heavily modified but based on the work of the following libraries. I was using them to load configs but had to modify them to fit my needs and ended up writing my own.
-* v1 of yamlinclude: https://github.com/tanbro/pyyaml-include 
-* hiyapyco for chain loading/merge template support: https://github.com/zerwes/hiyapyco
+```bash
+pip install yaconfiglib
+```
 
+To enable parsing of specific formats, install the optional dependencies:
+
+```bash
+# For YAML support
+pip install yaconfiglib[yaml]
+
+# For TOML support
+pip install yaconfiglib[toml]
+
+# For Jinja2 templating and transformations
+pip install yaconfiglib[jinja2]
+```
+
+## Quick Start
+
+```python
+from yaconfiglib import ConfigLoader
+
+# Initialize the loader
+loader = ConfigLoader(interpolate=True)
+
+# Load and merge configurations from multiple sources
+config = loader.load(
+    "base_config.yaml",
+    "override_config.toml"
+)
+
+print(config)
+```
 
