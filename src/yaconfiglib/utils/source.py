@@ -1,10 +1,11 @@
 import io as _io
+import logging
 import typing as _ty
 
 from pathlib_next import Path, Pathname
 from pathlib_next.mempath import MemPath
 
-from . import log as _log
+logger = logging.getLogger(__name__)
 
 SourceLike = str | Pathname | _io.IOBase | bytes
 
@@ -12,13 +13,11 @@ SourceLike = str | Pathname | _io.IOBase | bytes
 def parse_sources(
     sources: _ty.Iterable[SourceLike | _ty.Iterable[SourceLike]],
     base_dir: Path = None,
-    logger: _log.Logger = None,
     encoding: str = None,
     memo: list[str | Path] = None,
     path_factory: type[Path] = None,
     recursive: bool = None,
 ) -> _ty.Iterator[Path]:
-    logger = _log.getLogger(None)
     path_factory = path_factory or Path
     recursive = False if recursive is None else bool(recursive)
     if memo is None:
@@ -62,15 +61,29 @@ def parse_sources(
                 yield path
                 continue
             elif isinstance(source, Path):
-                try:
-                    if base_dir:
-                        path = base_dir / source
-                except Exception as _e:
-                    ...
-            else:
+                path = source
                 if base_dir:
-                    path = base_dir / source
-            path = path_factory(source) if not isinstance(source, Path) else source
+                    try:
+                        path = base_dir / source
+                    except TypeError:
+                        # base_dir type (e.g. MemPath) is incompatible with
+                        # this source path type — use source as-is.
+                        logger.debug(
+                            "Cannot join base_dir %r with path %r; using path as-is",
+                            base_dir,
+                            source,
+                        )
+            else:
+                path = path_factory(source)
+                if base_dir:
+                    try:
+                        path = base_dir / source
+                    except (TypeError, ValueError):
+                        logger.debug(
+                            "Cannot join base_dir %r with %r; using path_factory result",
+                            base_dir,
+                            source,
+                        )
             if path.has_glob_pattern():
                 yield from path.glob("", recursive=recursive)
             else:
@@ -80,7 +93,6 @@ def parse_sources(
                 source,
                 memo=memo,
                 base_dir=base_dir,
-                logger=logger,
                 path_factory=path_factory,
                 encoding=encoding,
             )
@@ -92,3 +104,4 @@ def parse_sources(
                     type(source),
                 )
             )
+
