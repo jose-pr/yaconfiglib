@@ -1,7 +1,14 @@
+from __future__ import annotations
+
 import logging
 import typing
 
-from pathlib_next import Path, PosixPathname
+try:
+    from pathlib_next import Path
+except ImportError:
+    from pathlib import Path
+
+from pathlib import PurePosixPath
 
 try:
     from .utils import jinja2
@@ -14,7 +21,7 @@ from .utils.log import Logger, LogLevel, getLogger
 from .utils.merge import Merge, MergeMethod, is_array
 from .utils.source import SourceLike, parse_sources
 
-__all__ = ["ConfigLoader", "ConfigLoaderMergeMethod"]
+__all__ = ["ConfigLoader", "ConfigLoaderMergeMethod", "load", "loads", "dumps"]
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +107,7 @@ class ConfigLoader(ConfigBackend):
         *,
         encoding: str = None,
         path_factory: typing.Callable[[str], Path] = None,
-        configloader_factory: type[ConfigBackend] = None,
+        loader_factory: type[ConfigBackend] = None,
         recursive: bool = None,
         key_factory: typing.Callable[[Path, object], str] = None,
         log_level: int | LogLevel = LogLevel.Warning,
@@ -108,19 +115,23 @@ class ConfigLoader(ConfigBackend):
         merge: ConfigLoaderMergeMethod | Merge = ConfigLoaderMergeMethod.Simple,
         merge_options: dict[str] = None,
         ignore_error: _IgnoreError | bool = False,
+        inject_env: bool = False,
+        strict: bool = False,
     ) -> None:
         self.merge = (
             merge if isinstance(merge, Merge) else ConfigLoaderMergeMethod(merge)
         )
         self.merge_options = {} if merge_options is None else merge_options
         self.interpolate = False if interpolate is None else bool(interpolate)
+        self.inject_env = bool(inject_env)
+        self.strict = bool(strict)
         self._log_level = LogLevel(log_level or LogLevel.Warning)
         logger.setLevel(self._log_level)
         self.path_factory = path_factory or self.DEFAULT_PATH_FACTORY
         self.base_dir = base_dir or ""
         self.encoding = encoding or self.DEFAULT_ENCODING
         self.recursive = False if recursive is None else recursive
-        self.configloader_factory = configloader_factory or (
+        self.loader_factory = loader_factory or (
             lambda path: ConfigBackend.get_class_by_path(path)()
         )
         self.key_factory = key_factory or (lambda path, value: path.stem)
@@ -147,7 +158,7 @@ class ConfigLoader(ConfigBackend):
         *,
         encoding: str,
         recursive: bool = None,
-        configloader: str = None,
+        loader: str = None,
         transform: str = None,
         key_factory: str | typing.Callable[[Path], str] = None,
         interpolate: bool = None,
@@ -156,17 +167,18 @@ class ConfigLoader(ConfigBackend):
 
         recursive = self.recursive if recursive is None else recursive
 
-        if isinstance(configloader, str):
-            configloader_factory = lambda path: ConfigBackend.get_class_by_name(
-                configloader
-            )(path)
-        elif callable(getattr(configloader, "load", None)):
-            configloader_factory = lambda path: configloader
+        if isinstance(loader, str):
+            backend_cls = ConfigBackend.get_class_by_name(loader)
+            if not backend_cls:
+                raise ValueError(f"Unknown configuration format/loader: {loader}")
+            loader_factory = lambda path: backend_cls()
+        elif callable(getattr(loader, "load", None)):
+            loader_factory = lambda path: loader
         else:
-            configloader_factory = configloader or self.configloader_factory
+            loader_factory = loader or self.loader_factory
 
-        if configloader is self:
-            configloader_factory = self.configloader_factory
+        if loader is self:
+            loader_factory = self.loader_factory
 
         key_factory = key_factory or self.key_factory
         if not callable(key_factory):
@@ -174,7 +186,7 @@ class ConfigLoader(ConfigBackend):
                 _eval = jinja2.eval(key_factory.removeprefix("%"))
 
                 def _key(path: Path, value):
-                    return _eval(value=value, pathname=PosixPathname(path.as_posix()))
+                    return _eval(value=value, pathname=PurePosixPath(path.as_posix()))
 
             else:
                 _keyname = key_factory
@@ -187,22 +199,22 @@ class ConfigLoader(ConfigBackend):
 
             key_factory = _key
         logger.debug(f"Loading file: {path}")
-        _configloader = configloader_factory(path)
+        _loader = loader_factory(path)
         _options = dict(
             encoding=encoding,
             path_factory=self.path_factory,
-            configloader=self,
+            loader=self,
             base_dir=self.base_dir,
             interpolate=(
-                False if (configloader == self and self.interpolate) else interpolate
+                False if (loader == self and self.interpolate) else interpolate
             ),
         )
         _options.update(reader_args)
 
-        value = _configloader.load(path, **_options)
+        value = _loader.load(path, **_options)
         if transform:
             value = jinja2.eval(transform)(
-                value=value, pathname=PosixPathname(path.as_posix())
+                value=value, pathname=PurePosixPath(path.as_posix())
             )
 
         return key_factory(path, value), value
@@ -212,12 +224,12 @@ class ConfigLoader(ConfigBackend):
         *pathname: SourceLike,
         recursive: bool = None,
         encoding: str = None,
-        configloader: str = None,
+        loader: str = None,
         transform: str = None,
         default: object = None,
         key_factory: str | typing.Callable[[Path], str] = None,
         flatten: bool = False,
-        interpolate: bool = False,
+        interpolate: bool = None,
         merge: ConfigLoaderMergeMethod | Merge = None,
         merge_options: dict[str] = None,
         **reader_args,
@@ -238,6 +250,9 @@ class ConfigLoader(ConfigBackend):
         results = default
         _join_init = False
 
+        if not pathname:
+            pathname = ("#!\n",)
+
         for path in parse_sources(
             pathname,
             base_dir=self.base_dir,
@@ -249,7 +264,7 @@ class ConfigLoader(ConfigBackend):
                     path,
                     recursive=recursive,
                     encoding=encoding,
-                    configloader=configloader,
+                    loader=loader,
                     transform=transform,
                     key_factory=key_factory,
                     **reader_args,
@@ -267,7 +282,7 @@ class ConfigLoader(ConfigBackend):
                         results = result
                     _join_init = True
             except Exception as error:
-                if self.ignore_error(error, path=path, configloader=self):
+                if self.ignore_error(error, path=path, loader=self):
                     continue
                 raise
 
@@ -284,13 +299,70 @@ class ConfigLoader(ConfigBackend):
             result = results
 
         if interpolate:
+            import os
+            from jinja2 import Environment, StrictUndefined
+            # Set up a Jinja environment if options require custom behavior
+            env_kwargs = {}
+            if self.strict:
+                env_kwargs["undefined"] = StrictUndefined
+            custom_env = Environment(extensions=["jinja2.ext.do"], **env_kwargs)
+
+            # Auto-inject env context if requested
+            globals_dict = {}
+            if isinstance(result, typing.Mapping):
+                globals_dict.update(result)
+            if self.inject_env:
+                globals_dict["env"] = os.environ
+
             try:
-                result = jinja2.interpolate(result, result)
+                result = jinja2.interpolate(
+                    result,
+                    globals=globals_dict,
+                    environment=custom_env,
+                )
             except Exception as error:
-                if not self.ignore_error(error, result=result, configloader=self):
+                if not self.ignore_error(error, result=result, loader=self):
                     raise
 
+        # Wrap dict results in a helper class that supports dot-notation
+        if isinstance(result, dict):
+            result = DotAccessibleDict(result)
+
         return result
+
+    def load_as(self, model_cls: type[T], *pathname: SourceLike, **kwargs) -> T:
+        """Load configuration sources and instantiate as *model_cls*.
+
+        Supports Pydantic models (if installed) or dataclasses. If neither matches,
+        falls back to passing kwargs/dict unpacking to the constructor.
+        """
+        data = self.load(*pathname, **kwargs)
+        if not isinstance(data, dict):
+            raise TypeError("Loaded configuration must be a dictionary to load as a model")
+
+        # Try Pydantic integration (strictly optional)
+        try:
+            import pydantic
+            if issubclass(model_cls, pydantic.BaseModel):
+                # Pydantic V2 and V1 compatibility helper
+                if hasattr(model_cls, "model_validate"):
+                    return model_cls.model_validate(data)
+                elif hasattr(model_cls, "parse_obj"):
+                    return model_cls.parse_obj(data)
+        except ImportError:
+            pass
+
+        # Try dataclass
+        from dataclasses import is_dataclass
+        if is_dataclass(model_cls):
+            # Safe init passing only valid dataclass field names
+            import inspect
+            sig = inspect.signature(model_cls.__init__)
+            valid_keys = {name for name, param in sig.parameters.items() if param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)}
+            filtered = {k: v for k, v in data.items() if k in valid_keys}
+            return model_cls(**filtered)
+
+        return model_cls(**data)
 
     def load_all(
         self,
@@ -314,14 +386,109 @@ class ConfigLoader(ConfigBackend):
                     **reader_args,
                 )
                 if interpolate:
-                    value = jinja2.interpolate(value, value)
+                    globals_dict = {}
+                    if isinstance(value, typing.Mapping):
+                        globals_dict.update(value)
+                    if self.inject_env:
+                        import os
+                        globals_dict["env"] = os.environ
+                    from jinja2 import Environment, StrictUndefined
+                    env_kwargs = {}
+                    if self.strict:
+                        env_kwargs["undefined"] = StrictUndefined
+                    custom_env = Environment(extensions=["jinja2.ext.do"], **env_kwargs)
+                    value = jinja2.interpolate(value, globals_dict, environment=custom_env)
+                if isinstance(value, dict):
+                    value = DotAccessibleDict(value)
                 yield value
 
             except Exception as error:
                 if not self.ignore_error(
-                    error, path=path, value=value, configloader=self
+                    error, path=path, value=value, loader=self
                 ):
                     raise
 
 
+class DotAccessibleDict(dict):
+    """Dictionary subclass supporting dot-notation queries and attribute access."""
+
+    def __getattr__(self, name: str) -> object:
+        try:
+            val = self[name]
+            if isinstance(val, dict) and not isinstance(val, DotAccessibleDict):
+                val = DotAccessibleDict(val)
+                self[name] = val
+            return val
+        except KeyError:
+            raise AttributeError(f"'DotAccessibleDict' object has no attribute '{name}'")
+
+    def __setattr__(self, name: str, value: object) -> None:
+        self[name] = value
+
+    def get(self, key: str, default: object = None, dig: bool = True) -> object:
+        """Support dot-notation traversal, e.g., get("database.credentials.user", dig=True)."""
+        if key in self:
+            val = super().get(key, default)
+            if isinstance(val, dict) and not isinstance(val, DotAccessibleDict):
+                val = DotAccessibleDict(val)
+                self[key] = val
+            return val
+
+        if dig and "." in key:
+            parts = key.split(".")
+            current = self
+            for part in parts:
+                if isinstance(current, dict) and not isinstance(current, DotAccessibleDict):
+                    current = DotAccessibleDict(current)
+                if isinstance(current, DotAccessibleDict):
+                    try:
+                        current = current.__getattr__(part)
+                    except AttributeError:
+                        return default
+                elif isinstance(current, dict):
+                    current = current.get(part)
+                else:
+                    return default
+                if current is None:
+                    return default
+            return current
+        val = super().get(key, default)
+        if isinstance(val, dict) and not isinstance(val, DotAccessibleDict):
+            val = DotAccessibleDict(val)
+            self[key] = val
+        return val
+
+
+def load(fp: typing.Any, **kwargs) -> object:
+    """Load configuration from a file pointer or file path."""
+    load_keys = {"recursive", "encoding", "loader", "transform", "default", "key_factory", "flatten", "interpolate", "merge", "merge_options", "master"}
+    loader_kwargs = {k: v for k, v in kwargs.items() if k not in load_keys}
+    load_kwargs = {k: v for k, v in kwargs.items() if k in load_keys}
+    loader_inst = ConfigLoader(**loader_kwargs)
+    return loader_inst.load(fp, **load_kwargs)
+
+
+def loads(s: str | bytes, **kwargs) -> object:
+    """Load configuration from a string or bytes in memory."""
+    load_keys = {"recursive", "encoding", "loader", "transform", "default", "key_factory", "flatten", "interpolate", "merge", "merge_options", "master"}
+    loader_kwargs = {k: v for k, v in kwargs.items() if k not in load_keys}
+    load_kwargs = {k: v for k, v in kwargs.items() if k in load_keys}
+    loader_inst = ConfigLoader(**loader_kwargs)
+    # Use parse_sources inline memory doc marker
+    marker = "#!\n"
+    if isinstance(s, bytes):
+        content = marker.encode("utf-8") + s
+    else:
+        content = marker + s
+    return loader_inst.load(content, **load_kwargs)
+
+
+def dumps(obj: object, **kwargs) -> str:
+    """Dump configuration object to string (delegates to YamlConfig dumper by default)."""
+    from .backends.yaml import YamlConfig
+    backend = YamlConfig()
+    return backend.dumps(obj, **kwargs)
+
+
 DEFAULT_LOADER = ConfigLoader()
+
