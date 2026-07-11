@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-11
+
 ### Added
 - Pluggable backend registry with custom backends: `DotenvBackend` (parsing `.env` files), `EnvVarBackend` (querying `os.environ` with prefix filtering), and `PythonBackend` (direct dict injection).
 - New `CommandBackend` supporting command and shell script execution (`cmd://`, `exec://`, `.sh`, `.bat`, etc.) with format overrides and shebang-based routing (`#!json` / `#!yaml`).
-- Top-level standard library API parity (`load`, `loads`, `dump`, `dumps`).
+- Top-level standard library API parity (`load`, `loads`, `dump`, `dumps`) with the newly implemented `dump` function.
 - Optional Pydantic model validation (`load_as`) with fallback support to dataclasses.
 - Dot-notation dictionary access wrapper (`DotAccessibleDict`) for deep configuration values.
 - Jinja2 environment features: environment auto-injection (`env.KEY`) and strict interpolation mode (`strict=True`).
@@ -30,3 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 - Legacy references and code blocks tied to `hiyapyco`.
+
+[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.0
+
+
