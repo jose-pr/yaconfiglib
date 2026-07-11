@@ -18,7 +18,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-SourceLike = str | _ty.Any | _io.IOBase | bytes
+SourceLike = _ty.Union[str, _ty.Any, _io.IOBase, bytes]
 
 
 def has_glob_pattern(path: Path) -> bool:
