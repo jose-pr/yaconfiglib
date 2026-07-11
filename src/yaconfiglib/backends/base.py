@@ -1,9 +1,16 @@
+from __future__ import annotations
+
 import re as _re
 import typing as _ty
 
-from pathlib_next import LocalPath as _LocalPath
-from pathlib_next import Path as _Path
-from pathlib_next import Pathname as _Pathname
+try:
+    from pathlib_next import LocalPath as _LocalPath
+    from pathlib_next import Path as _Path
+    from pathlib_next import Pathname as _Pathname
+except ImportError:
+    from pathlib import Path as _Path  # type: ignore[no-redef]
+    _LocalPath = _Path
+    _Pathname = _Path
 
 if _ty.TYPE_CHECKING:
     import yaml as _yaml
