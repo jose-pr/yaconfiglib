@@ -126,7 +126,7 @@ def parse_sources(
                             base_dir,
                             source,
                         )
-            if has_glob_pattern(path):
+            if not is_cmd and has_glob_pattern(path):
                 # stdlib glob pattern fallback uses glob.glob on string paths
                 if hasattr(path, "glob") and HAS_PATHLIB_NEXT:
                     yield from path.glob("", recursive=recursive)
