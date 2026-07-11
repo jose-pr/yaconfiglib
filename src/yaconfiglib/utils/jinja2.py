@@ -30,13 +30,26 @@ def load_template(
     return Template.from_code(env, code, env.make_globals(globals))
 
 
+_COMPILE_CACHE = {}
+_EVAL_CACHE = {}
+
+
 def compile(
     code: str,
     environment: Environment | None = None,
     globals: _ty.MutableMapping | None = None,
 ) -> _ty.Callable[..., str]:
     """Return a render callable for *code* (a Jinja2 template string)."""
-    return load_template(code, environment=environment, globals=globals).render
+    env = environment or DEFAULT_ENV
+    cache_key = (code, id(env))
+    if cache_key in _COMPILE_CACHE:
+        return _COMPILE_CACHE[cache_key]
+    
+    render = load_template(code, environment=env, globals=globals).render
+    if len(_COMPILE_CACHE) >= 1024:
+        _COMPILE_CACHE.clear()
+    _COMPILE_CACHE[cache_key] = render
+    return render
 
 
 def eval(
@@ -49,9 +62,14 @@ def eval(
     The expression result is captured via a ``{% do %}`` statement and
     returned from the callable, preserving non-string Python types.
     """
+    env = environment or DEFAULT_ENV
+    cache_key = (code, id(env))
+    if cache_key in _EVAL_CACHE:
+        return _EVAL_CACHE[cache_key]
+
     template = load_template(
         "{% do _meta.__setitem__('result', " + code + ") %}",
-        environment=environment,
+        environment=env,
         globals=globals,
     )
 
@@ -65,6 +83,9 @@ def eval(
             return None
         return res
 
+    if len(_EVAL_CACHE) >= 1024:
+        _EVAL_CACHE.clear()
+    _EVAL_CACHE[cache_key] = _eval
     return _eval
 
 
