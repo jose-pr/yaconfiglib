@@ -30,6 +30,44 @@ class TestRegistryBackends:
         result = loader.load(loader=EnvVarBackend(prefix="TESTPREFIX_"))
         assert result == {"val_one": "hello", "val_two": "world"}
 
+    def test_env_var_backend_nested_delimiter(self, monkeypatch):
+        monkeypatch.setenv("APP_DB__HOST", "localhost")
+        monkeypatch.setenv("APP_DB__PORT", "5432")
+        monkeypatch.setenv("APP_FEATURES__CACHE", "true")
+        monkeypatch.setenv("OTHER_DB__HOST", "ignored")
+
+        loader = ConfigLoader()
+        result = loader.load(loader=EnvVarBackend(prefix="APP_", nested_delimiter="__"))
+        assert result == {
+            "db": {"host": "localhost", "port": "5432"},
+            "features": {"cache": "true"},
+        }
+
+    def test_env_var_backend_coerces_scalars(self, monkeypatch):
+        monkeypatch.setenv("APP_DEBUG", "true")
+        monkeypatch.setenv("APP_PORT", "5432")
+        monkeypatch.setenv("APP_RATE", "1.5")
+        monkeypatch.setenv("APP_EMPTY", "null")
+        monkeypatch.setenv("APP_ITEMS", '["a", 2]')
+        monkeypatch.setenv("APP_DB__OPTIONS", '{"pool": 5}')
+
+        loader = ConfigLoader()
+        result = loader.load(
+            loader=EnvVarBackend(
+                prefix="APP_",
+                nested_delimiter="__",
+                coerce=True,
+            )
+        )
+        assert result == {
+            "debug": True,
+            "port": 5432,
+            "rate": 1.5,
+            "empty": None,
+            "items": ["a", 2],
+            "db": {"options": {"pool": 5}},
+        }
+
     def test_python_backend(self):
         loader = ConfigLoader()
         data = {"foo": "bar", "nested": [1, 2]}

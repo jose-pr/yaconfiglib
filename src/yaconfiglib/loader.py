@@ -441,19 +441,18 @@ class DotAccessibleDict(dict):
             parts = key.split(".")
             current = self
             for part in parts:
-                if isinstance(current, dict) and not isinstance(current, DotAccessibleDict):
-                    current = DotAccessibleDict(current)
-                if isinstance(current, DotAccessibleDict):
-                    try:
-                        current = current.__getattr__(part)
-                    except AttributeError:
-                        return default
-                elif isinstance(current, dict):
-                    current = current.get(part)
-                else:
+                if not isinstance(current, dict):
+                    return default
+                parent = current
+                try:
+                    current = current[part]
+                except KeyError:
                     return default
                 if current is None:
                     return default
+                if isinstance(current, dict) and not isinstance(current, DotAccessibleDict):
+                    current = DotAccessibleDict(current)
+                    parent[part] = current
             return current
         val = super().get(key, default)
         if isinstance(val, dict) and not isinstance(val, DotAccessibleDict):
@@ -504,4 +503,3 @@ def dumps(obj: object, **kwargs) -> str:
 
 
 DEFAULT_LOADER = ConfigLoader()
-
