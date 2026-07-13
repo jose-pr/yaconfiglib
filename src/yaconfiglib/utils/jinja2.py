@@ -134,5 +134,3 @@ def interpolate(data: object, globals: dict | None = None, environment: Environm
         return data
 
     return data
-
-    return data

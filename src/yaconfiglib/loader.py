@@ -25,6 +25,8 @@ __all__ = ["ConfigLoader", "ConfigLoaderMergeMethod", "load", "loads", "dump", "
 
 logger = logging.getLogger(__name__)
 
+T = typing.TypeVar("T")
+
 
 _JINJA_ENVS = {}
 

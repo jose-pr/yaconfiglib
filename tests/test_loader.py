@@ -2,6 +2,7 @@
 Tests for ConfigLoader — loading, merging, and example file compatibility.
 """
 import pathlib
+import typing
 
 import pytest
 
@@ -243,6 +244,11 @@ class TestDXFeatures:
         assert isinstance(result, MyConfig)
         assert result.host == "localhost"
         assert result.port == 80
+
+    def test_load_as_type_hints_resolve(self):
+        hints = typing.get_type_hints(ConfigLoader.load_as)
+        assert "model_cls" in hints
+        assert "return" in hints
 
 
 class TestTopLevelAPI:
