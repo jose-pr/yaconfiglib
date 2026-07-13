@@ -6,8 +6,10 @@ import pytest
 import subprocess
 
 from yaconfiglib import ConfigLoader
+from yaconfiglib.backends.base import ConfigBackend
 from yaconfiglib.backends.dotenv import DotenvBackend
 from yaconfiglib.backends.env import EnvVarBackend
+from yaconfiglib.backends.jinja2 import Jinja2ConfigLoader
 from yaconfiglib.backends.python_backend import PythonBackend
 from yaconfiglib.backends.command import CommandBackend
 
@@ -73,6 +75,21 @@ class TestRegistryBackends:
         data = {"foo": "bar", "nested": [1, 2]}
         result = loader.load(loader=PythonBackend(data))
         assert result == data
+
+    def test_jinja_backend_registered_by_name(self):
+        assert ConfigBackend.get_class_by_name("jinja2") is Jinja2ConfigLoader
+
+    def test_jinja_backend_accepts_custom_environment(self, tmp_path):
+        from jinja2 import Environment
+
+        template = tmp_path / "config.yaml.j2"
+        template.write_text("value: {{ custom_value }}\n")
+        environment = Environment()
+        environment.globals["custom_value"] = "from-env"
+
+        loader = ConfigLoader(base_dir=tmp_path)
+        result = loader.load("config.yaml.j2", environment=environment)
+        assert result == {"value": "from-env"}
 
 
 class TestCommandBackend:
