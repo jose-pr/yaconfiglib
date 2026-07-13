@@ -17,11 +17,22 @@ from yaconfiglib.backends.command import CommandBackend
 class TestRegistryBackends:
     def test_dotenv_backend(self, tmp_path):
         f = tmp_path / "test.env"
-        f.write_text("DB_HOST=127.0.0.1\nexport DB_PORT=5432\n# Comment\nDB_PASS=\"secret\"\n")
+        f.write_text(
+            "DB_HOST=127.0.0.1 # local database\n"
+            "export DB_PORT=5432\n"
+            "# Comment\n"
+            "DB_PASS=\"secret # preserved\"\n"
+            "DB_TOKEN='abc#123'\n"
+        )
         
         loader = ConfigLoader(base_dir=tmp_path)
         result = loader.load("test.env", loader="dotenv")
-        assert result == {"db_host": "127.0.0.1", "db_port": "5432", "db_pass": "secret"}
+        assert result == {
+            "db_host": "127.0.0.1",
+            "db_port": "5432",
+            "db_pass": "secret # preserved",
+            "db_token": "abc#123",
+        }
 
     def test_env_var_backend(self, monkeypatch):
         monkeypatch.setenv("TESTPREFIX_VAL_ONE", "hello")
