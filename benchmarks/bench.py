@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import logging
+import os
 import statistics
 import sys
 import tempfile
@@ -16,6 +17,7 @@ sys.path.insert(0, str(StdlibPath(__file__).parent.parent / "src"))
 from jinja2 import Environment
 
 from yaconfiglib.loader import ConfigLoader, DotAccessibleDict
+from yaconfiglib.backends.env import EnvVarBackend
 from yaconfiglib.utils import jinja2
 from yaconfiglib.utils.merge import MergeMethod
 from yaconfiglib.utils.source import has_glob_pattern, parse_sources
@@ -235,12 +237,67 @@ def benchmark_dot_access() -> BenchmarkRows:
     ]
 
 
+def benchmark_env() -> BenchmarkRows:
+    rows: BenchmarkRows = []
+    original = os.environ.copy()
+    try:
+        for i in range(100):
+            os.environ[f"YACFG_FLAT_{i}"] = str(i)
+            os.environ[f"YACFG_NESTED_SERVICE__ITEM_{i}"] = str(i)
+        os.environ["YACFG_NESTED_FEATURES__CACHE"] = "true"
+        os.environ["YACFG_NESTED_LIMITS__RATE"] = "1.5"
+        os.environ["YACFG_NESTED_ITEMS"] = '["a", 2]'
+
+        flat_backend = EnvVarBackend(prefix="YACFG_FLAT_")
+        nested_backend = EnvVarBackend(
+            prefix="YACFG_NESTED_",
+            nested_delimiter="__",
+            coerce=True,
+        )
+        loader = ConfigLoader()
+
+        rows.append(
+            (
+                "flat env scan (200)",
+                _measure(
+                    lambda: [loader.load(loader=flat_backend) for _ in range(200)],
+                    repeat=5,
+                ),
+            )
+        )
+        rows.append(
+            (
+                "nested/coerced env scan (200)",
+                _measure(
+                    lambda: [loader.load(loader=nested_backend) for _ in range(200)],
+                    repeat=5,
+                ),
+            )
+        )
+        result = loader.load(loader=nested_backend)
+        rows.append(
+            (
+                "nested/coerced correctness",
+                {
+                    "cache": result["features"]["cache"],
+                    "rate": result["limits"]["rate"],
+                    "items": result["items"],
+                },
+            )
+        )
+    finally:
+        os.environ.clear()
+        os.environ.update(original)
+    return rows
+
+
 def collect_rows(command: str) -> list[tuple[str, BenchmarkRows]]:
     suites = {
         "sources": benchmark_sources,
         "merge": benchmark_merge,
         "jinja": benchmark_jinja,
         "dot": benchmark_dot_access,
+        "env": benchmark_env,
     }
     if command == "all":
         return [(name, benchmark()) for name, benchmark in suites.items()]
@@ -253,7 +310,7 @@ def cli(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["all", "sources", "merge", "jinja", "dot"],
+        choices=["all", "sources", "merge", "jinja", "dot", "env"],
         default="all",
         help="benchmark suite to run",
     )
