@@ -7,6 +7,7 @@ import pytest
 
 from yaconfiglib import ConfigLoader
 from yaconfiglib.loader import ConfigLoaderMergeMethod
+from yaconfiglib.utils.source import parse_sources
 
 EXAMPLES = pathlib.Path(__file__).parent.parent / "examples"
 
@@ -129,6 +130,33 @@ class TestExamples:
         assert isinstance(result, list)
         assert len(result) == 3
 
+    def test_parse_sources_glob_with_stdlib_base_dir(self, tmp_path):
+        for name in ("a.yaml", "b.yaml"):
+            (tmp_path / name).write_text(f"file: {name}\n")
+        paths = list(parse_sources(["*.yaml"], base_dir=tmp_path))
+        assert sorted(path.name for path in paths) == ["a.yaml", "b.yaml"]
+
+    def test_duplicate_path_source_loads_once(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("file: a.yaml\n")
+        loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.List)
+        result = loader.load("a.yaml", "a.yaml")
+        assert result == [{"file": "a.yaml"}]
+
+    def test_nested_source_iterables_are_flattened(self, tmp_path):
+        for name in ("a.yaml", "b.yaml", "c.yaml"):
+            (tmp_path / name).write_text(f"file: {name}\n")
+        loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.List)
+        result = loader.load(["a.yaml", "b.yaml"], "c.yaml")
+        assert [item["file"] for item in result] == ["a.yaml", "b.yaml", "c.yaml"]
+
+    def test_command_source_with_glob_metacharacters_is_not_globbed(self, tmp_path):
+        command = "cmd+json://python -c \"print({'items': [1, 2]})\""
+        paths = list(parse_sources([command], base_dir=tmp_path))
+        assert len(paths) == 1
+        assert "cmd+json:" in str(paths[0])
+        assert "[1, 2]" in str(paths[0])
+        assert str(tmp_path) not in str(paths[0])
+
 
 # ---------------------------------------------------------------------------
 # load_all
@@ -227,4 +255,3 @@ class TestTopLevelAPI:
         content = fp.getvalue()
         assert "a: 1" in content
         assert "b: 2" in content
-

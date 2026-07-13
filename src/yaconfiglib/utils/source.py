@@ -76,9 +76,6 @@ def parse_sources(
             continue
 
         elif isinstance(source, (str, Path, bytes)):
-            if source in memo:
-                logger.warning("ignoring duplicated file %s" % source)
-                continue
             if isinstance(source, (str, bytes)) and source.startswith(path_marker):
                 filename, source = source.split(newline, maxsplit=1)
                 logger.debug("loading config doc from memory ...")
@@ -127,10 +124,21 @@ def parse_sources(
                             base_dir,
                             source,
                         )
+            if not is_cmd:
+                memo_key = str(path)
+                if memo_key in memo:
+                    logger.warning("ignoring duplicated file %s" % path)
+                    continue
+                memo.append(memo_key)
             if not is_cmd and has_glob_pattern(path):
                 # stdlib glob pattern fallback uses glob.glob on string paths
                 if hasattr(path, "glob") and HAS_PATHLIB_NEXT:
-                    yield from path.glob("", recursive=recursive)
+                    try:
+                        yield from path.glob("", recursive=recursive)
+                    except TypeError:
+                        pattern = path.name
+                        parent_dir = path.parent
+                        yield from parent_dir.glob(pattern)
                 else:
                     # Fallback path traversal
                     # If it's a standard Path, glob is supported: path.glob(pattern)
@@ -147,6 +155,7 @@ def parse_sources(
                 base_dir=base_dir,
                 path_factory=path_factory,
                 encoding=encoding,
+                recursive=recursive,
             )
         else:
             raise ValueError(
