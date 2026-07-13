@@ -19,19 +19,21 @@ __all__ = ["Jinja2ConfigLoader"]
 
 class Jinja2ConfigLoader(ConfigBackend):
     PATHNAME_REGEX = re.compile(r".*\.((j2)|(jinja2))$", re.IGNORECASE)
+    NAME = "jinja2"
 
     def load(
         self,
         path: Path,
         encoding: str = None,
         loader: ConfigBackend = None,
-        envoriment: Environment = None,
+        environment: Environment = None,
         **kwargs,
     ) -> None:
         encoding = encoding or self.DEFAULT_ENCODING
+        environment = environment or kwargs.pop("envoriment", None)
         template = jinja2.load_template(
             path.read_text(encoding=encoding),
-            environment=envoriment or jinja2.DEFAULT_ENV,
+            environment=environment or jinja2.DEFAULT_ENV,
         )
         pathname = PosixPathname(path.as_posix())
         rendered = template.render(pathname=pathname)
@@ -40,12 +42,13 @@ class Jinja2ConfigLoader(ConfigBackend):
         )
         mempath.parent.mkdir(parents=True, exist_ok=True)
         mempath.write_text(rendered, encoding=encoding)
-        loader = loader or ConfigBackend.get_class_by_path(mempath)
+        parent_loader = loader
+        rendered_loader = ConfigBackend.get_class_by_path(mempath)()
 
-        rendered = loader.load(
+        rendered = rendered_loader.load(
             mempath,
             encoding=encoding,
-            loader=loader,
+            loader=parent_loader,
             **kwargs,
         )
         return rendered
