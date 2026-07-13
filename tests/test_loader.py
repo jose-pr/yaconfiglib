@@ -201,6 +201,16 @@ class TestDXFeatures:
         assert result.get("db.host") == "exact-value"
         assert result.get("db.host", dig=False) == "exact-value"
 
+    def test_dot_accessible_dict_dotted_get_wraps_nested_dicts(self):
+        from yaconfiglib.backends.python_backend import PythonBackend
+        from yaconfiglib.loader import DotAccessibleDict
+
+        loader = ConfigLoader()
+        result = loader.load(loader=PythonBackend({"db": {"credentials": {"user": "postgres"}}}))
+        assert result.get("db.credentials.user") == "postgres"
+        assert isinstance(result["db"], DotAccessibleDict)
+        assert isinstance(result["db"]["credentials"], DotAccessibleDict)
+
     def test_load_as_dataclass(self):
         from dataclasses import dataclass
         from yaconfiglib.backends.python_backend import PythonBackend
