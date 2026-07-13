@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optimized `DotAccessibleDict.get()` dotted traversal to avoid exception-converting attribute lookup on hot paths.
 
 ### Fixed
+- Fixed `.env` parsing so inline comments outside quoted values are stripped while hashes inside quotes are preserved.
 - Defined the missing `ConfigLoader.load_as` type variable so runtime type-hint introspection succeeds.
 - Fixed `Jinja2ConfigLoader` so `environment=` is honored, the backend is discoverable as `jinja2`, and rendered in-memory configs are parsed without rejoining the parent base directory.
 - Fixed `ConfigLoader.load()` so `merge_options` are passed to merge implementations, including `mergelists=True`.

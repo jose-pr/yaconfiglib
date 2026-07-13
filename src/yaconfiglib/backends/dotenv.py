@@ -20,8 +20,31 @@ _PAIR_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
 _QUOTED_RE = re.compile(r'^(["\'])(.*)\1$', re.DOTALL)
 
 
+def _strip_inline_comment(raw: str) -> str:
+    quote = None
+    escaped = False
+    for idx, char in enumerate(raw):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if quote:
+            if char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            continue
+        if char == "#":
+            return raw[:idx].rstrip()
+    return raw
+
+
 def _parse_value(raw: str) -> str:
     """Strip optional surrounding quotes from a dotenv value."""
+    raw = _strip_inline_comment(raw)
     m = _QUOTED_RE.match(raw)
     if m:
         return m.group(2)
