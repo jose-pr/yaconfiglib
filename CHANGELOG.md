@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optimized `DotAccessibleDict.get()` dotted traversal to avoid exception-converting attribute lookup on hot paths.
 
 ### Fixed
+- Fixed `ConfigLoader.load()` so `merge_options` are passed to merge implementations, including `mergelists=True`.
+- Added an explicit `TypeError` for `flatten=True` on scalar merged results instead of leaving an unbound local failure path.
 - Fixed duplicate path tracking, nested iterable option propagation, and stdlib `base_dir` glob fallback behavior in `parse_sources()`.
 
 ## [0.9.5] - 2026-07-13
