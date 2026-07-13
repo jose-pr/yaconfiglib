@@ -21,6 +21,7 @@ Zero required runtime dependencies (except standard pathlib, with optional packa
 - **Shell & Command Execution**: Execute arbitrary commands or shell scripts dynamically (e.g. `cmd://aws...` or `./generate.sh`) and auto-parse their outputs, with support for shebang-based format routing (e.g. `#!json` header).
 - **YAML Includes**: Out-of-the-box support for `!include` and `!load` YAML constructors to seamlessly and recursively import child configurations or commands.
 - **Advanced Templating**: Interleave configurations with Jinja2. Generate configuration blocks dynamically, auto-inject `os.environ` via `env.VAR_NAME`, or reference previously declared values using Jinja's `{% do %}` statements.
+- **Environment Overlays**: Load prefixed environment variables as flat or nested configuration, with optional scalar coercion for booleans, numbers, nulls, arrays, and objects.
 - **Path Agnostic**: Compatible with both standard `pathlib.Path` and optionally [pathlib_next](https://github.com/jose-pr/pathlib_next) for URI loading (HTTP, SFTP, etc.) exactly like standard file paths.
 
 ---
@@ -81,6 +82,18 @@ database: !include "db_settings.toml"
 
 # Dynamically execute commands to retrieve parameters (e.g. secrets)
 secrets: !include 'cmd+json://python -c "import json; print(json.dumps({\"token\": \"super-secret\"}))"'
+```
+
+### 4. Environment Variable Overlays
+
+```python
+from yaconfiglib import ConfigLoader
+from yaconfiglib.backends.env import EnvVarBackend
+
+# APP_DB__PORT=5432 -> {"db": {"port": 5432}}
+config = ConfigLoader().load(
+    loader=EnvVarBackend(prefix="APP_", nested_delimiter="__", coerce=True)
+)
 ```
 
 ---

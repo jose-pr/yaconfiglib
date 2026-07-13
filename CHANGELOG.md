@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added optional nested environment variable loading and scalar coercion to `EnvVarBackend` via `nested_delimiter` and `coerce`.
+- Expanded benchmarks with focused suites for source parsing, merge behavior, Jinja/load interpolation, dot-access lookup, and env backend loading.
+
+### Changed
+- Optimized `DotAccessibleDict.get()` dotted traversal to avoid exception-converting attribute lookup on hot paths.
+
+### Fixed
+- Fixed duplicate path tracking, nested iterable option propagation, and stdlib `base_dir` glob fallback behavior in `parse_sources()`.
+
 ## [0.9.5] - 2026-07-13
 
 ### Changed
