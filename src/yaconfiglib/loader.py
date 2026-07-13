@@ -282,12 +282,17 @@ class ConfigLoader(ConfigBackend):
                 )
                 if _join_init:
                     results = merge(
-                        results, result, configloaderkey=name
+                        results,
+                        result,
+                        configloaderkey=name,
+                        **self.merge_options,
                     )
                 else:
                     try:
                         results = merge.init(
-                            initial=result, configloaderkey=name
+                            initial=result,
+                            configloaderkey=name,
+                            **self.merge_options,
                         )
                     except AttributeError:
                         results = result
@@ -306,6 +311,10 @@ class ConfigLoader(ConfigBackend):
                 }
             elif is_array(results):
                 result = [r for result in results for r in result]
+            else:
+                raise TypeError(
+                    "flatten=True requires merged results to be a mapping or sequence"
+                )
         else:
             result = results
 
