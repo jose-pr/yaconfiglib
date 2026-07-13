@@ -70,6 +70,17 @@ class TestMergeMethods:
         result = loader.load("a.yaml", "b.yaml")
         assert result == {"db": {"host": "localhost", "port": 5433, "name": "mydb"}}
 
+    def test_deep_merge_options_reach_loader_merge(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("items:\n  - name: api\n    enabled: false\n")
+        (tmp_path / "b.yaml").write_text("items:\n  - name: api\n    enabled: true\n")
+        loader = ConfigLoader(
+            base_dir=tmp_path,
+            merge=ConfigLoaderMergeMethod.Deep,
+            merge_options={"mergelists": True},
+        )
+        result = loader.load("a.yaml", "b.yaml")
+        assert result == {"items": [{"name": "api", "enabled": True}]}
+
     def test_substitute_merge(self, tmp_path):
         (tmp_path / "a.yaml").write_text("list: [1, 2, 3]\n")
         (tmp_path / "b.yaml").write_text("list: [4, 5]\n")
@@ -92,6 +103,13 @@ class TestMergeMethods:
         result = loader.load("a.yaml", "b.yaml")
         assert isinstance(result, list)
         assert len(result) == 2
+
+    def test_flatten_scalar_result_raises_clear_error(self):
+        from yaconfiglib.backends.python_backend import PythonBackend
+
+        loader = ConfigLoader()
+        with pytest.raises(TypeError, match="flatten=True"):
+            loader.load(loader=PythonBackend("scalar"), flatten=True)
 
 
 # ---------------------------------------------------------------------------

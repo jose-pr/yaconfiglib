@@ -16,7 +16,7 @@ sys.path.insert(0, str(StdlibPath(__file__).parent.parent / "src"))
 
 from jinja2 import Environment
 
-from yaconfiglib.loader import ConfigLoader, DotAccessibleDict
+from yaconfiglib.loader import ConfigLoader, ConfigLoaderMergeMethod, DotAccessibleDict
 from yaconfiglib.backends.env import EnvVarBackend
 from yaconfiglib.utils import jinja2
 from yaconfiglib.utils.merge import MergeMethod
@@ -163,9 +163,24 @@ def benchmark_merge() -> BenchmarkRows:
         {"items": [{"name": "a", "enabled": True}]},
         mergelists=True,
     )
+
+    loader = ConfigLoader(
+        merge=ConfigLoaderMergeMethod.Deep,
+        merge_options={"mergelists": True},
+    )
+    docs = (
+        "#!.yaml\nitems:\n  - name: api\n    enabled: false\n",
+        "#!.yaml\nitems:\n  - name: api\n    enabled: true\n",
+    )
+
+    def load_merge_options_many() -> None:
+        for _ in range(200):
+            loader.load(*docs)
+
     return [
         ("deep merge, append list dicts (1k)", _measure(lambda: deep_merge_many(False), repeat=5)),
         ("deep merge, positional list dicts (1k)", _measure(lambda: deep_merge_many(True), repeat=5)),
+        ("loader deep merge_options mergelists (200)", _measure(load_merge_options_many, repeat=5)),
         ("positional merge correctness", result),
     ]
 
