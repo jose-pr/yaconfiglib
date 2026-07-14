@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-07-14
+
 ### Added
 - Added optional nested environment variable loading and scalar coercion to `EnvVarBackend` via `nested_delimiter` and `coerce`.
 - Expanded benchmarks with focused suites for source parsing, merge behavior, Jinja/load interpolation, dot-access lookup, and env backend loading.
@@ -15,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optimized `DotAccessibleDict.get()` dotted traversal to avoid exception-converting attribute lookup on hot paths.
 
 ### Fixed
-- Fixed `.env` parsing so inline comments outside quoted values are stripped while hashes inside quotes are preserved.
+- Fixed `.env` parsing so whitespace-delimited inline comments are stripped while hashes inside quoted or unquoted values are preserved.
 - Defined the missing `ConfigLoader.load_as` type variable so runtime type-hint introspection succeeds.
 - Fixed `Jinja2ConfigLoader` so `environment=` is honored, the backend is discoverable as `jinja2`, and rendered in-memory configs are parsed without rejoining the parent base directory.
 - Fixed `ConfigLoader.load()` so `merge_options` are passed to merge implementations, including `mergelists=True`.
@@ -79,7 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Legacy references and code blocks tied to `hiyapyco`.
 
-[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.6...HEAD
+[0.9.6]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.5
 [0.9.4]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.4
 [0.9.3]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.3
