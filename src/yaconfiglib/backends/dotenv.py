@@ -74,6 +74,20 @@ class DotenvBackend(ConfigBackend):
         lowercase: bool | None = None,
         **_options,
     ) -> dict[str, str]:
+        """Parse *path* as a ``.env`` file into a flat ``{key: value}`` dict.
+
+        Args:
+            path: File to parse, either a ``Path`` or a string (converted
+                via *path_factory*).
+            encoding: Text encoding, defaults to :attr:`DEFAULT_ENCODING`.
+            path_factory: Path constructor used when *path* is a string.
+            lowercase: Overrides the instance's *lowercase* for this call.
+
+        Returns:
+            A flat mapping of variable name to string value. Values are
+            not coerced to other types — quoting is stripped but the
+            result stays all-string, matching dotenv conventions.
+        """
         encoding = encoding or self.DEFAULT_ENCODING
         lowercase = self.lowercase if lowercase is None else lowercase
         if path_factory and not isinstance(path, _Path):

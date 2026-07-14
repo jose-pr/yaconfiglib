@@ -12,6 +12,14 @@ __all__ = ["IniConfig"]
 
 
 class IniConfig(ConfigBackend):
+    """Backend for ``*.ini`` files, parsed via the standard library's :class:`configparser.ConfigParser`.
+
+    Returns a ``{section_name: {key: value}}`` mapping. All values are
+    strings, matching :mod:`configparser` semantics — use interpolation
+    (:func:`yaconfiglib.utils.jinja2.interpolate`) or manual coercion if
+    typed values are needed.
+    """
+
     PATHNAME_REGEX = re.compile(r".*\.ini$", re.IGNORECASE)
     DEFAULT_SECTION = "DEFAULT"
 
@@ -19,8 +27,17 @@ class IniConfig(ConfigBackend):
         self,
         path: Path,
         encoding: str = None,
-        **options,
+        **options: object,
     ) -> object:
+        """Parse *path* as INI and return a ``{section: {key: value}}`` dict.
+
+        Args:
+            path: File to parse.
+            encoding: Text encoding, defaults to :attr:`DEFAULT_ENCODING`.
+            **options: Accepts ``ini_default_section`` — the section name
+                used for :class:`~configparser.ConfigParser`'s
+                ``default_section``, defaults to :attr:`DEFAULT_SECTION`.
+        """
         encoding = encoding or self.DEFAULT_ENCODING
 
         parser_args = dict(
