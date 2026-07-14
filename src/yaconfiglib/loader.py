@@ -41,6 +41,19 @@ def _get_jinja_env(strict: bool) -> object:
 
 
 class _ConfigLoaderMergeMethod(IntEnum):
+    """Loader-specific merge strategies layered on top of :class:`~yaconfiglib.utils.merge.MergeMethod`.
+
+    * **Last** — each new source simply replaces the running result.
+    * **List** — sources are collected into a list, one entry per source,
+      in load order.
+    * **Hash** — sources are collected into a dict keyed by each source's
+      merge key (see ``key_factory``).
+
+    Exposed to callers as :class:`ConfigLoaderMergeMethod`, which extends
+    :class:`~yaconfiglib.utils.merge.MergeMethod` with these three values
+    in addition to ``Simple``/``Deep``/``Substitute``.
+    """
+
     Last = 4
     List = 5
     Hash = 6
@@ -113,6 +126,24 @@ class _IgnoreError(typing.Protocol):
 
 
 class ConfigLoader(ConfigBackend):
+    """Orchestrates loading, merging, and interpolating configuration sources.
+
+    A ``ConfigLoader`` is the main entrypoint for hiera-like configuration
+    loading: given one or more sources (file paths, glob patterns, command
+    URIs, in-memory strings, or nested lists thereof), it resolves each
+    source to the appropriate :class:`~yaconfiglib.backends.base.ConfigBackend`,
+    parses it, and merges the results together in order using a configurable
+    :class:`ConfigLoaderMergeMethod`/:class:`~yaconfiglib.utils.merge.Merge`
+    strategy. Optionally, the merged result is interpolated with Jinja2
+    (see :attr:`interpolate`) and wrapped in a :class:`DotAccessibleDict`
+    for ``config.some.nested.key`` style access.
+
+    Most users can use the module-level :func:`load`/:func:`loads` helpers,
+    which construct a ``ConfigLoader`` for a single call. Construct a
+    ``ConfigLoader`` instance directly when you need to reuse the same
+    settings (base directory, merge strategy, interpolation options) across
+    multiple loads.
+    """
 
     def __init__(
         self,
@@ -131,6 +162,41 @@ class ConfigLoader(ConfigBackend):
         inject_env: bool = False,
         strict: bool = False,
     ) -> None:
+        """Configure a reusable loader.
+
+        Args:
+            base_dir: Directory relative-path sources are resolved
+                against. Accepts a string or ``Path``.
+            encoding: Default text encoding for reading sources.
+            path_factory: Callable used to build a ``Path`` from a bare
+                string source. Defaults to :attr:`DEFAULT_PATH_FACTORY`.
+            loader_factory: Callable ``(path) -> ConfigBackend instance``
+                used to select a backend per source. Defaults to
+                :meth:`~yaconfiglib.backends.base.ConfigBackend.get_class_by_path`-based
+                dispatch.
+            recursive: Whether glob sources should recurse into
+                subdirectories by default.
+            key_factory: Callable ``(path, value) -> str`` producing the
+                merge key used to track/name each loaded document (e.g.
+                for :attr:`ConfigLoaderMergeMethod.Hash`). Defaults to the
+                source's filename stem. May also be set per-call as a
+                string attribute name or a ``"%<jinja-expr>"`` template.
+            log_level: Logging verbosity for this loader's module logger.
+            interpolate: If True, run Jinja2 interpolation over the merged
+                result after loading (see :func:`yaconfiglib.utils.jinja2.interpolate`).
+            merge: The merge strategy applied between successive sources —
+                a :class:`ConfigLoaderMergeMethod` or any
+                :class:`~yaconfiglib.utils.merge.Merge`-compatible callable.
+            merge_options: Extra keyword options forwarded to the merge
+                callable on every call (e.g. ``{"mergelists": True}``).
+            ignore_error: Either a bool (ignore/re-raise all load errors
+                uniformly) or a predicate ``(error, **context) -> bool``
+                deciding per-error whether to skip and continue.
+            inject_env: If True and *interpolate* is set, expose
+                ``os.environ`` to templates as the ``env`` global.
+            strict: If True, undefined Jinja2 variables raise during
+                interpolation instead of rendering as empty.
+        """
         self.merge = (
             merge if isinstance(merge, Merge) else ConfigLoaderMergeMethod(merge)
         )
@@ -245,8 +311,52 @@ class ConfigLoader(ConfigBackend):
         interpolate: bool = None,
         merge: ConfigLoaderMergeMethod | Merge = None,
         merge_options: dict[str] = None,
-        **reader_args,
-    ):
+        **reader_args: object,
+    ) -> object:
+        """Load, merge, and (optionally) interpolate one or more configuration sources.
+
+        Each item in *pathname* is resolved via
+        :func:`~yaconfiglib.utils.source.parse_sources` (expanding globs,
+        nested lists, in-memory ``#!``-marked strings, streams, and command
+        URIs), parsed with the backend selected for it, and merged into the
+        running result in order using *merge*.
+
+        Args:
+            *pathname: One or more sources — file paths, glob patterns,
+                command URIs (``cmd://...``), in-memory content, open
+                streams, or nested iterables of any of these. If omitted
+                entirely, loads a single empty in-memory document.
+            recursive: Overrides the instance's *recursive* for glob
+                expansion during this call.
+            encoding: Overrides the instance's *encoding* for this call.
+            loader: Backend name, backend instance, or callable selecting
+                the backend for every source loaded in this call,
+                overriding per-source auto-detection.
+            transform: A Jinja2 expression string evaluated against each
+                loaded document (as ``value``) before merging, letting you
+                reshape a document inline.
+            default: Initial value merged against, used when *pathname*
+                yields no sources.
+            key_factory: Overrides the instance's *key_factory* for this
+                call.
+            flatten: If True, the final merged result (expected to be a
+                mapping-of-mappings or sequence-of-sequences) is flattened
+                one level — useful when each source contributes items to a
+                shared top-level collection instead of being keyed by
+                itself.
+            interpolate: Overrides the instance's *interpolate* for this
+                call.
+            merge: Overrides the instance's *merge* strategy for this call.
+            merge_options: Overrides the instance's *merge_options* for
+                this call.
+            **reader_args: Additional keyword arguments forwarded to each
+                backend's ``load()`` (e.g. backend-specific options like
+                ``json_decoder_options`` or ``ini_default_section``).
+
+        Returns:
+            The merged (and possibly interpolated) result. Dict results
+            are wrapped in :class:`DotAccessibleDict`.
+        """
         encoding = encoding or self.encoding
         interpolate = self.interpolate if interpolate is None else interpolate
         merge = (
@@ -386,8 +496,28 @@ class ConfigLoader(ConfigBackend):
         *pathname: Path | typing.Sequence[Path],
         encoding: str = None,
         interpolate: bool = None,
-        **reader_args,
-    ):
+        **reader_args: object,
+    ) -> typing.Iterator[object]:
+        """Yield each source's parsed (and optionally interpolated) document individually, without merging.
+
+        Unlike :meth:`load`, which merges every source into a single
+        result, this generator yields one value per resolved source —
+        useful when sources represent independent documents rather than
+        layers of the same configuration (e.g. iterating a directory of
+        unrelated config files).
+
+        Args:
+            *pathname: Sources to resolve, same semantics as :meth:`load`.
+            encoding: Overrides the instance's *encoding* for this call.
+            interpolate: Overrides the instance's *interpolate* for this
+                call; applied independently to each yielded document.
+            **reader_args: Additional keyword arguments forwarded to each
+                backend's ``load()``.
+
+        Yields:
+            Each source's parsed document, with dict results wrapped in
+            :class:`DotAccessibleDict`.
+        """
         interpolate = self.interpolate if interpolate is None else interpolate
         encoding = encoding or self.encoding
         custom_env = _get_jinja_env(self.strict) if interpolate else None

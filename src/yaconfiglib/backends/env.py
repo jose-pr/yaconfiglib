@@ -91,6 +91,27 @@ class EnvVarBackend(ConfigBackend):
         coerce: bool | None = None,
         **_options,
     ) -> dict[str, object]:
+        """Snapshot ``os.environ`` (optionally filtered/coerced) into a dict.
+
+        Args:
+            path: Ignored — present only so this backend satisfies the
+                :meth:`~yaconfiglib.backends.base.ConfigBackend.load`
+                signature when invoked generically.
+            prefix: Overrides the instance's *prefix* for this call.
+            lowercase: Overrides the instance's *lowercase* for this call.
+            nested_delimiter: Overrides the instance's *nested_delimiter*.
+                When set, keys containing the delimiter (after prefix
+                stripping) are split into nested dicts, e.g. with
+                delimiter ``"__"``, ``DB__PORT=5432`` becomes
+                ``{"db": {"port": 5432}}``.
+            coerce: Overrides the instance's *coerce*. When True, string
+                values are converted to ``None``/``bool``/``int``/
+                ``float``/parsed JSON (for values starting with ``[`` or
+                ``{``) where they match, otherwise left as strings.
+
+        Returns:
+            A flat or nested dict depending on *nested_delimiter*.
+        """
         prefix = self.prefix if prefix is None else prefix
         lowercase = self.lowercase if lowercase is None else lowercase
         nested_delimiter = (

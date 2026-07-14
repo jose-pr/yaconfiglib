@@ -20,6 +20,15 @@ _INCLUDE_TAGS = ("!include", "!load")
 
 
 class YamlConfig(ConfigBackend):
+    """Backend for ``*.yaml``/``*.yml`` files.
+
+    Automatically registers ``!include`` and ``!load`` tag constructors on
+    the active PyYAML loader class so nested configuration files can be
+    pulled in directly from YAML, e.g. ``database: !include "db.toml"``.
+    Registration happens once per loader class and only when a parent
+    :class:`~yaconfiglib.loader.ConfigLoader` is supplied via ``loader=``.
+    """
+
     PATHNAME_REGEX = re.compile(r".*\.((yaml)|(yml))$", re.IGNORECASE)
     DEFAULT_LOADER_CLS = yaml.SafeLoader
     DEFAULT_DUMPER_CLS = yaml.Dumper
@@ -31,9 +40,29 @@ class YamlConfig(ConfigBackend):
         master: yaml.Loader = None,
         loader_cls: type[yaml.Loader] = None,
         path_factory: type[Path] = None,
-        loader=None,
+        loader: ConfigBackend = None,
         **options,
     ) -> object:
+        """Parse *path* as YAML and return the resulting object.
+
+        Args:
+            path: File to parse, either a ``Path`` or a string (converted
+                via *path_factory*).
+            encoding: Text encoding, defaults to :attr:`DEFAULT_ENCODING`.
+            master: An in-progress PyYAML loader instance to inherit
+                anchors/aliases from — used when this call originates from
+                a ``!include``/``!load`` tag within another YAML document.
+            loader_cls: PyYAML loader class to use. Defaults to *master*'s
+                class if given, else :attr:`DEFAULT_LOADER_CLS`.
+            path_factory: Path constructor used when *path* is a string.
+            loader: The parent :class:`~yaconfiglib.loader.ConfigLoader`.
+                When supplied, ``!include``/``!load`` tags are registered
+                on *loader_cls* so nested includes resolve through it.
+
+        Returns:
+            The parsed YAML document (typically a ``dict``, ``list``, or
+            scalar).
+        """
         encoding = encoding or self.DEFAULT_ENCODING
 
         if path_factory is None:
@@ -94,5 +123,6 @@ class YamlConfig(ConfigBackend):
         loader_cls._yaconfiglib_include_registered = True  # type: ignore[attr-defined]
 
     def dumps(self, data: str, dumper_cls: yaml.Dumper = None, **options) -> str:
+        """Serialize *data* to a YAML string using *dumper_cls* (defaults to :attr:`DEFAULT_DUMPER_CLS`)."""
         options.setdefault("Dumper", dumper_cls or self.DEFAULT_DUMPER_CLS)
         return yaml.dump(data, **options)

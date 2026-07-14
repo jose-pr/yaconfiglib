@@ -17,7 +17,25 @@ __all__ = ["CommandBackend"]
 
 
 class CommandBackend(ConfigBackend):
-    """Executes a script/command and parses stdout into a configuration object."""
+    """Executes a script/command and parses stdout into a configuration object.
+
+    Sources are recognized either by a URI scheme prefix (``exec://``,
+    ``cmd://``, ``sh://``, or a format-tagged variant like ``cmd+json://``)
+    or by a ``.sh``/``.bat``/``.ps1``/``.cmd`` file extension. The command
+    is run through the shell and its stdout is parsed as configuration
+    data — this makes it easy to source secrets or dynamic values from
+    external tools, e.g. ``cmd+json://aws secretsmanager get-secret-value ...``.
+
+    Output format resolution, in priority order:
+
+    1. An explicit ``format=`` argument.
+    2. The ``+fmt`` suffix on the scheme (e.g. ``cmd+yaml://...``).
+    3. A ``#!fmt`` shebang line at the start of the command's stdout.
+    4. Sniffing: try json, yaml, toml, dotenv, ini in turn.
+
+    If parsing fails and no format was requested, the raw stdout string is
+    returned as a fallback rather than raising.
+    """
 
     PATHNAME_REGEX = re.compile(
         r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:).*|.*?\.(sh|bat|ps1|cmd)$",
@@ -27,6 +45,7 @@ class CommandBackend(ConfigBackend):
 
     @classmethod
     def can_load_path(cls, path: Path) -> bool:
+        """Return True if *path* matches a command scheme prefix or script extension."""
         path_str = str(path)
         return (
             cls.PATHNAME_REGEX.match(path_str) is not None or
@@ -41,6 +60,30 @@ class CommandBackend(ConfigBackend):
         path_factory: typing.Callable[[str], Path] = None,
         **options,
     ) -> object:
+        """Run the command encoded in *path* and parse its stdout.
+
+        Args:
+            path: A scheme-prefixed command string (e.g.
+                ``"cmd+json://echo {}"``), a bare shell command, or a
+                script file path.
+            encoding: Unused directly (subprocess output is captured as
+                text); accepted for interface consistency with other
+                backends.
+            format: Explicit output format, or a comma-separated/list of
+                candidate formats to try in order. Overrides shebang
+                detection and sniffing.
+            path_factory: Unused; accepted for interface consistency.
+
+        Returns:
+            The parsed stdout, or the raw stripped stdout string if no
+            format could be determined and sniffing failed.
+
+        Raises:
+            subprocess.CalledProcessError: If the command exits non-zero.
+            ValueError: If an explicit *format*/shebang format is
+                requested but the output cannot be parsed as that format,
+                or output is empty while a format was requested.
+        """
         path_str = str(path)
         explicit_format = format
 

@@ -37,6 +37,13 @@ class PythonBackend(ConfigBackend):
         path: _Path | str | object = None,
         **_options,
     ) -> object:
+        """Return the wrapped object, ignoring any file I/O.
+
+        If constructed with ``data=...``, that object is always returned.
+        Otherwise *path* itself is returned as-is, letting this backend
+        double as a passthrough for already-parsed data injected into a
+        loader chain.
+        """
         # If called as a YAML tag constructor path will be a string/Path;
         # otherwise callers pass the data object directly via __init__.
         if self._data is not None:
