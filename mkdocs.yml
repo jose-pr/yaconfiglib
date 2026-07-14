@@ -25,7 +25,17 @@ theme:
 
 nav:
   - Home: index.md
-  - API Reference: api/reference.md
+  - Guide:
+      - Backends: guide/backends.md
+      - Merging: guide/merging.md
+      - Templating: guide/templating.md
+      - Includes: guide/includes.md
+      - Model hydration: guide/models.md
+  - API Reference:
+      - Overview: api/reference.md
+      - Loader: api/loader.md
+      - Backends: api/backends.md
+      - Utilities: api/utils.md
   - Changelog: changelog.md
 
 plugins:
