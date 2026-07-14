@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-07-14
+
+### Documentation
+- Added docstrings across `ConfigBackend` and every built-in backend (YAML, TOML, JSON, INI, dotenv, env, command, python, jinja2), and filled in `ConfigLoader`'s constructor, `load`, `load_all`, and `parse_sources`.
+- Rebuilt the docs site: `docs/index.md` is now a full landing page instead of a README redirect stub; added task-oriented guide pages (`backends`, `merging`, `templating`, `includes`, `models`) under `docs/guide/`; split the flat API reference into per-module pages (`api/loader.md`, `api/backends.md`, `api/utils.md`).
+
 ## [0.9.6] - 2026-07-14
 
 ### Added
