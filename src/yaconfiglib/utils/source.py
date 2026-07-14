@@ -1,3 +1,11 @@
+"""Source discovery and normalization for :class:`~yaconfiglib.loader.ConfigLoader`.
+
+Turns the heterogeneous inputs a caller can pass to ``load()`` — file
+paths, glob patterns, command URIs, open streams, in-memory ``#!``-marked
+strings, and arbitrarily nested iterables of these — into a flat stream of
+concrete :class:`~pathlib.Path`-like objects ready for a backend to read.
+"""
+
 from __future__ import annotations
 
 import io as _io
@@ -40,6 +48,44 @@ def parse_sources(
     path_factory: type[Path] = None,
     recursive: bool = None,
 ) -> _ty.Iterator[Path]:
+    """Resolve *sources* into a flat stream of loadable :class:`Path`-like objects.
+
+    Each item in *sources* may be:
+
+    * A file path (string or ``Path``) — resolved against *base_dir* if
+      relative and not a command URI, and glob-expanded if it contains
+      glob magic characters.
+    * A command URI (``exec://``, ``cmd://``, ``sh://``, or a ``+fmt``
+      variant) — passed through unresolved and unexpanded so
+      :class:`~yaconfiglib.backends.command.CommandBackend` can run it.
+    * An in-memory document: a string/bytes value starting with the
+      ``"#!\\n"`` marker, where the first line (after the marker) is
+      treated as a virtual filename and the remainder as its content. The
+      content is materialized to a ``MemPath`` (or a real temp file as a
+      fallback) so downstream backends can read it like any other file.
+    * An open stream (:class:`io.IOBase`) — read fully and materialized
+      the same way as an in-memory document.
+    * A nested iterable of any of the above — flattened recursively.
+
+    Args:
+        sources: The sources to resolve, as passed to ``ConfigLoader.load()``.
+        base_dir: Directory relative file paths are joined against.
+        encoding: Text encoding used when decoding bytes markers/content.
+        memo: Optional list of already-seen path strings, used to detect
+            and skip duplicate sources across recursive calls; extended
+            in place.
+        path_factory: Constructor used to build a ``Path`` from a bare
+            string source.
+        recursive: Whether glob expansion should recurse into
+            subdirectories.
+
+    Yields:
+        Resolved :class:`Path`-like objects, one per concrete source
+        (glob patterns may yield zero or many).
+
+    Raises:
+        ValueError: If an item in *sources* is not a recognized source type.
+    """
     path_factory = path_factory or Path
     recursive = False if recursive is None else bool(recursive)
     if memo is None:
