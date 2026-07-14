@@ -37,7 +37,7 @@ def _strip_inline_comment(raw: str) -> str:
         if char in {"'", '"'}:
             quote = char
             continue
-        if char == "#":
+        if char == "#" and (idx == 0 or raw[idx - 1].isspace()):
             return raw[:idx].rstrip()
     return raw
 
