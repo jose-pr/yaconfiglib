@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import typing
 
@@ -11,6 +12,8 @@ except ImportError:
     Pathname = Path
 
 from yaconfiglib.backends.base import ConfigBackend
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["YamlConfig"]
 
@@ -100,6 +103,30 @@ class YamlConfig(ConfigBackend):
         """
         if getattr(loader_cls, "_yaconfiglib_include_registered", False):
             return
+
+        # A consumer may have manually registered an !include/!load constructor
+        # (e.g. ``yaml.add_constructor("!include", ...)``). yaconfiglib's own
+        # registration is authoritative and replaces it; warn so the override is
+        # visible -- manual registration is unnecessary, since this runs
+        # automatically on the first load through a ConfigLoader.
+        # Inspect the class's OWN constructors (``__dict__``), not inherited
+        # ones: a tag inherited from a parent is either PyYAML's default or
+        # yaconfiglib's own earlier registration, neither of which is a foreign
+        # override worth warning about. ``add_constructor`` always populates
+        # ``cls.__dict__["yaml_constructors"]``, so a manual registration on
+        # exactly this class (the pixy pattern) is caught here.
+        own_constructors = loader_cls.__dict__.get("yaml_constructors", {})
+        preexisting = [tag for tag in _INCLUDE_TAGS if tag in own_constructors]
+        if preexisting:
+            logger.warning(
+                "overriding pre-existing YAML constructor(s) %s on %s with "
+                "yaconfiglib's include handler; a manual "
+                "yaml.add_constructor(%r, ...) is unnecessary (yaconfiglib "
+                "registers !include/!load automatically on first load)",
+                ", ".join(preexisting),
+                loader_cls.__name__,
+                _INCLUDE_TAGS[0],
+            )
 
         def _construct(ldr: yaml.Loader, node: yaml.Node) -> object:
             args = ()
