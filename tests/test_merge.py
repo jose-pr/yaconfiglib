@@ -1,9 +1,26 @@
 """
 Tests for MergeMethod (simple, substitute, deep) and typed_merge.
 """
+from argparse import Namespace
+
 import pytest
 
 from yaconfiglib.utils.merge import MergeMethod, is_array, is_scalar, typed_merge
+
+
+def _ip_factory(v):
+    """An ipaddress-style factory FUNCTION (not a class), used as a field hint.
+
+    Mirrors netutils.IPNetwork/IPAddress: callable, coerces a raw value, but is
+    not a class so it cannot be an argument to issubclass()/isinstance().
+    """
+    return f"net:{v}"
+
+
+class _NetConfig(Namespace):
+    # A field annotated by a factory function rather than a class — this is the
+    # real-world shape that used to crash typed_merge (issubclass() arg 1).
+    network: _ip_factory
 
 
 # ---------------------------------------------------------------------------
@@ -178,3 +195,36 @@ class TestTypedMerge:
     def test_dict_merge(self):
         result = typed_merge(dict, {"a": 1}, {"b": 2})
         assert result == {"a": 1, "b": 2}
+
+
+# ---------------------------------------------------------------------------
+# typed_merge — non-class type hints (factory functions, opaque objects)
+# ---------------------------------------------------------------------------
+
+class TestTypedMergeNonClassHint:
+    def test_factory_function_hint_coerces_last_value(self):
+        # A non-class callable origin: last value wins, coerced through it.
+        assert typed_merge(_ip_factory, "10.0.0.0/8", "192.168.0.0/16") == (
+            "net:192.168.0.0/16"
+        )
+
+    def test_factory_rejecting_value_falls_back_to_raw(self):
+        def strict(v):
+            if not isinstance(v, str):
+                raise TypeError("need a str")
+            return v.upper()
+
+        # The factory rejects an int → merge stays total, returning the raw
+        # last value rather than raising.
+        assert typed_merge(strict, 1, 2) == 2
+
+    def test_non_class_non_callable_hint_last_wins(self):
+        sentinel = object()  # neither a class nor callable
+        assert typed_merge(sentinel, 1, 2) == 2
+
+    def test_factory_field_hint_on_namespace_does_not_crash(self):
+        # The regression: a Namespace field annotated by a factory function.
+        a = _NetConfig(network="10.0.0.0/8")
+        b = _NetConfig(network="192.168.0.0/16")
+        merged = typed_merge(_NetConfig, a, b)
+        assert merged.network == "net:192.168.0.0/16"
