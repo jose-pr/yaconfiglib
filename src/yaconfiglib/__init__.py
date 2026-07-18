@@ -9,12 +9,16 @@ from .loader import (
     dump as dump,
     dumps as dumps,
 )
-from .utils.merge import MergeMethod as MergeMethod
+from .utils.merge import (
+    MergeMethod as MergeMethod,
+    typed_merge as typed_merge,
+)
 
 __all__ = [
     "ConfigLoader",
     "ConfigLoaderMergeMethod",
     "MergeMethod",
+    "typed_merge",
     "ConfigBackend",
     "load",
     "loads",
