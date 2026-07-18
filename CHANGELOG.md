@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   construction. The `__merge__` and `_parse_<field>` extension hooks are now
   documented in the merging guide.
 
+### Changed
+- YAML `!include`/`!load` auto-registration now logs a `WARNING` when it
+  overrides a constructor already registered on the loader class, so a
+  redundant manual `yaml.add_constructor("!include", ...)` is visible rather
+  than silently replaced.
+
 ## [0.9.8] - 2026-07-18
 
 ### Added

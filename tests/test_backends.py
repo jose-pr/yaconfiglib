@@ -188,3 +188,46 @@ class TestCommandBackend:
         with pytest.raises(ValueError) as exc_info:
             loader.load(cmd)
         assert "Unknown configuration format/loader" in str(exc_info.value)
+
+
+class TestYamlIncludeRegistration:
+    def test_manual_include_registration_warns(self, caplog):
+        """A pre-existing !include constructor is overridden with a warning.
+
+        yaconfiglib registers !include/!load automatically on first load, so a
+        manual ``yaml.add_constructor`` is unnecessary and gets replaced. The
+        override must be visible (a WARNING) rather than silent.
+        """
+        import logging
+
+        import yaml
+
+        from yaconfiglib.backends.yaml import YamlConfig
+
+        class _Fresh(yaml.SafeLoader):  # fresh class: not yet auto-registered
+            # The flag is inherited via MRO from SafeLoader once any earlier load
+            # registered there; shadow it so this class runs the registration path.
+            _yaconfiglib_include_registered = False
+
+        _Fresh.add_constructor("!include", lambda ldr, node: None)  # manual, foreign
+
+        with caplog.at_level(logging.WARNING):
+            YamlConfig._register_include_tags(_Fresh, loader=None, path_factory=None)
+
+        assert any("unnecessary" in rec.getMessage() for rec in caplog.records)
+        assert getattr(_Fresh, "_yaconfiglib_include_registered", False) is True
+
+    def test_no_warning_without_preexisting_constructor(self, caplog):
+        import logging
+
+        import yaml
+
+        from yaconfiglib.backends.yaml import YamlConfig
+
+        class _Fresh(yaml.SafeLoader):
+            _yaconfiglib_include_registered = False
+
+        with caplog.at_level(logging.WARNING):
+            YamlConfig._register_include_tags(_Fresh, loader=None, path_factory=None)
+
+        assert not any("unnecessary" in rec.getMessage() for rec in caplog.records)
