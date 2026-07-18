@@ -25,6 +25,13 @@ parent `ConfigLoader` in scope (the normal case when calling
 `yaconfiglib.load(...)`), the `!include`/`!load` constructors are
 registered on the active PyYAML loader class.
 
+!!! note "You do not need `yaml.add_constructor` yourself"
+    Registering `!include`/`!load` by hand
+    (`yaml.add_constructor("!include", ...)`) is unnecessary — yaconfiglib
+    does it automatically on the first load. A manual registration is
+    replaced by yaconfiglib's own include handler, and the override is logged
+    at `WARNING` so it is not silent.
+
 ## Passing extra arguments
 
 The tag accepts a sequence node to forward positional args, or a mapping
