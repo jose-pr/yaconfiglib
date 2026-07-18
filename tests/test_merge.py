@@ -196,6 +196,12 @@ class TestTypedMerge:
         result = typed_merge(dict, {"a": 1}, {"b": 2})
         assert result == {"a": 1, "b": 2}
 
+    def test_exported_from_package_root(self):
+        import yaconfiglib
+
+        assert yaconfiglib.typed_merge is typed_merge
+        assert "typed_merge" in yaconfiglib.__all__
+
 
 # ---------------------------------------------------------------------------
 # typed_merge — non-class type hints (factory functions, opaque objects)
