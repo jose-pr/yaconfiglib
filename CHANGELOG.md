@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `typed_merge` is now exported from the top-level `yaconfiglib` package
+  (`from yaconfiglib import typed_merge`), alongside `MergeMethod` /
+  `ConfigLoaderMergeMethod`. It was previously only reachable via the internal
+  `yaconfiglib.utils.merge` path.
+
 ### Fixed
 - `typed_merge` no longer raises `TypeError: issubclass() arg 1 must be a class`
   when a field's resolved type hint is a **non-class callable** (e.g. an
