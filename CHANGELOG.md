@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-07-18
+
 ### Added
 - `typed_merge` is now exported from the top-level `yaconfiglib` package
   (`from yaconfiglib import typed_merge`), alongside `MergeMethod` /
