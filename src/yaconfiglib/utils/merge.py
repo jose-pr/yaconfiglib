@@ -301,4 +301,9 @@ class MergeMethod(IntEnum):
             return result
 
 
-from .typing_merge import typed_merge
+from .typing_merge import (
+    OpaqueMerge,
+    TypedNamespace,
+    opaque,
+    typed_merge,
+)

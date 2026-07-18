@@ -11,6 +11,9 @@ from .loader import (
 )
 from .utils.merge import (
     MergeMethod as MergeMethod,
+    OpaqueMerge as OpaqueMerge,
+    TypedNamespace as TypedNamespace,
+    opaque as opaque,
     typed_merge as typed_merge,
 )
 
@@ -19,6 +22,9 @@ __all__ = [
     "ConfigLoaderMergeMethod",
     "MergeMethod",
     "typed_merge",
+    "OpaqueMerge",
+    "opaque",
+    "TypedNamespace",
     "ConfigBackend",
     "load",
     "loads",
