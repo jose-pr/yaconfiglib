@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `typed_merge` no longer raises `TypeError: issubclass() arg 1 must be a class`
+  when a field's resolved type hint is a **non-class callable** (e.g. an
+  `ipaddress`-style factory function such as `netutils.IPNetwork`). Such a hint is
+  now treated as an opaque coercer: the last value wins, coerced through the
+  callable when it accepts the value, otherwise returned unchanged. Class hints are
+  unaffected.
+
 ## [0.9.7] - 2026-07-14
 
 ### Documentation

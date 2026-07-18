@@ -41,6 +41,21 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
     cls_args = typing.get_args(cls) if cls is not origin else ()
     origin = getattr(origin, "__origin__", origin)
 
+    # A resolved hint that is not a class (e.g. an ipaddress-style factory
+    # FUNCTION used as a field annotation, such as netutils.IPNetwork) cannot
+    # drive the issubclass()/isinstance(_, origin) branch selection below and
+    # would raise TypeError. Treat it as an opaque coercer: last value wins,
+    # coerced through the callable when it is one, else returned as-is. This
+    # mirrors the scalar tail, which is unreachable for a non-class origin.
+    if not isinstance(origin, type):
+        value = objects[-1]
+        if callable(origin):
+            try:
+                return origin(value)
+            except (TypeError, ValueError):
+                return value
+        return value
+
     try:
         hints = typing.get_type_hints(origin)
     except Exception:
