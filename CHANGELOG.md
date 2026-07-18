@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `OpaqueMerge` mixin, `opaque` class decorator, and `TypedNamespace` base for
+  customizing `typed_merge`, all exported from the package root.
+  `OpaqueMerge`/`opaque` mark a type opaque (last object wins, no field
+  introspection — for a fully-built config object or one with factory-function
+  field hints); `TypedNamespace` applies `_parse_<field>` coercers at
+  construction. The `__merge__` and `_parse_<field>` extension hooks are now
+  documented in the merging guide.
+
 ## [0.9.8] - 2026-07-18
 
 ### Added

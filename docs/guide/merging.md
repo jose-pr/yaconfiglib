@@ -85,3 +85,61 @@ loader = ConfigLoader(merge=ConfigLoaderMergeMethod.Simple)
 # Uses Deep merging just this once.
 result = loader.load("a.yaml", "b.yaml", merge=ConfigLoaderMergeMethod.Deep)
 ```
+
+## Typed merge and custom merge behavior
+
+`typed_merge` merges several objects into one instance of a target type,
+guided by its type hints: mappings and dataclasses/namespaces merge field by
+field, sequences element by element, and scalars last-object-wins.
+
+```python
+from yaconfiglib import typed_merge
+
+merged = typed_merge(MyConfig, base_cfg, override_cfg)
+```
+
+Two per-type hooks let a class customize how it is merged.
+
+### `__merge__` — take over merging for a type
+
+Define a `__merge__(cls, *objects, init=True)` classmethod to fully override
+how instances of that type are merged. The most common need — "this is a
+fully-built object, just take the last one" — is packaged as `OpaqueMerge`
+(a mixin) and `opaque` (a class decorator):
+
+```python
+from yaconfiglib import OpaqueMerge, opaque
+
+class Zone(OpaqueMerge, argparse.Namespace):
+    network: IPNetwork          # a factory function, not a class
+
+# ...or, without changing the base classes:
+@opaque
+class Zone(argparse.Namespace):
+    ...
+```
+
+Use it when a config object's `__init__` already normalized its fields, or
+when a field is annotated by a factory function rather than a class:
+`typed_merge` then returns the last object unchanged instead of introspecting
+its fields (which would otherwise fail on a non-class annotation).
+
+### `_parse_<field>` — coerce a field as it is merged
+
+If a source object defines a `_parse_<name>(value)` method, `typed_merge`
+applies it to that field's value while collecting it. `TypedNamespace`
+applies the same convention at construction time, so a built object is
+already normalized:
+
+```python
+from yaconfiglib import TypedNamespace
+
+class ServerConfig(TypedNamespace):
+    def _parse_port(self, value):
+        return int(value)
+
+ServerConfig(port="8080").port      # -> 8080 (int)
+```
+
+Compose `TypedNamespace` with `OpaqueMerge` for a config object that both
+coerces its fields at build time and is opaque to re-merging.

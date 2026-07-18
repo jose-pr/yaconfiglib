@@ -9,6 +9,8 @@ from .merge import is_scalar, is_array
 
 T = typing.TypeVar("T")
 
+__all__ = ["typed_merge", "OpaqueMerge", "opaque", "TypedNamespace"]
+
 
 def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
     """Recursively merge *objects* into an instance of *cls*.
@@ -104,3 +106,64 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
     # Scalar / unknown: last value wins.
     value = objects[-1]
     return value if isinstance(value, origin) else origin(value)
+
+
+# ---------------------------------------------------------------------------
+# Extension hooks for consumers
+#
+# ``typed_merge`` honors two per-type hooks:
+#   * ``__merge__(cls, *objects, init=True)`` — a classmethod that fully
+#     overrides how instances of ``cls`` are merged.
+#   * ``_parse_<field>(value)`` — a per-field coercer looked up on each source
+#     object as a field is collected.
+# The helpers below package the two most common uses so consumers do not
+# reimplement them.
+# ---------------------------------------------------------------------------
+
+
+def _last_wins(_cls, *objects: object, init: bool = True) -> object:
+    return objects[-1] if objects else None
+
+
+class OpaqueMerge:
+    """Mixin marking a type *opaque* to :func:`typed_merge` — last object wins.
+
+    Inherit from ``OpaqueMerge`` when instances should NOT be re-merged field by
+    field: a fully-built config object whose ``__init__`` already normalized its
+    fields, or one whose field annotations are factory functions rather than
+    classes. ``typed_merge`` then returns the last object unchanged instead of
+    introspecting its fields.
+    """
+
+    @classmethod
+    def __merge__(cls, *objects: object, init: bool = True) -> object:
+        return _last_wins(cls, *objects, init=init)
+
+
+def opaque(cls: type) -> type:
+    """Class decorator equivalent of :class:`OpaqueMerge`.
+
+    Marks *cls* opaque to :func:`typed_merge` (last object wins) without altering
+    its base classes — useful when the type already has a fixed hierarchy.
+    """
+    cls.__merge__ = classmethod(_last_wins)
+    return cls
+
+
+class TypedNamespace(Namespace):
+    """An :class:`argparse.Namespace` that applies ``_parse_<field>`` coercers.
+
+    At construction, for every keyword given, if the instance defines a
+    ``_parse_<name>(value)`` method it is applied to that field's value. This is
+    the same per-field coercion convention :func:`typed_merge` honors, applied at
+    build time so a constructed object is already normalized (e.g. a raw string
+    field turned into an ``ipaddress`` object). Compose with :class:`OpaqueMerge`
+    when such a built object should also be opaque to re-merging.
+    """
+
+    def __init__(self, **kwargs: object) -> None:
+        for name, value in list(kwargs.items()):
+            parser = getattr(self, f"_parse_{name}", None)
+            if parser is not None:
+                kwargs[name] = parser(value)
+        super().__init__(**kwargs)

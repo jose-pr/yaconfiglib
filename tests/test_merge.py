@@ -5,7 +5,15 @@ from argparse import Namespace
 
 import pytest
 
-from yaconfiglib.utils.merge import MergeMethod, is_array, is_scalar, typed_merge
+from yaconfiglib.utils.merge import (
+    MergeMethod,
+    OpaqueMerge,
+    TypedNamespace,
+    is_array,
+    is_scalar,
+    opaque,
+    typed_merge,
+)
 
 
 def _ip_factory(v):
@@ -234,3 +242,49 @@ class TestTypedMergeNonClassHint:
         b = _NetConfig(network="192.168.0.0/16")
         merged = typed_merge(_NetConfig, a, b)
         assert merged.network == "net:192.168.0.0/16"
+
+
+# ---------------------------------------------------------------------------
+# typed_merge extension hooks: OpaqueMerge / opaque / TypedNamespace
+# ---------------------------------------------------------------------------
+
+class TestTypedMergeHooks:
+    def test_opaque_mixin_last_wins(self):
+        class Zone(OpaqueMerge, Namespace):
+            pass
+
+        merged = typed_merge(Zone, Zone(x=1), Zone(x=2))
+        assert merged.x == 2
+
+    def test_opaque_decorator_last_wins(self):
+        @opaque
+        class Zone(Namespace):
+            pass
+
+        merged = typed_merge(Zone, Zone(x="a"), Zone(x="z"))
+        assert merged.x == "z"
+
+    def test_opaque_bypasses_factory_function_field_hint(self):
+        # Without opacity a factory-function field hint drives per-field
+        # coercion; OpaqueMerge skips all field introspection.
+        class Zone(OpaqueMerge, Namespace):
+            network: _ip_factory  # a factory function, not a class
+
+        merged = typed_merge(Zone, Zone(network="a"), Zone(network="b"))
+        assert merged.network == "b"  # opaque → the raw last value, uncoerced
+
+    def test_typed_namespace_applies_parse_hooks(self):
+        class Cfg(TypedNamespace):
+            def _parse_port(self, v):
+                return int(v)
+
+        cfg = Cfg(port="8080", host="db")
+        assert cfg.port == 8080
+        assert cfg.host == "db"
+
+    def test_hooks_exported_from_package_root(self):
+        import yaconfiglib
+
+        for name in ("OpaqueMerge", "opaque", "TypedNamespace"):
+            assert name in yaconfiglib.__all__
+            assert getattr(yaconfiglib, name) is not None
