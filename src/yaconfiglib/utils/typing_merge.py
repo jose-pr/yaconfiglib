@@ -60,7 +60,10 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
 
     try:
         hints = typing.get_type_hints(origin)
-    except Exception:
+    except (TypeError, NameError, AttributeError):
+        # Unresolvable forward refs / non-type objects — merge field-by-field on
+        # values only. A new exception type here is a bug we want to see, not
+        # swallow (project error-handling stance: no bare except Exception).
         hints = {}
 
     if issubclass(origin, typing.Mapping) and len(cls_args) > 1:

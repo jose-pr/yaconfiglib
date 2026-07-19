@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Narrowed `typed_merge`'s `get_type_hints` fallback to
+  `(TypeError, NameError, AttributeError)`; the loader/command broad error
+  boundaries that feed the `ignore_error` predicate now log the swallowed error
+  at DEBUG and are documented as deliberate.
 - **Faster interpolation.** A string with no Jinja delimiter (`{{`/`{%`/`{#`) —
   the common case for config values — now returns unchanged without a cache
   lookup or `Template.render`. The template/expression caches also switched from

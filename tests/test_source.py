@@ -40,3 +40,20 @@ class TestMemoNormalization:
         seen = ["already-there"]
         paths = list(parse_sources(["a.yaml", "a.yaml"], base_dir=tmp_path, memo=seen))
         assert len(paths) == 1  # second occurrence deduped
+
+
+class TestStreamsThroughLoad:
+    def test_stringio_and_bytesio_load(self):
+        import io
+
+        from yaconfiglib import ConfigLoader
+
+        loader = ConfigLoader()
+        assert loader.load(io.StringIO("x: 1\n")) == {"x": 1}
+        assert loader.load(io.BytesIO(b"y: 2\n")) == {"y": 2}
+
+    def test_named_bytes_memory_doc(self):
+        from yaconfiglib import ConfigLoader
+
+        loader = ConfigLoader()
+        assert loader.load(b"#!doc.yaml\nk: v\n") == {"k": "v"}

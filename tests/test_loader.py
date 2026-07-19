@@ -371,3 +371,71 @@ class TestSecurityControls:
         payload = "#!\ngreeting: \"hello {{ name }}\"\nname: world\n"
         result = ConfigLoader(interpolate=True, sandbox=True).load(payload)
         assert result["greeting"] == "hello world"
+
+
+# ---------------------------------------------------------------------------
+# Coverage gaps: ignore_error predicate, Hash merge, override isolation
+# ---------------------------------------------------------------------------
+
+class TestIgnoreErrorPredicate:
+    def test_predicate_skips_only_selected_errors(self, tmp_path):
+        (tmp_path / "good.yaml").write_text("x: 1\n")
+        (tmp_path / "bad.yaml").write_text("x: [unclosed\n")  # malformed YAML
+
+        # Skip a missing file, but let a real parse error propagate.
+        def only_missing(error, **ctx):
+            return isinstance(error, FileNotFoundError)
+
+        loader = ConfigLoader(base_dir=tmp_path, ignore_error=only_missing)
+
+        # Missing file is skipped -> the good file still loads.
+        result = loader.load("nope.yaml", "good.yaml")
+        assert result == {"x": 1}
+
+        # A malformed file raises (predicate returns False for a YAML error).
+        with pytest.raises(Exception):
+            loader.load("bad.yaml")
+
+
+class TestHashMerge:
+    def _files(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("v: 1\n")
+        (tmp_path / "b.yaml").write_text("v: 2\n")
+
+    def test_hash_default_key_is_stem(self, tmp_path):
+        self._files(tmp_path)
+        loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Hash)
+        result = loader.load("a.yaml", "b.yaml")
+        assert result == {"a": {"v": 1}, "b": {"v": 2}}
+
+    def test_hash_attribute_key_factory(self, tmp_path):
+        self._files(tmp_path)
+        loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Hash)
+        result = loader.load("a.yaml", "b.yaml", key_factory="name")
+        assert set(result.keys()) == {"a.yaml", "b.yaml"}
+
+    def test_hash_jinja_key_factory(self, tmp_path):
+        self._files(tmp_path)
+        loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Hash)
+        result = loader.load("a.yaml", "b.yaml", key_factory="%pathname.stem ~ '!'")
+        assert set(result.keys()) == {"a!", "b!"}
+
+
+class TestPerCallOverrideIsolation:
+    def test_overrides_do_not_leak_into_instance(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("x: 1\n")
+        loader = ConfigLoader(
+            base_dir=tmp_path,
+            merge=ConfigLoaderMergeMethod.Simple,
+            interpolate=False,
+        )
+        before = (loader.merge, loader.interpolate, loader.merge_options, loader.sandbox)
+        loader.load(
+            "a.yaml",
+            merge=ConfigLoaderMergeMethod.Deep,
+            merge_options={"mergelists": True},
+            interpolate=True,
+            sandbox=True,
+        )
+        after = (loader.merge, loader.interpolate, loader.merge_options, loader.sandbox)
+        assert before == after

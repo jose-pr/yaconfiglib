@@ -152,7 +152,9 @@ def parse_sources(
         if isinstance(source, _io.IOBase):
             content = source.read()
             if MemPath is not None:
-                path = MemPath(f"stream-{next(_SOURCE_COUNTER)}")
+                # Unique name + default .yaml suffix so backend auto-detection
+                # works for an anonymous stream (YAML is yaconfiglib's default).
+                path = MemPath(f"stream-{next(_SOURCE_COUNTER)}.yaml")
                 path.parent.mkdir(parents=True, exist_ok=True)
                 if isinstance(content, str):
                     path.write_text(content, encoding=encoding)
