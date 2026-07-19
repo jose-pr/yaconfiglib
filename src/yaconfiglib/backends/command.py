@@ -162,7 +162,7 @@ class CommandBackend(ConfigBackend):
                 continue
             try:
                 return loads(output, loader=fmt, **loads_options)
-            except Exception:
+            except Exception:  # noqa: BLE001 - format sniffing must survive ANY parse error
                 # If explicit_format or shebang_format failed and is the only candidate,
                 # we want to propagate the error. Otherwise, continue.
                 if len(candidates) == 1 and (explicit_format or shebang_format):
