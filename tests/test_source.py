@@ -30,3 +30,13 @@ class TestStreamAndMemorySources:
         paths = list(parse_sources([b"#!\nk: v\n"]))
         assert len(paths) == 1
         assert b"k: v" in paths[0].read_bytes()
+
+
+class TestMemoNormalization:
+    def test_list_memo_still_dedupes(self, tmp_path):
+        # Backward-compat: a caller passing a list is accepted (normalized to a
+        # set); duplicate detection still works.
+        (tmp_path / "a.yaml").write_text("x: 1\n")
+        seen = ["already-there"]
+        paths = list(parse_sources(["a.yaml", "a.yaml"], base_dir=tmp_path, memo=seen))
+        assert len(paths) == 1  # second occurrence deduped

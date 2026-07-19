@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import logging
 import typing as _ty
+import weakref as _weakref
+from collections import OrderedDict as _OrderedDict
 
 from jinja2 import Environment, Template
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_ENV = Environment(extensions=["jinja2.ext.do"])
+
+#: A string with none of Jinja's delimiters cannot be a template.
+_JINJA_MARKERS = ("{{", "{%", "{#")
 
 
 def load_template(
@@ -30,8 +35,37 @@ def load_template(
     return Template.from_code(env, code, env.make_globals(globals))
 
 
-_COMPILE_CACHE = {}
-_EVAL_CACHE = {}
+_CACHE_MAX = 1024
+# LRU caches keyed on (code, id(env)); the value carries a weakref to the env
+# so a recycled id() (a new env reusing a GC'd env's address) can't return a
+# render bound to the dead env. OrderedDict gives O(1) LRU without clearing the
+# whole cache at capacity (the old dict did, causing recompile stampedes).
+_COMPILE_CACHE: "_OrderedDict[tuple, tuple]" = _OrderedDict()
+_EVAL_CACHE: "_OrderedDict[tuple, tuple]" = _OrderedDict()
+
+
+def _cache_get(cache: _OrderedDict, code: str, env: Environment):
+    key = (code, id(env))
+    hit = cache.get(key)
+    if hit is None:
+        return None
+    env_ref, value = hit
+    if env_ref() is env:
+        cache.move_to_end(key)
+        return value
+    del cache[key]  # id() was recycled onto a different env — recompile
+    return None
+
+
+def _cache_put(cache: _OrderedDict, code: str, env: Environment, value) -> None:
+    try:
+        env_ref = _weakref.ref(env)
+    except TypeError:
+        env_ref = lambda: env  # non-weakrefable env: keep it alive via closure
+    cache[(code, id(env))] = (env_ref, value)
+    cache.move_to_end((code, id(env)))
+    while len(cache) > _CACHE_MAX:
+        cache.popitem(last=False)
 
 
 def compile(
@@ -41,14 +75,11 @@ def compile(
 ) -> _ty.Callable[..., str]:
     """Return a render callable for *code* (a Jinja2 template string)."""
     env = environment or DEFAULT_ENV
-    cache_key = (code, id(env))
-    if cache_key in _COMPILE_CACHE:
-        return _COMPILE_CACHE[cache_key]
-    
+    cached = _cache_get(_COMPILE_CACHE, code, env)
+    if cached is not None:
+        return cached
     render = load_template(code, environment=env, globals=globals).render
-    if len(_COMPILE_CACHE) >= 1024:
-        _COMPILE_CACHE.clear()
-    _COMPILE_CACHE[cache_key] = render
+    _cache_put(_COMPILE_CACHE, code, env, render)
     return render
 
 
@@ -63,9 +94,9 @@ def eval(
     returned from the callable, preserving non-string Python types.
     """
     env = environment or DEFAULT_ENV
-    cache_key = (code, id(env))
-    if cache_key in _EVAL_CACHE:
-        return _EVAL_CACHE[cache_key]
+    cached = _cache_get(_EVAL_CACHE, code, env)
+    if cached is not None:
+        return cached
 
     template = load_template(
         "{% do _meta.__setitem__('result', " + code + ") %}",
@@ -83,9 +114,7 @@ def eval(
             return None
         return res
 
-    if len(_EVAL_CACHE) >= 1024:
-        _EVAL_CACHE.clear()
-    _EVAL_CACHE[cache_key] = _eval
+    _cache_put(_EVAL_CACHE, code, env, _eval)
     return _eval
 
 
@@ -104,6 +133,11 @@ def interpolate(data: object, globals: dict | None = None, environment: Environm
     globals = {} if globals is None else globals
 
     if isinstance(data, str):
+        # Fast path: a string with no Jinja delimiter renders to itself, so
+        # skip the cache lookup + Template.render entirely. Most config strings
+        # are plain text — this avoids paying Jinja for every one of them.
+        if not any(marker in data for marker in _JINJA_MARKERS):
+            return data
         stripped = data.strip()
         # Pure Jinja2 expression: {{ expr }} — evaluate to preserve type.
         if stripped.startswith("{{") and stripped.endswith("}}"):

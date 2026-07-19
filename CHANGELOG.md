@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Faster interpolation.** A string with no Jinja delimiter (`{{`/`{%`/`{#`) —
+  the common case for config values — now returns unchanged without a cache
+  lookup or `Template.render`. The template/expression caches also switched from
+  clear-everything-at-capacity to LRU eviction, and their env keys are
+  weakref-guarded so a recycled `id(env)` can't return a render bound to a dead
+  environment. `parse_sources` duplicate detection is O(1) per source (set)
+  instead of O(n²) (list).
+
 ### Added
 - **`allow_commands` control.** `ConfigLoader(allow_commands=False)` (or per
   `load()` call) refuses to execute a command source — `cmd://`, `exec://`,
