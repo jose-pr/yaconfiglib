@@ -170,8 +170,10 @@ def parse_sources(
                     filename = filename.decode(encoding or "utf-8")
                 if not filename:
                     # Unnamed in-memory docs each get a unique virtual name so
-                    # two of them never share (and overwrite) one MemPath.
-                    filename = f"mem-{next(_SOURCE_COUNTER)}"
+                    # two of them never share (and overwrite) one MemPath. The
+                    # ``.yaml`` suffix keeps backend auto-detection working for
+                    # a bare ``loads("...")`` (YAML is yaconfiglib's default).
+                    filename = f"mem-{next(_SOURCE_COUNTER)}.yaml"
                 if MemPath is not None:
                     path = MemPath(filename)
                     path.parent.mkdir(parents=True, exist_ok=True)
