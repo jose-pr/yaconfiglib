@@ -66,9 +66,9 @@ class CommandBackend(ConfigBackend):
             path: A scheme-prefixed command string (e.g.
                 ``"cmd+json://echo {}"``), a bare shell command, or a
                 script file path.
-            encoding: Unused directly (subprocess output is captured as
-                text); accepted for interface consistency with other
-                backends.
+            encoding: Codec used to decode the command's stdout/stderr
+                (default ``utf-8``; previously the locale codec, which
+                mangled UTF-8 output on Windows).
             format: Explicit output format, or a comma-separated/list of
                 candidate formats to try in order. Overrides shebang
                 detection and sniffing.
@@ -103,12 +103,16 @@ class CommandBackend(ConfigBackend):
         else:
             command = path_str
 
-        # 2. Execute command
+        # 2. Execute command. Decode output explicitly: text=True alone uses
+        # the locale codec (cp1252 on Windows), which mangles UTF-8 output
+        # from tools like secret managers. errors="replace" keeps the
+        # format-sniffing path total instead of raising mid-decode.
         result = subprocess.run(
             command,
             shell=True,
             capture_output=True,
-            text=True,
+            encoding=encoding or "utf-8",
+            errors="replace",
             check=True
         )
         output = result.stdout.strip()

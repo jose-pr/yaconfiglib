@@ -231,3 +231,46 @@ class TestYamlIncludeRegistration:
             YamlConfig._register_include_tags(_Fresh, loader=None, path_factory=None)
 
         assert not any("unnecessary" in rec.getMessage() for rec in caplog.records)
+
+
+class TestDeterministicDispatch:
+    def test_first_defined_backend_wins(self):
+        import re
+
+        from pathlib import Path as StdPath
+
+        class ZzzFirstBackend(ConfigBackend):
+            PATHNAME_REGEX = re.compile(r".*\.zzztest$")
+            NAME = "zzzfirst"
+
+            def load(self, path, **options):
+                return "first"
+
+        class ZzzSecondBackend(ConfigBackend):
+            PATHNAME_REGEX = re.compile(r".*\.zzztest$")
+            NAME = "zzzsecond"
+
+            def load(self, path, **options):
+                return "second"
+
+        # Regression: recursive discovery returned a set, so which of two
+        # equally-matching backends won depended on hash order.
+        subs = ConfigBackend.__subclasses__(recursive=True)
+        assert isinstance(subs, list)
+        for _ in range(10):
+            assert (
+                ConfigBackend.get_class_by_path(StdPath("x.zzztest"))
+                is ZzzFirstBackend
+            )
+
+
+class TestCommandOutputEncoding:
+    def test_command_output_utf8_decoding(self):
+        import sys
+
+        # -X utf8 forces the child to emit UTF-8; the backend must decode it
+        # as UTF-8 (previously the locale codec — cp1252 on Windows — turned
+        # 'café' into mojibake).
+        cmd = f"cmd://{sys.executable} -X utf8 -c \"print('caf\xe9')\""
+        result = CommandBackend().load(cmd)
+        assert result == "café"
