@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`allow_commands` control.** `ConfigLoader(allow_commands=False)` (or per
+  `load()` call) refuses to execute a command source — `cmd://`, `exec://`,
+  `sh://`, `*+fmt://`, script-extension files, and any reached via `!include` —
+  raising `CommandsDisabledError` instead. Use it when loading configuration you
+  do not fully trust. Defaults to permissive (commands allowed).
+- **`sandbox` control.** `ConfigLoader(sandbox=True)` runs interpolation in
+  Jinja2's `SandboxedEnvironment`, blocking attribute-traversal (SSTI) attacks
+  from untrusted config values. Defaults off.
+- New `docs/guide/security.md` documenting the trust model and both controls.
+
 ### Fixed
+- **`!include` now routes through the loader driving the current parse.** The
+  include constructor is registered once per YAML loader class, capturing the
+  first `ConfigLoader`; nested `!include`/`!load` previously inherited that first
+  loader's settings (base_dir, merge, and — critically — `allow_commands`),
+  leaking state across loaders. Includes now use the loader actually performing
+  the load.
 - `ConfigLoader.load(merge_options=...)` no longer permanently overwrites the
   instance's `merge_options` — the documented per-call override was leaking into
   every subsequent `load()`.

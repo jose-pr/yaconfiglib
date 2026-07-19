@@ -313,3 +313,61 @@ class TestLoaderStateHygiene:
         ConfigLoader(log_level=logging.DEBUG)
         ConfigLoader()
         assert mod_logger.level == before
+
+
+class TestSecurityControls:
+    def test_commands_blocked_top_level(self):
+        import pytest
+
+        from yaconfiglib import CommandsDisabledError, ConfigLoader
+
+        loader = ConfigLoader(allow_commands=False)
+        with pytest.raises(CommandsDisabledError):
+            loader.load("cmd://python -c \"print({'a': 1})\"")
+
+    def test_commands_blocked_via_include(self, tmp_path):
+        import pytest
+
+        from yaconfiglib import CommandsDisabledError, ConfigLoader
+
+        (tmp_path / "main.yaml").write_text(
+            "app: !include 'cmd+json://python -c \"import json;"
+            " print(json.dumps({}))\"'\n"
+        )
+        loader = ConfigLoader(base_dir=tmp_path, allow_commands=False)
+        with pytest.raises(CommandsDisabledError):
+            loader.load("main.yaml")
+
+    def test_commands_allowed_by_default(self):
+        from yaconfiglib import ConfigLoader
+
+        loader = ConfigLoader()
+        assert loader.load("cmd://python -c \"print({'a': 1})\"") == {"a": 1}
+
+    def test_per_call_override_blocks(self):
+        import pytest
+
+        from yaconfiglib import CommandsDisabledError, ConfigLoader
+
+        loader = ConfigLoader()  # allowed at instance level
+        with pytest.raises(CommandsDisabledError):
+            loader.load("cmd://python -c \"print(1)\"", allow_commands=False)
+
+    def test_sandbox_blocks_ssti(self):
+        import pytest
+        from jinja2.exceptions import SecurityError
+
+        from yaconfiglib import ConfigLoader
+
+        payload = "#!\nx: \"{{ ''.__class__.__mro__ }}\"\n"
+        # The sandbox refuses attribute traversal into Python internals with a
+        # Jinja SecurityError specifically (not just any error).
+        with pytest.raises(SecurityError):
+            ConfigLoader(interpolate=True, sandbox=True).load(payload)
+
+    def test_sandbox_allows_ordinary_interpolation(self):
+        from yaconfiglib import ConfigLoader
+
+        payload = "#!\ngreeting: \"hello {{ name }}\"\nname: world\n"
+        result = ConfigLoader(interpolate=True, sandbox=True).load(payload)
+        assert result["greeting"] == "hello world"

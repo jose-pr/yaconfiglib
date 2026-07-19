@@ -31,6 +31,7 @@ nav:
       - Templating: guide/templating.md
       - Includes: guide/includes.md
       - Model hydration: guide/models.md
+      - Security: guide/security.md
   - API Reference:
       - Overview: api/reference.md
       - Loader: api/loader.md
