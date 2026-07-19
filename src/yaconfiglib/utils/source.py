@@ -89,7 +89,7 @@ def parse_sources(
     sources: _ty.Iterable[SourceLike | _ty.Iterable[SourceLike]],
     base_dir: Path = None,
     encoding: str = None,
-    memo: list[str | Path] = None,
+    memo: _ty.Iterable[str | Path] = None,
     path_factory: type[Path] = None,
     recursive: bool = None,
 ) -> _ty.Iterator[Path]:
@@ -116,9 +116,10 @@ def parse_sources(
         sources: The sources to resolve, as passed to ``ConfigLoader.load()``.
         base_dir: Directory relative file paths are joined against.
         encoding: Text encoding used when decoding bytes markers/content.
-        memo: Optional list of already-seen path strings, used to detect
-            and skip duplicate sources across recursive calls; extended
-            in place.
+        memo: Optional set of already-seen path strings, used to detect
+            and skip duplicate sources across recursive calls; mutated in
+            place. Any iterable is accepted and normalized to a set (O(1)
+            membership; the previous list made duplicate detection O(n²)).
         path_factory: Constructor used to build a ``Path`` from a bare
             string source.
         recursive: Whether glob expansion should recurse into
@@ -134,7 +135,9 @@ def parse_sources(
     path_factory = path_factory or Path
     recursive = False if recursive is None else bool(recursive)
     if memo is None:
-        memo = []
+        memo = set()
+    elif not isinstance(memo, set):
+        memo = set(memo)
     for source in sources:
         if not source:
             continue
@@ -216,7 +219,7 @@ def parse_sources(
                 if memo_key in memo:
                     logger.warning("ignoring duplicated file %s" % path)
                     continue
-                memo.append(memo_key)
+                memo.add(memo_key)
             if not is_cmd and has_glob_pattern(path):
                 # stdlib glob pattern fallback uses glob.glob on string paths
                 if hasattr(path, "glob") and HAS_PATHLIB_NEXT:
