@@ -138,12 +138,22 @@ class ConfigBackend(_ty.Protocol):
         to discover every registered backend regardless of how deep its
         class hierarchy is.
         """
-        subclasess: _ty.Sequence[_ty.Self] = type.__subclasses__(cls)
+        direct: list[type[_ty.Self]] = type.__subclasses__(cls)
         if not recursive:
-            return subclasess
-        return set(subclasess).union(
-            [_cls for cls in subclasess for _cls in cls.__subclasses__(recursive=True)]
-        )
+            return direct
+        # Deterministic, definition-order walk (depth-first, deduplicated).
+        # The previous implementation returned a set, which made
+        # get_class_by_path()'s "first match wins" depend on hash order —
+        # backend resolution could differ between runs when two backends'
+        # regexes both matched a path.
+        ordered: list[type[_ty.Self]] = []
+        for scls in direct:
+            if scls not in ordered:
+                ordered.append(scls)
+            for nested in scls.__subclasses__(recursive=True):
+                if nested not in ordered:
+                    ordered.append(nested)
+        return ordered
 
     @classmethod
     def get_class_by_name(cls, name: str) -> type[_ty.Self]:
@@ -167,7 +177,9 @@ class ConfigBackend(_ty.Protocol):
     def can_load_path(cls, path: _Path) -> bool:
         """Return True if this backend's :attr:`PATHNAME_REGEX` matches *path*'s filename."""
         return (
-            cls.PATHNAME_REGEX.match(path.name) != None if cls.PATHNAME_REGEX else False
+            cls.PATHNAME_REGEX.match(path.name) is not None
+            if cls.PATHNAME_REGEX
+            else False
         )
 
     @classmethod

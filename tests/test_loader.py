@@ -289,3 +289,27 @@ class TestTopLevelAPI:
         content = fp.getvalue()
         assert "a: 1" in content
         assert "b: 2" in content
+
+
+# ---------------------------------------------------------------------------
+# Per-call override isolation & global-state hygiene (loader_state fixes)
+# ---------------------------------------------------------------------------
+
+class TestLoaderStateHygiene:
+    def test_merge_options_override_does_not_leak(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("items:\n  - 1\n")
+        loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Deep)
+        original = loader.merge_options
+        loader.load("a.yaml", merge_options={"mergelists": True})
+        # The documented "for this call" override must not rewrite instance state.
+        assert loader.merge_options is original
+        assert loader.merge_options == {}
+
+    def test_construction_does_not_mutate_module_logger(self):
+        import logging
+
+        mod_logger = logging.getLogger("yaconfiglib.loader")
+        before = mod_logger.level
+        ConfigLoader(log_level=logging.DEBUG)
+        ConfigLoader()
+        assert mod_logger.level == before

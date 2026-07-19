@@ -204,8 +204,12 @@ class ConfigLoader(ConfigBackend):
         self.interpolate = False if interpolate is None else bool(interpolate)
         self.inject_env = bool(inject_env)
         self.strict = bool(strict)
+        # Stored for introspection only. Library code must never call
+        # logger.setLevel() on the module logger: doing it here made every
+        # ConfigLoader construction (including the module-import-time
+        # DEFAULT_LOADER) mutate global logging state, and two loaders with
+        # different levels fought over one logger. Callers configure logging.
         self._log_level = LogLevel(log_level or LogLevel.Warning)
-        logger.setLevel(self._log_level)
         self.path_factory = path_factory or self.DEFAULT_PATH_FACTORY
         self.base_dir = base_dir or ""
         self.encoding = encoding or self.DEFAULT_ENCODING
@@ -285,7 +289,7 @@ class ConfigLoader(ConfigBackend):
             loader=self,
             base_dir=self.base_dir,
             interpolate=(
-                False if (loader == self and self.interpolate) else interpolate
+                False if (loader is self and self.interpolate) else interpolate
             ),
         )
         _options.update(reader_args)
@@ -366,7 +370,9 @@ class ConfigLoader(ConfigBackend):
         )
         if not merge:
             merge = self.merge
-        self.merge_options = (
+        # Per-call override only — must NOT rewrite self.merge_options (doing so
+        # made one call's override silently leak into every later load()).
+        merge_options = (
             self.merge_options if merge_options is None else merge_options
         )
 
@@ -397,14 +403,14 @@ class ConfigLoader(ConfigBackend):
                         results,
                         result,
                         configloaderkey=name,
-                        **self.merge_options,
+                        **merge_options,
                     )
                 else:
                     try:
                         results = merge.init(
                             initial=result,
                             configloaderkey=name,
-                            **self.merge_options,
+                            **merge_options,
                         )
                     except AttributeError:
                         results = result
