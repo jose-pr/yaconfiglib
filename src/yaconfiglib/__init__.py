@@ -4,6 +4,7 @@ from .backends import ConfigBackend as ConfigBackend
 from .loader import (
     ConfigLoader as ConfigLoader,
     ConfigLoaderMergeMethod as ConfigLoaderMergeMethod,
+    CommandsDisabledError as CommandsDisabledError,
     load as load,
     loads as loads,
     dump as dump,
@@ -20,6 +21,7 @@ from .utils.merge import (
 __all__ = [
     "ConfigLoader",
     "ConfigLoaderMergeMethod",
+    "CommandsDisabledError",
     "MergeMethod",
     "typed_merge",
     "OpaqueMerge",

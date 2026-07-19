@@ -83,6 +83,11 @@ class YamlConfig(ConfigBackend):
             self._register_include_tags(loader_cls, loader, path_factory)
 
         loader_instance = loader_cls(path.read_text(encoding=encoding))
+        # Make the driving ConfigLoader reachable from the include constructor
+        # (see _register_include_tags._construct) so nested !include/!load
+        # resolve through THIS loader's settings, not the first one registered.
+        if loader is not None:
+            loader_instance._yaconfiglib_config_loader = loader
         try:
             if master:
                 loader_instance.anchors = master.anchors
@@ -142,7 +147,15 @@ class YamlConfig(ConfigBackend):
                 raise TypeError(f"Un-supported YAML node {node!r}")
 
             kwargs.setdefault("master", ldr)
-            return loader.load(pathname, *args, **kwargs)
+            # Route the include through the ConfigLoader driving THIS parse, not
+            # the one captured when the constructor was first registered on this
+            # (global) loader class. The constructor is registered once per
+            # SafeLoader, so without this every later loader's includes would
+            # inherit the first loader's settings (base_dir, allow_commands,
+            # merge, ...) — a cross-loader state leak, and a hole in
+            # allow_commands=False against `!include 'cmd://...'`.
+            active = getattr(ldr, "_yaconfiglib_config_loader", loader)
+            return active.load(pathname, *args, **kwargs)
 
         for tag in _INCLUDE_TAGS:
             loader_cls.add_constructor(tag, _construct)
