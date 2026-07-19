@@ -108,3 +108,49 @@ class TestLoaderInterpolationFeatures:
         loader = ConfigLoader(interpolate=True, strict=True)
         with pytest.raises(Exception):
             loader.load(loader=PythonBackend({"value": "{{ missing_var }}"}))
+
+
+class TestInterpolatePerf:
+    def test_plain_string_fast_path_returns_identity(self):
+        from yaconfiglib.utils.jinja2 import interpolate
+
+        s = "just plain text, no templating here"
+        assert interpolate(s) is s  # fast path returns the same object
+
+    def test_string_with_delimiter_still_rendered(self):
+        from yaconfiglib.utils.jinja2 import interpolate
+
+        assert interpolate("hi {{ name }}", {"name": "bob"}) == "hi bob"
+
+    def test_compile_cache_lru_keeps_hot_entry(self):
+        from yaconfiglib.utils import jinja2 as J
+
+        J._COMPILE_CACHE.clear()
+        hot = "{{ a }}-hot"
+        J.compile(hot)
+        # Fill past capacity with unique templates; the hot entry must survive
+        # because each render of it moves it to the MRU end.
+        for i in range(J._CACHE_MAX + 50):
+            J.compile(f"{{{{ v{i} }}}}")
+            if i % 10 == 0:
+                J.compile(hot)  # keep it hot
+        assert (hot, id(J.DEFAULT_ENV)) in J._COMPILE_CACHE
+        assert len(J._COMPILE_CACHE) <= J._CACHE_MAX
+
+    def test_stale_env_id_recompiles(self):
+        import gc
+
+        from jinja2 import Environment
+
+        from yaconfiglib.utils import jinja2 as J
+
+        J._COMPILE_CACHE.clear()
+        env = Environment()
+        J.compile("{{ x }}", environment=env)
+        assert len(J._COMPILE_CACHE) == 1
+        del env
+        gc.collect()
+        # A fresh env that might reuse the id must not get the dead env's render.
+        env2 = Environment()
+        r = J.compile("{{ x }}", environment=env2)
+        assert r(x=5) == "5"
