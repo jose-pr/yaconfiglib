@@ -464,7 +464,14 @@ class ConfigLoader(ConfigBackend):
                     except AttributeError:
                         results = result
                     _join_init = True
-            except Exception as error:
+            # Deliberately broad: ``ignore_error`` is a user predicate designed
+            # to decide per-error whether to skip ANY load failure (a YAML parse
+            # error, a missing file, a backend error...), so narrowing the tuple
+            # would break that contract. KeyboardInterrupt/SystemExit are
+            # BaseException and already excluded. The error is never swallowed
+            # silently — it is handed to the predicate and logged.
+            except Exception as error:  # noqa: BLE001 - feeds the ignore_error predicate
+                logger.debug("load error for %s: %s", path, error)
                 if self.ignore_error(error, path=path, loader=self):
                     continue
                 raise
@@ -502,7 +509,8 @@ class ConfigLoader(ConfigBackend):
                     globals=globals_dict,
                     environment=custom_env,
                 )
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - feeds the ignore_error predicate
+                logger.debug("interpolation error: %s", error)
                 if not self.ignore_error(error, result=result, loader=self):
                     raise
 
@@ -601,7 +609,8 @@ class ConfigLoader(ConfigBackend):
                     value = DotAccessibleDict(value)
                 yield value
 
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - feeds the ignore_error predicate
+                logger.debug("load_all error for %s: %s", path, error)
                 if not self.ignore_error(
                     error, path=path, value=value, loader=self
                 ):
