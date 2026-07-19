@@ -21,7 +21,15 @@ from .utils.log import Logger, LogLevel, getLogger
 from .utils.merge import Merge, MergeMethod, is_array
 from .utils.source import SourceLike, parse_sources
 
-__all__ = ["ConfigLoader", "ConfigLoaderMergeMethod", "load", "loads", "dump", "dumps"]
+__all__ = [
+    "ConfigLoader",
+    "ConfigLoaderMergeMethod",
+    "CommandsDisabledError",
+    "load",
+    "loads",
+    "dump",
+    "dumps",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +38,25 @@ T = typing.TypeVar("T")
 
 _JINJA_ENVS = {}
 
-def _get_jinja_env(strict: bool) -> object:
-    if strict not in _JINJA_ENVS:
-        from jinja2 import Environment, StrictUndefined
+def _get_jinja_env(strict: bool, sandbox: bool = False) -> object:
+    key = (strict, sandbox)
+    if key not in _JINJA_ENVS:
+        from jinja2 import StrictUndefined
         env_kwargs = {}
         if strict:
             env_kwargs["undefined"] = StrictUndefined
-        _JINJA_ENVS[strict] = Environment(extensions=["jinja2.ext.do"], **env_kwargs)
-    return _JINJA_ENVS[strict]
+        if sandbox:
+            # SandboxedEnvironment blocks attribute traversal into Python
+            # internals (SSTI) when interpolating untrusted config values.
+            from jinja2.sandbox import SandboxedEnvironment as _Env
+        else:
+            from jinja2 import Environment as _Env
+        _JINJA_ENVS[key] = _Env(extensions=["jinja2.ext.do"], **env_kwargs)
+    return _JINJA_ENVS[key]
+
+
+class CommandsDisabledError(ValueError):
+    """Raised when a command source is loaded while ``allow_commands`` is False."""
 
 
 class _ConfigLoaderMergeMethod(IntEnum):
@@ -161,6 +180,8 @@ class ConfigLoader(ConfigBackend):
         ignore_error: _IgnoreError | bool = False,
         inject_env: bool = False,
         strict: bool = False,
+        allow_commands: bool = True,
+        sandbox: bool = False,
     ) -> None:
         """Configure a reusable loader.
 
@@ -196,7 +217,19 @@ class ConfigLoader(ConfigBackend):
                 ``os.environ`` to templates as the ``env`` global.
             strict: If True, undefined Jinja2 variables raise during
                 interpolation instead of rendering as empty.
+            allow_commands: If False, loading a command source (``cmd://``,
+                ``exec://``, ``sh://``, ``*+fmt://``, or a script-extension
+                file) — including one reached via ``!include`` — raises
+                :class:`CommandsDisabledError` instead of executing it. Set
+                this when loading configuration you do not fully trust. Does
+                not restrict a directly-constructed ``CommandBackend``.
+            sandbox: If True, interpolation runs in Jinja2's
+                ``SandboxedEnvironment``, blocking attribute traversal into
+                Python internals (SSTI). Set this when config values may be
+                untrusted.
         """
+        self.allow_commands = bool(allow_commands)
+        self.sandbox = bool(sandbox)
         self.merge = (
             merge if isinstance(merge, Merge) else ConfigLoaderMergeMethod(merge)
         )
@@ -245,10 +278,14 @@ class ConfigLoader(ConfigBackend):
         transform: str = None,
         key_factory: str | typing.Callable[[Path], str] = None,
         interpolate: bool = None,
+        allow_commands: bool = None,
         **reader_args,
     ) -> tuple[str, object]:
 
         recursive = self.recursive if recursive is None else recursive
+        allow_commands = (
+            self.allow_commands if allow_commands is None else allow_commands
+        )
 
         if isinstance(loader, str):
             backend_cls = ConfigBackend.get_class_by_name(loader)
@@ -283,6 +320,14 @@ class ConfigLoader(ConfigBackend):
             key_factory = _key
         logger.debug(f"Loading file: {path}")
         _loader = loader_factory(path)
+        if not allow_commands:
+            from .backends.command import CommandBackend
+
+            if isinstance(_loader, CommandBackend):
+                raise CommandsDisabledError(
+                    f"refusing to run command source {str(path)!r}: "
+                    "allow_commands=False"
+                )
         _options = dict(
             encoding=encoding,
             path_factory=self.path_factory,
@@ -315,6 +360,8 @@ class ConfigLoader(ConfigBackend):
         interpolate: bool = None,
         merge: ConfigLoaderMergeMethod | Merge = None,
         merge_options: dict[str] = None,
+        allow_commands: bool = None,
+        sandbox: bool = None,
         **reader_args: object,
     ) -> object:
         """Load, merge, and (optionally) interpolate one or more configuration sources.
@@ -363,6 +410,7 @@ class ConfigLoader(ConfigBackend):
         """
         encoding = encoding or self.encoding
         interpolate = self.interpolate if interpolate is None else interpolate
+        sandbox = self.sandbox if sandbox is None else sandbox
         merge = (
             merge
             if isinstance(merge, Merge)
@@ -396,6 +444,7 @@ class ConfigLoader(ConfigBackend):
                     loader=loader,
                     transform=transform,
                     key_factory=key_factory,
+                    allow_commands=allow_commands,
                     **reader_args,
                 )
                 if _join_init:
@@ -438,7 +487,7 @@ class ConfigLoader(ConfigBackend):
 
         if interpolate:
             import os
-            custom_env = _get_jinja_env(self.strict)
+            custom_env = _get_jinja_env(self.strict, sandbox)
 
             # Auto-inject env context if requested
             globals_dict = {}
@@ -526,7 +575,7 @@ class ConfigLoader(ConfigBackend):
         """
         interpolate = self.interpolate if interpolate is None else interpolate
         encoding = encoding or self.encoding
-        custom_env = _get_jinja_env(self.strict) if interpolate else None
+        custom_env = _get_jinja_env(self.strict, self.sandbox) if interpolate else None
         for path in parse_sources(
             pathname,
             base_dir=self.base_dir,
