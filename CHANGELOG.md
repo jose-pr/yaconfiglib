@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `ConfigLoader.load(merge_options=...)` no longer permanently overwrites the
+  instance's `merge_options` — the documented per-call override was leaking into
+  every subsequent `load()`.
+- Backend resolution is now deterministic: recursive backend discovery returns a
+  definition-ordered list instead of a `set`, so when two backends' patterns both
+  match a path, the first-registered one reliably wins (previously hash-order
+  dependent).
+- Constructing a `ConfigLoader` (including the import-time default instance) no
+  longer calls `setLevel()` on the module logger — library code no longer mutates
+  global logging state.
+- Stream and unnamed in-memory sources each get a unique virtual path; previously
+  every stream materialized to the same `MemPath("stream")`, so resolving sources
+  up front left all of them holding the last stream's content.
+- `CommandBackend` decodes command output as UTF-8 (or an explicit `encoding=`)
+  instead of the locale codec, which mangled UTF-8 output on Windows; temp-file
+  fallback sources are cleaned up at exit and their suffixes sanitized.
+
 ## [0.10.0] - 2026-07-18
 
 ### Added

@@ -8,8 +8,11 @@ concrete :class:`~pathlib.Path`-like objects ready for a backend to read.
 
 from __future__ import annotations
 
+import atexit as _atexit
 import io as _io
+import itertools as _itertools
 import logging
+import os as _os
 import typing as _ty
 import glob as _glob
 import tempfile as _tempfile
@@ -30,6 +33,48 @@ logger = logging.getLogger(__name__)
 SourceLike = _ty.Union[str, _ty.Any, _io.IOBase, bytes]
 
 _CMD_REGEX = _re.compile(r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:)", _re.IGNORECASE)
+
+#: Monotonic counter giving every stream / unnamed in-memory source a unique
+#: virtual name. Without it every stream materialized to the SAME
+#: ``MemPath("stream")``, so callers that resolved sources up front
+#: (``list(parse_sources(...))``) saw every path holding the LAST stream's
+#: content.
+_SOURCE_COUNTER = _itertools.count()
+
+# Temp files created by the no-pathlib_next fallback (delete=False so the
+# backend can re-open them). Best-effort removal at interpreter exit — they
+# previously leaked one file per materialized source.
+_TEMP_SOURCES: list[str] = []
+
+
+def _cleanup_temp_sources() -> None:
+    for name in _TEMP_SOURCES:
+        try:
+            _os.unlink(name)
+        except OSError:
+            pass
+
+
+_atexit.register(_cleanup_temp_sources)
+
+
+def _materialize_temp(content: str | bytes, encoding: str, suffix: str) -> Path:
+    """Write *content* to a tracked temp file and return its Path.
+
+    The suffix is reduced to a basename (separators stripped) so a virtual
+    filename from an in-memory ``#!`` marker line can never steer the temp
+    file outside the temp directory.
+    """
+    mode = "w" if isinstance(content, str) else "wb"
+    kwargs = {"encoding": encoding} if isinstance(content, str) else {}
+    safe_suffix = _os.path.basename(str(suffix).replace("\\", "/")) if suffix else ""
+    with _tempfile.NamedTemporaryFile(
+        mode=mode, delete=False, suffix="-" + (safe_suffix or "source.yaml"), **kwargs
+    ) as tmp:
+        tmp.write(content)
+        name = tmp.name
+    _TEMP_SOURCES.append(name)
+    return Path(name)
 
 
 def has_glob_pattern(path: Path) -> bool:
@@ -97,14 +142,14 @@ def parse_sources(
         newline = "\n"
 
         if isinstance(source, bytes):
-            path_marker = path_marker.encode(encoding)
-            newline = newline.encode(encoding)
+            path_marker = path_marker.encode(encoding or "utf-8")
+            newline = newline.encode(encoding or "utf-8")
 
         # Handle file streams (in-memory or real)
         if isinstance(source, _io.IOBase):
             content = source.read()
             if MemPath is not None:
-                path = MemPath("stream")
+                path = MemPath(f"stream-{next(_SOURCE_COUNTER)}")
                 path.parent.mkdir(parents=True, exist_ok=True)
                 if isinstance(content, str):
                     path.write_text(content, encoding=encoding)
@@ -113,12 +158,7 @@ def parse_sources(
                 yield path
             else:
                 # Fallback to temp file if MemPath is not available
-                mode = "w" if isinstance(content, str) else "wb"
-                temp_kwargs = {"encoding": encoding} if isinstance(content, str) else {}
-                with _tempfile.NamedTemporaryFile(mode=mode, delete=False, suffix=".yaml", **temp_kwargs) as tmp:
-                    tmp.write(content)
-                    tmp_path = Path(tmp.name)
-                yield tmp_path
+                yield _materialize_temp(content, encoding, ".yaml")
             continue
 
         elif isinstance(source, (str, Path, bytes)):
@@ -127,7 +167,11 @@ def parse_sources(
                 logger.debug("loading config doc from memory ...")
                 filename = filename.removeprefix(path_marker)
                 if isinstance(filename, bytes):
-                    filename = filename.decode(encoding)
+                    filename = filename.decode(encoding or "utf-8")
+                if not filename:
+                    # Unnamed in-memory docs each get a unique virtual name so
+                    # two of them never share (and overwrite) one MemPath.
+                    filename = f"mem-{next(_SOURCE_COUNTER)}"
                 if MemPath is not None:
                     path = MemPath(filename)
                     path.parent.mkdir(parents=True, exist_ok=True)
@@ -138,12 +182,7 @@ def parse_sources(
                     yield path
                 else:
                     # Fallback to temp file if MemPath is not available
-                    mode = "wb" if isinstance(source, bytes) else "w"
-                    temp_kwargs = {"encoding": encoding} if not isinstance(source, bytes) else {}
-                    with _tempfile.NamedTemporaryFile(mode=mode, delete=False, suffix=filename, **temp_kwargs) as tmp:
-                        tmp.write(source)
-                        tmp_path = Path(tmp.name)
-                    yield tmp_path
+                    yield _materialize_temp(source, encoding, filename)
                 continue
             elif isinstance(source, Path):
                 is_cmd = bool(_CMD_REGEX.match(str(source)))
