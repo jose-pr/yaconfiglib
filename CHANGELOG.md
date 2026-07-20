@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-20
+
 ### Changed
 - Narrowed `typed_merge`'s `get_type_hints` fallback to
   `(TypeError, NameError, AttributeError)`; the loader/command broad error
