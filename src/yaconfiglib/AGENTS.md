@@ -3,7 +3,7 @@
 Header-file-style reference for the `yaconfiglib` package: every public export with its
 signature, arguments, contract, and gotchas, so this module can be consumed without
 reading its source. Kept current with the public API. For the library overview,
-features, and code layout, see the repo-root `AGENTS.md`.
+features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 
 ## Top-level (`import yaconfiglib`)
 
