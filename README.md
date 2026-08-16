@@ -22,7 +22,7 @@ Zero required runtime dependencies (except standard pathlib, with optional packa
 - **YAML Includes**: Out-of-the-box support for `!include` and `!load` YAML constructors to seamlessly and recursively import child configurations or commands.
 - **Advanced Templating**: Interleave configurations with Jinja2. Generate configuration blocks dynamically, auto-inject `os.environ` via `env.VAR_NAME`, or reference previously declared values using Jinja's `{% do %}` statements.
 - **Environment Overlays**: Load prefixed environment variables as flat or nested configuration, with optional scalar coercion for booleans, numbers, nulls, arrays, and objects.
-- **Path Agnostic**: Compatible with both standard `pathlib.Path` and optionally [pathlib_next](https://github.com/jose-pr/pathlib_next) for URI loading (HTTP, SFTP, etc.) exactly like standard file paths.
+- **Path Agnostic**: Compatible with both standard `pathlib.Path` and optionally [pathlib_next](https://github.com/jose-pr/pathlib-next) for URI loading (HTTP, SFTP, etc.) exactly like standard file paths.
 
 ---
 
