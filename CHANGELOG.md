@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-08-16
+
 ### Fixed
 - **`sandbox=True` no longer breaks bare `{{ expr }}` values.** The
   type-preserving expression path captured its result with
@@ -204,7 +206,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Legacy references and code blocks tied to `hiyapyco`.
 
-[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.6...HEAD
+[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/jose-pr/yaconfiglib/compare/v0.11.0...v0.11.1
+[0.11.0]: https://github.com/jose-pr/yaconfiglib/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.8...v0.10.0
+[0.9.8]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.7...v0.9.8
+[0.9.7]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.6...v0.9.7
 [0.9.6]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.5...v0.9.6
 [0.9.5]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.5
 [0.9.4]: https://github.com/jose-pr/yaconfiglib/releases/tag/v0.9.4
