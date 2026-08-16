@@ -372,6 +372,30 @@ class TestSecurityControls:
         result = ConfigLoader(interpolate=True, sandbox=True).load(payload)
         assert result["greeting"] == "hello world"
 
+    def test_sandbox_allows_pure_expression_interpolation(self):
+        # Regression: a BARE `{{ expr }}` value routes through the
+        # type-preserving eval() path, whose result capture used to be
+        # `_meta.__setitem__(...)`. The sandbox rejects underscore ATTRIBUTES,
+        # so the capture — not the user's expression — raised SecurityError,
+        # breaking every pure-expression value under sandbox=True. The
+        # mixed-text test above only covers the compile() path, which is why a
+        # green suite hid this.
+        from yaconfiglib import ConfigLoader
+
+        payload = "#!\nname: world\ngreeting: \"{{ name }}\"\n"
+        result = ConfigLoader(interpolate=True, sandbox=True).load(payload)
+        assert result["greeting"] == "world"
+
+    def test_sandbox_pure_expression_preserves_type(self):
+        # The eval() path exists to keep non-string types; verify it still does
+        # so inside the sandbox rather than degrading to a rendered string.
+        from yaconfiglib import ConfigLoader
+
+        payload = "#!\nbase: 21\ndoubled: \"{{ base * 2 }}\"\n"
+        result = ConfigLoader(interpolate=True, sandbox=True).load(payload)
+        assert result["doubled"] == 42
+        assert isinstance(result["doubled"], int)
+
 
 # ---------------------------------------------------------------------------
 # Coverage gaps: ignore_error predicate, Hash merge, override isolation
@@ -439,3 +463,64 @@ class TestPerCallOverrideIsolation:
         )
         after = (loader.merge, loader.interpolate, loader.merge_options, loader.sandbox)
         assert before == after
+
+
+# ---------------------------------------------------------------------------
+# Recursive glob expansion
+#
+# Regression: `recursive` was documented on the constructor, on load(), and in
+# the shipped API header, but neither load() nor load_all() forwarded it to
+# parse_sources() — so glob expansion always ran non-recursively and both the
+# instance setting and the per-call override were silent no-ops. _load() also
+# resolved a `recursive` local it never used (glob expansion happens before
+# _load is reached).
+# ---------------------------------------------------------------------------
+
+class TestRecursiveGlob:
+    @staticmethod
+    def _tree(tmp_path):
+        (tmp_path / "top.yaml").write_text("a: 1\n")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "nested.yaml").write_text("b: 2\n")
+
+    def test_instance_recursive_true_includes_nested(self, tmp_path):
+        self._tree(tmp_path)
+        loader = ConfigLoader(
+            base_dir=tmp_path,
+            recursive=True,
+            merge=ConfigLoaderMergeMethod.Deep,
+        )
+        assert loader.load("**/*.yaml") == {"a": 1, "b": 2}
+
+    def test_per_call_recursive_true_includes_nested(self, tmp_path):
+        self._tree(tmp_path)
+        loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Deep)
+        assert loader.load("**/*.yaml", recursive=True) == {"a": 1, "b": 2}
+
+    def test_per_call_false_overrides_instance_true(self, tmp_path):
+        self._tree(tmp_path)
+        loader = ConfigLoader(
+            base_dir=tmp_path,
+            recursive=True,
+            merge=ConfigLoaderMergeMethod.Deep,
+        )
+        # The per-call override must win, i.e. it must not pick up the
+        # instance's True — which is only observable now that either reaches
+        # parse_sources at all.
+        assert loader.load("**/*.yaml", recursive=False) == {"b": 2}
+
+    def test_default_non_recursive_behavior_unchanged(self, tmp_path):
+        # Pins the pre-fix default so the fix is additive: with recursive unset
+        # the expansion is unchanged from the 0.11.0 behavior.
+        self._tree(tmp_path)
+        loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Deep)
+        assert loader.load("**/*.yaml") == {"b": 2}
+
+    def test_load_all_honors_instance_recursive(self, tmp_path):
+        self._tree(tmp_path)
+        recursive_docs = list(
+            ConfigLoader(base_dir=tmp_path, recursive=True).load_all("**/*.yaml")
+        )
+        assert {"a": 1} in recursive_docs and {"b": 2} in recursive_docs
+        plain_docs = list(ConfigLoader(base_dir=tmp_path).load_all("**/*.yaml"))
+        assert plain_docs == [{"b": 2}]

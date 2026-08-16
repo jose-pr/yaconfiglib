@@ -98,15 +98,23 @@ def eval(
     if cached is not None:
         return cached
 
+    # The result is captured by CALLING a plain function bound as a render
+    # variable — never by reaching for an attribute. jinja2's
+    # SandboxedEnvironment rejects every attribute whose name starts with "_",
+    # so the previous `_meta.__setitem__('result', ...)` capture raised
+    # SecurityError for every bare `{{ expr }}` under sandbox=True (the capture
+    # mechanism tripped the sandbox, not the user's expression). Names are not
+    # sandboxed, and a bound builtin method is safely callable, so `_set` works
+    # in both environments. Do not reintroduce attribute access here.
     template = load_template(
-        "{% do _meta.__setitem__('result', " + code + ") %}",
+        "{% do _set('result', " + code + ") %}",
         environment=env,
         globals=globals,
     )
 
     def _eval(**kwargs) -> object:
         _meta: dict = {}
-        template.render(_meta=_meta, **kwargs)
+        template.render(_set=_meta.__setitem__, **kwargs)
         res = _meta["result"]
         from jinja2 import Undefined
         if isinstance(res, Undefined):

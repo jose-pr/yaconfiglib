@@ -33,6 +33,29 @@ class TestEval:
         fn = j2.eval("dict(a=1, b=2)")
         assert fn() == {"a": 1, "b": 2}
 
+    def test_expression_works_under_sandboxed_environment(self):
+        # Regression: eval() captured its result via `_meta.__setitem__`, an
+        # underscore ATTRIBUTE access, which jinja2's SandboxedEnvironment
+        # refuses — so every eval() raised SecurityError under a sandbox. The
+        # capture is now a plain callable bound as a render NAME (`_set`),
+        # which the sandbox permits. Type preservation must survive too.
+        from jinja2.sandbox import SandboxedEnvironment
+
+        env = SandboxedEnvironment(extensions=["jinja2.ext.do"])
+        assert j2.eval("1 + 2", environment=env)() == 3
+        assert j2.eval("x * 2", environment=env)(x=5) == 10
+        assert isinstance(j2.eval("x * 2", environment=env)(x=5), int)
+
+    def test_sandboxed_environment_still_blocks_ssti(self):
+        # The fix must not weaken the sandbox: attribute traversal into Python
+        # internals still has to raise, so eval() is not an SSTI escape hatch.
+        from jinja2.exceptions import SecurityError
+        from jinja2.sandbox import SandboxedEnvironment
+
+        env = SandboxedEnvironment(extensions=["jinja2.ext.do"])
+        with pytest.raises(SecurityError):
+            j2.eval("''.__class__.__mro__", environment=env)()
+
 
 # ---------------------------------------------------------------------------
 # interpolate

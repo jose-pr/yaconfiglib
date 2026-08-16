@@ -273,7 +273,6 @@ class ConfigLoader(ConfigBackend):
         path: Path,
         *,
         encoding: str,
-        recursive: bool = None,
         loader: str = None,
         transform: str = None,
         key_factory: str | typing.Callable[[Path], str] = None,
@@ -282,7 +281,12 @@ class ConfigLoader(ConfigBackend):
         **reader_args,
     ) -> tuple[str, object]:
 
-        recursive = self.recursive if recursive is None else recursive
+        # NOTE: `recursive` is deliberately NOT a parameter here. Glob expansion
+        # happens in parse_sources(), before _load() is ever called, so a
+        # `recursive` resolved at this point could never affect anything — it
+        # used to be computed here and dropped on the floor. load()/load_all()
+        # now pass it to parse_sources() instead. No backend reads it either, so
+        # it must not reach **reader_args.
         allow_commands = (
             self.allow_commands if allow_commands is None else allow_commands
         )
@@ -411,6 +415,7 @@ class ConfigLoader(ConfigBackend):
         encoding = encoding or self.encoding
         interpolate = self.interpolate if interpolate is None else interpolate
         sandbox = self.sandbox if sandbox is None else sandbox
+        recursive = self.recursive if recursive is None else recursive
         merge = (
             merge
             if isinstance(merge, Merge)
@@ -435,11 +440,11 @@ class ConfigLoader(ConfigBackend):
             base_dir=self.base_dir,
             encoding=encoding,
             path_factory=self.path_factory,
+            recursive=recursive,
         ):
             try:
                 name, result = self._load(
                     path,
-                    recursive=recursive,
                     encoding=encoding,
                     loader=loader,
                     transform=transform,
@@ -589,6 +594,7 @@ class ConfigLoader(ConfigBackend):
             base_dir=self.base_dir,
             encoding=encoding,
             path_factory=self.path_factory,
+            recursive=self.recursive,
         ):
             value = None
             try:

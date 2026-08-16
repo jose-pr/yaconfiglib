@@ -271,13 +271,19 @@ class MergeMethod(IntEnum):
             # Merge dict elements by position if requested.
             for i, a_item in enumerate(result):
                 if isinstance(a_item, typing.Mapping) and i in b_dicts:
-                    b_item = b_dicts.pop(i)
+                    # PEEK, do not pop: only a dict that actually merges leaves
+                    # b_dicts here. Popping before the overlap check dropped a
+                    # non-overlapping positional dict entirely — it was neither
+                    # merged nor left for the append loop below (silent data
+                    # loss, e.g. Deep([{"k":1}], [{"z":9}], mergelists=True)
+                    # returned [{'k': 1}]).
+                    b_item = b_dicts[i]
                     # Only merge when at least one key overlaps.
                     if any(k in a_item for k in b_item):
+                        del b_dicts[i]
                         result[i] = self._deep(
                             a_item, b_item, memo=memo, mergelists=mergelists, **options
                         )
-                        continue
 
             # Append any remaining b dict entries that were not merged.
             for v in b_dicts.values():

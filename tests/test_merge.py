@@ -188,6 +188,20 @@ class TestDeepMerge:
         assert len(result) == 1
         assert result[0]["v"] == "b"
 
+    def test_mergelists_true_keeps_nonoverlapping_dict(self):
+        # Regression: a positionally-matched b dict sharing NO key with the a
+        # dict used to be popped before the overlap check, so it was neither
+        # merged nor appended — it vanished (returned [{'k': 1}]).
+        result = self.m([{"k": 1}], [{"z": 9}], mergelists=True)
+        assert result == [{"k": 1}, {"z": 9}]
+
+    def test_mergelists_true_mixed_overlap_and_nonoverlap(self):
+        # First position overlaps (merges in place), second does not (appends).
+        a = [{"k": 1}, {"p": 1}]
+        b = [{"k": 2}, {"q": 2}]
+        result = self.m(a, b, mergelists=True)
+        assert result == [{"k": 2}, {"p": 1}, {"q": 2}]
+
 
 # ---------------------------------------------------------------------------
 # typed_merge

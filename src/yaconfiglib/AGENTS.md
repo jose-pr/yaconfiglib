@@ -36,6 +36,10 @@ inject_env=False, strict=False, allow_commands=True, sandbox=False)`
 All constructor args become instance defaults, overridable per-call. Notable ones:
 
 - `base_dir` — directory relative file-path sources resolve against.
+- `recursive` — whether glob sources (`**/*.yaml`) recurse into subdirectories.
+  Default `False`. Forwarded to `parse_sources` by both `.load()` (which also honors a
+  per-call `recursive=`) and `.load_all()` (instance setting only — it has no per-call
+  parameter).
 - `key_factory` — `(path, value) -> str` merge/document key (default: filename stem);
   as a string it's a `Path` attribute name, or `"%<jinja-expr>"` for a template.
 - `merge` — a `ConfigLoaderMergeMethod` (or any `Merge`-compatible callable) applied
@@ -49,7 +53,8 @@ All constructor args become instance defaults, overridable per-call. Notable one
   directly-constructed `CommandBackend` instance.
 - `sandbox=True` — interpolation runs in Jinja2's `SandboxedEnvironment`, blocking
   attribute traversal into Python internals (SSTI protection) for untrusted config
-  values.
+  values. Applies to both template strings and bare `{{ expr }}` values, and bare
+  expressions keep their non-string type under the sandbox exactly as without it.
 - `inject_env=True` — with `interpolate`, exposes `os.environ` to templates as `env`.
 
 ### Methods

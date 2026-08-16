@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`sandbox=True` no longer breaks bare `{{ expr }}` values.** The
+  type-preserving expression path captured its result with
+  `_meta.__setitem__(...)`, an underscore attribute access that Jinja2's
+  `SandboxedEnvironment` refuses — so every pure-expression config value raised
+  `SecurityError` under the 0.11.0 `sandbox` control, while mixed-text templates
+  (`"hello {{ name }}"`) worked. The capture is now a plain callable bound as a
+  render name; SSTI payloads still raise `SecurityError` as before.
+- **The `recursive` option now actually recurses.** `ConfigLoader(recursive=True)`
+  and the per-call `load(recursive=...)` override were documented but never
+  forwarded to `parse_sources`, making both silent no-ops; `load_all()` now
+  honors the instance setting too. Default (`False`) glob behavior is unchanged.
+- **Deep merge with `mergelists=True` no longer drops non-overlapping dicts.** A
+  positionally-matched dict from the right-hand list that shared no key with its
+  counterpart was removed from the pending set before the overlap check, so it
+  was neither merged nor appended — `Deep([{"k": 1}], [{"z": 9}], mergelists=True)`
+  returned `[{'k': 1}]` instead of `[{'k': 1}, {'z': 9}]`. Silent data loss.
+
 ## [0.11.0] - 2026-07-20
 
 ### Changed
