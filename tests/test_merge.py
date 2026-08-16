@@ -1,7 +1,9 @@
 """
 Tests for MergeMethod (simple, substitute, deep) and typed_merge.
 """
+import typing
 from argparse import Namespace
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -223,6 +225,99 @@ class TestTypedMerge:
 
         assert yaconfiglib.typed_merge is typed_merge
         assert "typed_merge" in yaconfiglib.__all__
+
+
+# ---------------------------------------------------------------------------
+# typed_merge — parametrized generics
+#
+# Regression cluster: generic args were read off the ORIGINAL `cls` rather than
+# the union-unwrapped origin, and the sequence branch tested a class object with
+# instance checks so it could never run. Result: plain generics coerced nothing,
+# union-wrapped generics picked NoneType as the child type and crashed, and
+# sequence element types were ignored. Nothing in the suite exercised `cls_args`
+# — every typed case used dataclass/Namespace field hints — which is how all
+# three shipped green. `typing.Dict`/`List` spellings keep the 3.9 floor.
+# ---------------------------------------------------------------------------
+
+class TestTypedMergeGenerics:
+    def test_mapping_value_type_is_coerced(self):
+        # Was {'a': '1'}: cls_args came back empty for a non-union generic, so
+        # child_cls was never set and the value passed through uncoerced.
+        result = typed_merge(typing.Dict[str, int], {"a": "1"})
+        assert result == {"a": 1}
+        assert isinstance(result["a"], int)
+
+    def test_mapping_value_coercion_across_several_objects(self):
+        result = typed_merge(typing.Dict[str, int], {"a": "1"}, {"a": "2", "b": "3"})
+        assert result == {"a": 2, "b": 3}
+        assert all(isinstance(v, int) for v in result.values())
+
+    def test_sequence_element_type_is_coerced(self):
+        # Was [1, 2]: the sequence branch was unreachable, so this fell through
+        # to the scalar tail and returned the list unchanged.
+        result = typed_merge(typing.List[str], [1, 2])
+        assert result == ["1", "2"]
+        assert all(isinstance(v, str) for v in result)
+
+    def test_sequence_last_object_wins(self):
+        # Sequences keep last-object-wins semantics — not element-wise merging.
+        assert typed_merge(typing.List[str], [1, 2, 3], [9]) == ["9"]
+
+    def test_tuple_origin_rebuilds_a_tuple(self):
+        result = typed_merge(typing.Tuple[str, ...], (1, 2))
+        assert result == ("1", "2")
+        assert isinstance(result, tuple)
+
+    def test_optional_mapping_merges_instead_of_crashing(self):
+        # Was TypeError: NoneType takes no arguments — cls_args held the
+        # UNION's args, so child_cls became NoneType.
+        result = typed_merge(typing.Optional[typing.Dict[str, int]], {"a": 1}, {"b": "2"})
+        assert result == {"a": 1, "b": 2}
+
+    def test_optional_sequence_coerces_elements(self):
+        assert typed_merge(typing.Optional[typing.List[str]], [1, 2]) == ["1", "2"]
+
+    def test_optional_scalar_last_wins(self):
+        # Union unwrap leaves a bare `int`, which has no args — the scalar tail.
+        assert typed_merge(typing.Optional[int], 1, "2") == 2
+
+    def test_str_hint_is_not_treated_as_a_sequence(self):
+        # str/bytes are Sequences; if they reached the sequence branch a string
+        # hint would be rebuilt character by character.
+        assert typed_merge(str, "hello") == "hello"
+        assert typed_merge(typing.Optional[str], "a", "b") == "b"
+
+    def test_bare_unparametrized_generic_has_no_args(self):
+        # No args → child_cls stays None → elements keep their own types.
+        result = typed_merge(list, [1, "a"])
+        assert result == [1, "a"]
+
+    def test_dataclass_field_annotated_bare_list(self):
+        # Pins the no-args path through a dataclass field hint: the element
+        # types must survive untouched rather than being coerced to anything.
+        @dataclass
+        class Cfg:
+            items: list = field(default_factory=list)
+
+        merged = typed_merge(Cfg, Cfg(items=[1, 2]), Cfg(items=[3]))
+        assert merged.items == [3]
+
+    def test_dataclass_field_annotated_parametrized_list(self):
+        @dataclass
+        class Cfg:
+            ports: typing.List[int] = field(default_factory=list)
+
+        merged = typed_merge(Cfg, Cfg(ports=["1"]), Cfg(ports=["8080", "443"]))
+        assert merged.ports == [8080, 443]
+        assert all(isinstance(p, int) for p in merged.ports)
+
+    def test_dataclass_field_annotated_parametrized_dict(self):
+        @dataclass
+        class Cfg:
+            limits: typing.Dict[str, int] = field(default_factory=dict)
+
+        merged = typed_merge(Cfg, Cfg(limits={"a": "1"}), Cfg(limits={"b": "2"}))
+        assert merged.limits == {"a": 1, "b": 2}
 
 
 # ---------------------------------------------------------------------------

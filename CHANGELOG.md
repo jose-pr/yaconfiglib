@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counterpart was removed from the pending set before the overlap check, so it
   was neither merged nor appended — `Deep([{"k": 1}], [{"z": 9}], mergelists=True)`
   returned `[{'k': 1}]` instead of `[{'k': 1}, {'z': 9}]`. Silent data loss.
+- **`typed_merge` now actually reads parametrized-generic arguments.** Three
+  defects shared one root cause — type args were taken from the original `cls`
+  instead of the union-unwrapped origin, and the sequence branch tested a class
+  object with instance checks so it could never run. `Dict[str, int]` coerced
+  nothing (`{"a": "1"}` stayed a string), `List[str]` returned its elements
+  uncoerced, and `Optional[Dict[str, int]]` picked `NoneType` as the value type
+  and raised `TypeError: NoneType takes no arguments`. Unparametrized `dict`/
+  `list` hints and `str`/`bytes` are unaffected.
 
 ## [0.11.0] - 2026-07-20
 

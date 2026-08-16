@@ -121,6 +121,12 @@ distinguish merge branches.
   `None`. `init=False` builds via `cls.__new__` + attribute/item assignment instead of
   `cls(**merged)` — use when `__init__` has required positional-only args or side
   effects you want to skip.
+  - **Parametrized generics** are honored: `Dict[str, int]` coerces each value to the
+    mapping's value type, `List[str]`/`Tuple[str, ...]` coerce each element, and an
+    unparametrized `dict`/`list` leaves element types alone. A `Union`/`Optional`
+    wrapper is unwrapped to its first concrete member first, so
+    `Optional[Dict[str, int]]` behaves exactly like `Dict[str, int]`. `str`/`bytes`
+    hints are never treated as element sequences.
   - A field annotated with a **non-class hint** (e.g. a factory function like
     `netutils.IPNetwork`) is treated as opaque: last value wins, coerced through the
     callable when possible.

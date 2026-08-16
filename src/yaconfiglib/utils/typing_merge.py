@@ -5,8 +5,6 @@ import typing
 from argparse import Namespace
 from dataclasses import is_dataclass
 
-from .merge import is_scalar, is_array
-
 T = typing.TypeVar("T")
 
 __all__ = ["typed_merge", "OpaqueMerge", "opaque", "TypedNamespace"]
@@ -40,8 +38,16 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
             continue
         break
 
-    cls_args = typing.get_args(cls) if cls is not origin else ()
-    origin = getattr(origin, "__origin__", origin)
+    # Generic args come from the UNWRAPPED origin, and must be read before the
+    # __origin__ strip below. Reading them from `cls` was wrong in both
+    # directions: for a plain generic the unwrap loop leaves `origin is cls`, so
+    # the old `if cls is not origin else ()` guard yielded () and no element type
+    # was ever recovered; for a union it yielded the UNION's args, so
+    # Optional[Dict[str, int]] produced child_cls=NoneType and merging crashed
+    # with "NoneType takes no arguments".
+    cls_args = typing.get_args(origin)
+    _stripped = typing.get_origin(origin)
+    origin = origin if _stripped is None else _stripped
 
     # A resolved hint that is not a class (e.g. an ipaddress-style factory
     # FUNCTION used as a field annotation, such as netutils.IPNetwork) cannot
@@ -73,7 +79,13 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
             child_cls = cls_args[0]
 
     # Sequence type: use last object, convert each element via child type.
-    if is_array(origin) and not is_scalar(origin):
+    # The test is a CLASS test on the unwrapped origin. It used to be
+    # `is_array(origin) and not is_scalar(origin)` — instance checks applied to a
+    # class object, so `isinstance(list, (list, tuple))` was False and this whole
+    # branch was unreachable; List[str] fell through to the scalar tail and
+    # returned its elements uncoerced. str/bytes are Sequences too and must be
+    # excluded, or every string hint would be rebuilt character by character.
+    if issubclass(origin, typing.Sequence) and not issubclass(origin, (str, bytes)):
         value = objects[-1]
         return origin(
             typed_merge(child_cls or type(item), item, init=init) for item in value
