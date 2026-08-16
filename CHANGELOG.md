@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uncoerced, and `Optional[Dict[str, int]]` picked `NoneType` as the value type
   and raised `TypeError: NoneType takes no arguments`. Unparametrized `dict`/
   `list` hints and `str`/`bytes` are unaffected.
+- **The Jinja2 backend no longer crashes when `pathlib_next` is absent.** Its
+  ImportError fallback set `MemPath = None` and `load()` called it anyway, so
+  every `.j2`/`.jinja2` source raised `TypeError: 'NoneType' object is not
+  callable` — despite the class docstring promising "a real temp file when
+  `pathlib_next` is unavailable". It now materializes a tracked temp file,
+  reusing the mechanism `utils/source.py` already used for in-memory sources,
+  and keeps the rendered basename so backend auto-detection still resolves
+  `settings.yaml.j2` to the YAML backend.
 
 ## [0.11.0] - 2026-07-20
 

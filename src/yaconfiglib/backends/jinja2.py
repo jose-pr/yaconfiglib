@@ -13,6 +13,7 @@ except ImportError:
 
 from yaconfiglib.backends.base import ConfigBackend
 from yaconfiglib.utils import jinja2
+from yaconfiglib.utils.source import _materialize_temp
 
 __all__ = ["Jinja2ConfigLoader"]
 
@@ -72,16 +73,26 @@ class Jinja2ConfigLoader(ConfigBackend):
         )
         pathname = PosixPathname(path.as_posix())
         rendered = template.render(pathname=pathname)
-        mempath = MemPath(
-            path.with_name(path.stem).as_posix(),
-        )
-        mempath.parent.mkdir(parents=True, exist_ok=True)
-        mempath.write_text(rendered, encoding=encoding)
+        # Name the rendered document after the template minus its .j2/.jinja2
+        # suffix, so backend auto-detection resolves settings.yaml.j2 -> YAML.
+        rendered_name = path.with_name(path.stem).as_posix()
+        if MemPath is None:
+            # Without pathlib_next this used to call MemPath(...) anyway —
+            # TypeError: 'NoneType' object is not callable for any .j2 source —
+            # despite this class's own docstring promising "a real temp file
+            # when pathlib_next is unavailable". Reuse source.py's existing
+            # temp-file materializer, which keeps the rendered basename as the
+            # temp file's suffix so auto-detection still works.
+            target = _materialize_temp(rendered, encoding, rendered_name)
+        else:
+            target = MemPath(rendered_name)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(rendered, encoding=encoding)
         parent_loader = loader
-        rendered_loader = ConfigBackend.get_class_by_path(mempath)()
+        rendered_loader = ConfigBackend.get_class_by_path(target)()
 
         rendered = rendered_loader.load(
-            mempath,
+            target,
             encoding=encoding,
             loader=parent_loader,
             **kwargs,

@@ -104,6 +104,28 @@ class TestRegistryBackends:
         result = loader.load("config.yaml.j2", environment=environment)
         assert result == {"value": "from-env"}
 
+    def test_jinja_backend_falls_back_to_temp_file_without_pathlib_next(
+        self, tmp_path, monkeypatch
+    ):
+        # Regression: the ImportError fallback set MemPath = None and load()
+        # called it unconditionally, so every .j2 source raised
+        # "TypeError: 'NoneType' object is not callable" without pathlib_next —
+        # even though the class docstring promised "a real temp file when
+        # pathlib_next is unavailable". Simulating the absent import is enough;
+        # MemPath is the only thing this backend uses it for.
+        from yaconfiglib.backends import jinja2 as jinja2_backend
+
+        monkeypatch.setattr(jinja2_backend, "MemPath", None)
+
+        template = tmp_path / "config.yaml.j2"
+        template.write_text("port: {{ 8000 + 80 }}\nname: plain\n")
+
+        loader = ConfigLoader(base_dir=tmp_path)
+        result = loader.load("config.yaml.j2")
+        # Rendered, and still dispatched to the YAML backend by the stripped
+        # filename rather than being read as text.
+        assert result == {"port": 8080, "name": "plain"}
+
 
 class TestCommandBackend:
     def test_cmd_basic_execution_sniffing(self):
