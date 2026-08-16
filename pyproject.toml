@@ -31,7 +31,7 @@ toml = ["toml"]
 yaml = ["pyyaml"]
 transform = ["yaconfiglib[jinja2]"]
 jinja2 = ["jinja2"]
-dev = ["pytest", "build", "hatchling", "twine"]
+dev = ["pytest", "build", "hatchling", "twine", "black"]
 docs = ["mkdocs", "mkdocs-material", "mkdocstrings[python]"]
 
 [project.urls]
@@ -57,4 +57,9 @@ packages = ["src/yaconfiglib"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+# Pinned to the project's MINIMUM supported Python so black never emits syntax
+# the floor cannot parse.
+[tool.black]
+target-version = ["py39"]
 
