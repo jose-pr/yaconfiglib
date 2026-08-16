@@ -175,7 +175,6 @@ class MergeMethod(IntEnum):
             f"Cannot substitute-merge {type(b).__name__!r} into {type(a).__name__!r}"
         )
 
-
     # ------------------------------------------------------------------
     # Deep merge
     # Dicts merged key-by-key recursively.  Lists extended with unique

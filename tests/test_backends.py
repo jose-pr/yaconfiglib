@@ -21,11 +21,11 @@ class TestRegistryBackends:
             "DB_HOST=127.0.0.1 # local database\n"
             "export DB_PORT=5432\n"
             "# Comment\n"
-            "DB_PASS=\"secret # preserved\"\n"
+            'DB_PASS="secret # preserved"\n'
             "DB_TOKEN='abc#123'\n"
             "DB_UNQUOTED_TOKEN=abc#123\n"
         )
-        
+
         loader = ConfigLoader(base_dir=tmp_path)
         result = loader.load("test.env", loader="dotenv")
         assert result == {
@@ -161,7 +161,7 @@ class TestCommandBackend:
     def test_cmd_script_file_extension(self, tmp_path):
         if sys.platform == "win32":
             f = tmp_path / "script.bat"
-            f.write_text("@echo off\necho {\"win\": true}\n")
+            f.write_text('@echo off\necho {"win": true}\n')
         else:
             f = tmp_path / "script.sh"
             f.write_text("#!/bin/sh\necho '{\"unix\": true}'\n")
@@ -191,7 +191,7 @@ class TestCommandBackend:
     def test_cmd_execution_failure(self):
         loader = ConfigLoader()
         # Invalid command execution raises subprocess.CalledProcessError
-        cmd = "cmd://python -c \"import sys; sys.exit(42)\""
+        cmd = 'cmd://python -c "import sys; sys.exit(42)"'
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             loader.load(cmd)
         assert exc_info.value.returncode == 42
@@ -199,7 +199,7 @@ class TestCommandBackend:
     def test_cmd_execution_empty(self):
         loader = ConfigLoader()
         # Empty output should be handled safely (returns empty raw string)
-        cmd = "cmd://python -c \"pass\""
+        cmd = 'cmd://python -c "pass"'
         result = loader.load(cmd)
         assert result == ""
 
@@ -281,8 +281,7 @@ class TestDeterministicDispatch:
         assert isinstance(subs, list)
         for _ in range(10):
             assert (
-                ConfigBackend.get_class_by_path(StdPath("x.zzztest"))
-                is ZzzFirstBackend
+                ConfigBackend.get_class_by_path(StdPath("x.zzztest")) is ZzzFirstBackend
             )
 
 

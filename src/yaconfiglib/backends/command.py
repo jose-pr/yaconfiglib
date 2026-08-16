@@ -39,7 +39,7 @@ class CommandBackend(ConfigBackend):
 
     PATHNAME_REGEX = re.compile(
         r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:).*|.*?\.(sh|bat|ps1|cmd)$",
-        re.IGNORECASE
+        re.IGNORECASE,
     )
     NAME = "command"
 
@@ -47,9 +47,10 @@ class CommandBackend(ConfigBackend):
     def can_load_path(cls, path: Path) -> bool:
         """Return True if *path* matches a command scheme prefix or script extension."""
         path_str = str(path)
-        return (
-            cls.PATHNAME_REGEX.match(path_str) is not None or
-            (cls.PATHNAME_REGEX.match(path.name) is not None if cls.PATHNAME_REGEX else False)
+        return cls.PATHNAME_REGEX.match(path_str) is not None or (
+            cls.PATHNAME_REGEX.match(path.name) is not None
+            if cls.PATHNAME_REGEX
+            else False
         )
 
     def load(
@@ -89,13 +90,11 @@ class CommandBackend(ConfigBackend):
 
         # 1. Parse inline command schemes using regex to handle normalized slashes
         m = re.match(
-            r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:)",
-            path_str,
-            re.IGNORECASE
+            r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:)", path_str, re.IGNORECASE
         )
         if m:
             scheme = m.group(1)
-            command = path_str[m.end():]
+            command = path_str[m.end() :]
             if "+" in scheme:
                 _, scheme_fmt = scheme.split("+", 1)
                 if not explicit_format:
@@ -113,7 +112,7 @@ class CommandBackend(ConfigBackend):
             capture_output=True,
             encoding=encoding or "utf-8",
             errors="replace",
-            check=True
+            check=True,
         )
         output = result.stdout.strip()
 
@@ -162,7 +161,9 @@ class CommandBackend(ConfigBackend):
                 continue
             try:
                 return loads(output, loader=fmt, **loads_options)
-            except Exception:  # noqa: BLE001 - format sniffing must survive ANY parse error
+            except (
+                Exception
+            ):  # noqa: BLE001 - format sniffing must survive ANY parse error
                 # If explicit_format or shebang_format failed and is the only candidate,
                 # we want to propagate the error. Otherwise, continue.
                 if len(candidates) == 1 and (explicit_format or shebang_format):

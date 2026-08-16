@@ -117,6 +117,7 @@ def eval(
         template.render(_set=_meta.__setitem__, **kwargs)
         res = _meta["result"]
         from jinja2 import Undefined
+
         if isinstance(res, Undefined):
             str(res)  # Forces UndefinedError if strict
             return None
@@ -126,7 +127,9 @@ def eval(
     return _eval
 
 
-def interpolate(data: object, globals: dict | None = None, environment: Environment | None = None) -> object:
+def interpolate(
+    data: object, globals: dict | None = None, environment: Environment | None = None
+) -> object:
     """Recursively interpolate Jinja2 templates within *data*.
 
     * **Strings**: rendered as Jinja2 templates.  A bare ``{{ expr }}``

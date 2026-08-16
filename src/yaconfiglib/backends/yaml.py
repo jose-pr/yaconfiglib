@@ -5,10 +5,12 @@ import re
 import typing
 
 import yaml
+
 try:
     from pathlib_next import Path, Pathname
 except ImportError:
     from pathlib import Path
+
     Pathname = Path
 
 from yaconfiglib.backends.base import ConfigBackend

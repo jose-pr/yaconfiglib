@@ -38,10 +38,12 @@ T = typing.TypeVar("T")
 
 _JINJA_ENVS = {}
 
+
 def _get_jinja_env(strict: bool, sandbox: bool = False) -> object:
     key = (strict, sandbox)
     if key not in _JINJA_ENVS:
         from jinja2 import StrictUndefined
+
         env_kwargs = {}
         if strict:
             env_kwargs["undefined"] = StrictUndefined
@@ -423,9 +425,7 @@ class ConfigLoader(ConfigBackend):
         )
         # Per-call override only — must NOT rewrite self.merge_options (doing so
         # made one call's override silently leak into every later load()).
-        merge_options = (
-            self.merge_options if merge_options is None else merge_options
-        )
+        merge_options = self.merge_options if merge_options is None else merge_options
 
         results = default
         _join_init = False
@@ -473,7 +473,9 @@ class ConfigLoader(ConfigBackend):
             # would break that contract. KeyboardInterrupt/SystemExit are
             # BaseException and already excluded. The error is never swallowed
             # silently — it is handed to the predicate and logged.
-            except Exception as error:  # noqa: BLE001 - feeds the ignore_error predicate
+            except (
+                Exception
+            ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
                 logger.debug("load error for %s: %s", path, error)
                 if self.ignore_error(error, path=path, loader=self):
                     continue
@@ -497,6 +499,7 @@ class ConfigLoader(ConfigBackend):
 
         if interpolate:
             import os
+
             custom_env = _get_jinja_env(self.strict, sandbox)
 
             # Auto-inject env context if requested
@@ -512,7 +515,9 @@ class ConfigLoader(ConfigBackend):
                     globals=globals_dict,
                     environment=custom_env,
                 )
-            except Exception as error:  # noqa: BLE001 - feeds the ignore_error predicate
+            except (
+                Exception
+            ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
                 logger.debug("interpolation error: %s", error)
                 if not self.ignore_error(error, result=result, loader=self):
                     raise
@@ -531,11 +536,14 @@ class ConfigLoader(ConfigBackend):
         """
         data = self.load(*pathname, **kwargs)
         if not isinstance(data, dict):
-            raise TypeError("Loaded configuration must be a dictionary to load as a model")
+            raise TypeError(
+                "Loaded configuration must be a dictionary to load as a model"
+            )
 
         # Try Pydantic integration (strictly optional)
         try:
             import pydantic
+
             if issubclass(model_cls, pydantic.BaseModel):
                 # Pydantic V2 and V1 compatibility helper
                 if hasattr(model_cls, "model_validate"):
@@ -547,11 +555,21 @@ class ConfigLoader(ConfigBackend):
 
         # Try dataclass
         from dataclasses import is_dataclass
+
         if is_dataclass(model_cls):
             # Safe init passing only valid dataclass field names
             import inspect
+
             sig = inspect.signature(model_cls.__init__)
-            valid_keys = {name for name, param in sig.parameters.items() if param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)}
+            valid_keys = {
+                name
+                for name, param in sig.parameters.items()
+                if param.kind
+                in (
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+                )
+            }
             filtered = {k: v for k, v in data.items() if k in valid_keys}
             return model_cls(**filtered)
 
@@ -607,17 +625,20 @@ class ConfigLoader(ConfigBackend):
                         globals_dict.update(value)
                     if self.inject_env:
                         import os
+
                         globals_dict["env"] = os.environ
-                    value = jinja2.interpolate(value, globals_dict, environment=custom_env)
+                    value = jinja2.interpolate(
+                        value, globals_dict, environment=custom_env
+                    )
                 if isinstance(value, dict):
                     value = DotAccessibleDict(value)
                 yield value
 
-            except Exception as error:  # noqa: BLE001 - feeds the ignore_error predicate
+            except (
+                Exception
+            ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
                 logger.debug("load_all error for %s: %s", path, error)
-                if not self.ignore_error(
-                    error, path=path, value=value, loader=self
-                ):
+                if not self.ignore_error(error, path=path, value=value, loader=self):
                     raise
 
 
@@ -632,7 +653,9 @@ class DotAccessibleDict(dict):
                 self[name] = val
             return val
         except KeyError:
-            raise AttributeError(f"'DotAccessibleDict' object has no attribute '{name}'")
+            raise AttributeError(
+                f"'DotAccessibleDict' object has no attribute '{name}'"
+            )
 
     def __setattr__(self, name: str, value: object) -> None:
         self[name] = value
@@ -659,7 +682,9 @@ class DotAccessibleDict(dict):
                     return default
                 if current is None:
                     return default
-                if isinstance(current, dict) and not isinstance(current, DotAccessibleDict):
+                if isinstance(current, dict) and not isinstance(
+                    current, DotAccessibleDict
+                ):
                     current = DotAccessibleDict(current)
                     parent[part] = current
             return current
@@ -672,7 +697,19 @@ class DotAccessibleDict(dict):
 
 def load(fp: typing.Any, **kwargs) -> object:
     """Load configuration from a file pointer or file path."""
-    load_keys = {"recursive", "encoding", "loader", "transform", "default", "key_factory", "flatten", "interpolate", "merge", "merge_options", "master"}
+    load_keys = {
+        "recursive",
+        "encoding",
+        "loader",
+        "transform",
+        "default",
+        "key_factory",
+        "flatten",
+        "interpolate",
+        "merge",
+        "merge_options",
+        "master",
+    }
     loader_kwargs = {k: v for k, v in kwargs.items() if k not in load_keys}
     load_kwargs = {k: v for k, v in kwargs.items() if k in load_keys}
     loader_inst = ConfigLoader(**loader_kwargs)
@@ -681,7 +718,19 @@ def load(fp: typing.Any, **kwargs) -> object:
 
 def loads(s: str | bytes, **kwargs) -> object:
     """Load configuration from a string or bytes in memory."""
-    load_keys = {"recursive", "encoding", "loader", "transform", "default", "key_factory", "flatten", "interpolate", "merge", "merge_options", "master"}
+    load_keys = {
+        "recursive",
+        "encoding",
+        "loader",
+        "transform",
+        "default",
+        "key_factory",
+        "flatten",
+        "interpolate",
+        "merge",
+        "merge_options",
+        "master",
+    }
     loader_kwargs = {k: v for k, v in kwargs.items() if k not in load_keys}
     load_kwargs = {k: v for k, v in kwargs.items() if k in load_keys}
     loader_inst = ConfigLoader(**loader_kwargs)
@@ -707,6 +756,7 @@ def dump(obj: object, fp: typing.Any, **kwargs) -> None:
 def dumps(obj: object, **kwargs) -> str:
     """Dump configuration object to string (delegates to YamlConfig dumper by default)."""
     from .backends.yaml import YamlConfig
+
     backend = YamlConfig()
     return backend.dumps(obj, **kwargs)
 

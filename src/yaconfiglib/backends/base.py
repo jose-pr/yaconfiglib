@@ -9,6 +9,7 @@ try:
     from pathlib_next import Pathname as _Pathname
 except ImportError:
     from pathlib import Path as _Path  # type: ignore[no-redef]
+
     _LocalPath = _Path
     _Pathname = _Path
 

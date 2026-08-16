@@ -3,12 +3,14 @@ from __future__ import annotations
 import re
 
 from jinja2 import Environment
+
 try:
     from pathlib_next import Path, PosixPathname
     from pathlib_next.mempath import MemPath
 except ImportError:
     from pathlib import Path
     from pathlib import PurePosixPath as PosixPathname  # type: ignore[no-redef]
+
     MemPath = None  # type: ignore[assignment,misc]
 
 from yaconfiglib.backends.base import ConfigBackend

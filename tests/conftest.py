@@ -1,6 +1,7 @@
 """
 Shared pytest fixtures for yaconfiglib tests.
 """
+
 import pathlib
 import pytest
 

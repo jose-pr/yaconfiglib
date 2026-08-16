@@ -21,9 +21,11 @@ import re as _re
 try:
     from pathlib_next import Path, Pathname
     from pathlib_next.mempath import MemPath
+
     HAS_PATHLIB_NEXT = True
 except ImportError:
     from pathlib import Path
+
     Pathname = Path  # fallback
     MemPath = None  # fallback
     HAS_PATHLIB_NEXT = False
@@ -32,7 +34,9 @@ logger = logging.getLogger(__name__)
 
 SourceLike = _ty.Union[str, _ty.Any, _io.IOBase, bytes]
 
-_CMD_REGEX = _re.compile(r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:)", _re.IGNORECASE)
+_CMD_REGEX = _re.compile(
+    r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:)", _re.IGNORECASE
+)
 
 #: Monotonic counter giving every stream / unnamed in-memory source a unique
 #: virtual name. Without it every stream materialized to the SAME

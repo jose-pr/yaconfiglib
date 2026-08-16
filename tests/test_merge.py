@@ -1,6 +1,7 @@
 """
 Tests for MergeMethod (simple, substitute, deep) and typed_merge.
 """
+
 import typing
 from argparse import Namespace
 from dataclasses import dataclass, field
@@ -37,6 +38,7 @@ class _NetConfig(Namespace):
 # is_scalar / is_array helpers
 # ---------------------------------------------------------------------------
 
+
 class TestHelpers:
     def test_scalar_primitives(self):
         for v in (1, 3.14, True, False, "hello", b"bytes", None):
@@ -66,6 +68,7 @@ class TestHelpers:
 # ---------------------------------------------------------------------------
 # Simple merge
 # ---------------------------------------------------------------------------
+
 
 class TestSimpleMerge:
     m = MergeMethod.Simple
@@ -98,6 +101,7 @@ class TestSimpleMerge:
     def test_unsupported_type_raises(self):
         class Weird:
             pass
+
         with pytest.raises(TypeError):
             self.m({}, Weird())
 
@@ -105,6 +109,7 @@ class TestSimpleMerge:
 # ---------------------------------------------------------------------------
 # Substitute merge
 # ---------------------------------------------------------------------------
+
 
 class TestSubstituteMerge:
     m = MergeMethod.Substitute
@@ -141,6 +146,7 @@ class TestSubstituteMerge:
 # ---------------------------------------------------------------------------
 # Deep merge
 # ---------------------------------------------------------------------------
+
 
 class TestDeepMerge:
     m = MergeMethod.Deep
@@ -209,6 +215,7 @@ class TestDeepMerge:
 # typed_merge
 # ---------------------------------------------------------------------------
 
+
 class TestTypedMerge:
     def test_scalar_last_wins(self):
         assert typed_merge(int, 1, 2, 3) == 3
@@ -238,6 +245,7 @@ class TestTypedMerge:
 # — every typed case used dataclass/Namespace field hints — which is how all
 # three shipped green. `typing.Dict`/`List` spellings keep the 3.9 floor.
 # ---------------------------------------------------------------------------
+
 
 class TestTypedMergeGenerics:
     def test_mapping_value_type_is_coerced(self):
@@ -271,7 +279,9 @@ class TestTypedMergeGenerics:
     def test_optional_mapping_merges_instead_of_crashing(self):
         # Was TypeError: NoneType takes no arguments — cls_args held the
         # UNION's args, so child_cls became NoneType.
-        result = typed_merge(typing.Optional[typing.Dict[str, int]], {"a": 1}, {"b": "2"})
+        result = typed_merge(
+            typing.Optional[typing.Dict[str, int]], {"a": 1}, {"b": "2"}
+        )
         assert result == {"a": 1, "b": 2}
 
     def test_optional_sequence_coerces_elements(self):
@@ -324,6 +334,7 @@ class TestTypedMergeGenerics:
 # typed_merge — non-class type hints (factory functions, opaque objects)
 # ---------------------------------------------------------------------------
 
+
 class TestTypedMergeNonClassHint:
     def test_factory_function_hint_coerces_last_value(self):
         # A non-class callable origin: last value wins, coerced through it.
@@ -356,6 +367,7 @@ class TestTypedMergeNonClassHint:
 # ---------------------------------------------------------------------------
 # typed_merge extension hooks: OpaqueMerge / opaque / TypedNamespace
 # ---------------------------------------------------------------------------
+
 
 class TestTypedMergeHooks:
     def test_opaque_mixin_last_wins(self):

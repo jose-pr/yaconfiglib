@@ -1,6 +1,7 @@
 """
 Tests for Jinja2 interpolation utilities (utils/jinja2.py).
 """
+
 import pytest
 
 from yaconfiglib.utils import jinja2 as j2
@@ -9,6 +10,7 @@ from yaconfiglib.utils import jinja2 as j2
 # ---------------------------------------------------------------------------
 # compile / eval helpers
 # ---------------------------------------------------------------------------
+
 
 class TestCompile:
     def test_simple_render(self):
@@ -61,6 +63,7 @@ class TestEval:
 # interpolate
 # ---------------------------------------------------------------------------
 
+
 class TestInterpolate:
     def test_plain_string_no_change(self):
         assert j2.interpolate("hello") == "hello"
@@ -100,7 +103,9 @@ class TestInterpolate:
         assert j2.interpolate(None, {}) is None
 
     def test_interpolate_with_globals(self):
-        result = j2.interpolate("{{ greeting }}, {{ name }}!", {"greeting": "Hi", "name": "Alice"})
+        result = j2.interpolate(
+            "{{ greeting }}, {{ name }}!", {"greeting": "Hi", "name": "Alice"}
+        )
         assert result == "Hi, Alice!"
 
 
@@ -108,9 +113,11 @@ class TestInterpolate:
 # load_template
 # ---------------------------------------------------------------------------
 
+
 class TestLoadTemplate:
     def test_custom_environment(self):
         from jinja2 import Environment
+
         env = Environment()
         t = j2.load_template("{{ x }}", environment=env)
         assert t.render(x="ok") == "ok"
@@ -120,6 +127,7 @@ class TestLoaderInterpolationFeatures:
     def test_jinja_env_auto_injection(self, monkeypatch):
         from yaconfiglib import ConfigLoader
         from yaconfiglib.backends.python_backend import PythonBackend
+
         monkeypatch.setenv("MY_APP_VAR", "production")
         loader = ConfigLoader(interpolate=True, inject_env=True)
         result = loader.load(loader=PythonBackend({"mode": "{{ env.MY_APP_VAR }}"}))
@@ -128,6 +136,7 @@ class TestLoaderInterpolationFeatures:
     def test_strict_interpolation_raises(self):
         from yaconfiglib import ConfigLoader
         from yaconfiglib.backends.python_backend import PythonBackend
+
         loader = ConfigLoader(interpolate=True, strict=True)
         with pytest.raises(Exception):
             loader.load(loader=PythonBackend({"value": "{{ missing_var }}"}))

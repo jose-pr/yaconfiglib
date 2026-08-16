@@ -1,6 +1,7 @@
 """
 Tests for ConfigLoader — loading, merging, and example file compatibility.
 """
+
 import pathlib
 import typing
 
@@ -16,6 +17,7 @@ EXAMPLES = pathlib.Path(__file__).parent.parent / "examples"
 # ---------------------------------------------------------------------------
 # Basic loading
 # ---------------------------------------------------------------------------
+
 
 class TestBasicLoading:
     def test_load_yaml(self, tmp_path):
@@ -34,7 +36,7 @@ class TestBasicLoading:
 
     def test_load_toml(self, tmp_path):
         f = tmp_path / "cfg.toml"
-        f.write_text("[section]\nkey = \"hello\"\n")
+        f.write_text('[section]\nkey = "hello"\n')
         loader = ConfigLoader(base_dir=tmp_path)
         result = loader.load("cfg.toml")
         assert result == {"section": {"key": "hello"}}
@@ -55,6 +57,7 @@ class TestBasicLoading:
 # ---------------------------------------------------------------------------
 # Merge methods
 # ---------------------------------------------------------------------------
+
 
 class TestMergeMethods:
     def test_simple_merge(self, tmp_path):
@@ -85,7 +88,9 @@ class TestMergeMethods:
     def test_substitute_merge(self, tmp_path):
         (tmp_path / "a.yaml").write_text("list: [1, 2, 3]\n")
         (tmp_path / "b.yaml").write_text("list: [4, 5]\n")
-        loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Substitute)
+        loader = ConfigLoader(
+            base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Substitute
+        )
         result = loader.load("a.yaml", "b.yaml")
         # Substitute: lists always replace
         assert result["list"] == [4, 5]
@@ -116,6 +121,7 @@ class TestMergeMethods:
 # ---------------------------------------------------------------------------
 # Examples directory
 # ---------------------------------------------------------------------------
+
 
 class TestExamples:
     def test_load_includeme_yaml(self):
@@ -181,6 +187,7 @@ class TestExamples:
 # load_all
 # ---------------------------------------------------------------------------
 
+
 class TestLoadAll:
     def test_load_all_yields_each(self, tmp_path):
         (tmp_path / "a.yaml").write_text("a: 1\n")
@@ -194,11 +201,15 @@ class TestLoadAll:
 # DX features (DotAccessibleDict, load_as, Top-level API)
 # ---------------------------------------------------------------------------
 
+
 class TestDXFeatures:
     def test_dot_accessible_dict(self):
         from yaconfiglib.backends.python_backend import PythonBackend
+
         loader = ConfigLoader()
-        result = loader.load(loader=PythonBackend({"db": {"host": "localhost", "port": 3306}}))
+        result = loader.load(
+            loader=PythonBackend({"db": {"host": "localhost", "port": 3306}})
+        )
         assert result.db.host == "localhost"
         assert result.db.port == 3306
         assert result.get("db.host") == "localhost"
@@ -206,13 +217,17 @@ class TestDXFeatures:
 
     def test_dot_accessible_dict_dig_false(self):
         from yaconfiglib.backends.python_backend import PythonBackend
+
         loader = ConfigLoader()
-        result = loader.load(loader=PythonBackend({"db": {"host": "localhost", "port": 3306}}))
+        result = loader.load(
+            loader=PythonBackend({"db": {"host": "localhost", "port": 3306}})
+        )
         # dig=False prevents deep traversal
         assert result.get("db.host", "default", dig=False) == "default"
 
     def test_dot_accessible_dict_exact_match(self):
         from yaconfiglib.backends.python_backend import PythonBackend
+
         loader = ConfigLoader()
         # Dotted key matches exactly, outranking traversal
         data = {"db.host": "exact-value", "db": {"host": "traversed-value"}}
@@ -225,7 +240,9 @@ class TestDXFeatures:
         from yaconfiglib.loader import DotAccessibleDict
 
         loader = ConfigLoader()
-        result = loader.load(loader=PythonBackend({"db": {"credentials": {"user": "postgres"}}}))
+        result = loader.load(
+            loader=PythonBackend({"db": {"credentials": {"user": "postgres"}}})
+        )
         assert result.get("db.credentials.user") == "postgres"
         assert isinstance(result["db"], DotAccessibleDict)
         assert isinstance(result["db"]["credentials"], DotAccessibleDict)
@@ -240,7 +257,10 @@ class TestDXFeatures:
             port: int
 
         loader = ConfigLoader()
-        result = loader.load_as(MyConfig, loader=PythonBackend({"host": "localhost", "port": 80, "extra": "ignored"}))
+        result = loader.load_as(
+            MyConfig,
+            loader=PythonBackend({"host": "localhost", "port": 80, "extra": "ignored"}),
+        )
         assert isinstance(result, MyConfig)
         assert result.host == "localhost"
         assert result.port == 80
@@ -254,6 +274,7 @@ class TestDXFeatures:
 class TestTopLevelAPI:
     def test_load_file(self, tmp_path):
         from yaconfiglib import load
+
         f = tmp_path / "conf.json"
         f.write_text('{"foo": "bar"}')
         result = load(str(f))
@@ -261,21 +282,24 @@ class TestTopLevelAPI:
 
     def test_loads_string(self):
         from yaconfiglib import loads
+
         result = loads('{"hello": "world"}', loader="json")
         assert result == {"hello": "world"}
 
     def test_dumps_obj(self):
         from yaconfiglib import dumps
+
         data = {"foo": "bar"}
         result = dumps(data)
         assert "foo: bar" in result
 
     def test_dump_file_path(self, tmp_path):
         from yaconfiglib import dump, load
+
         data = {"key": "val"}
         f = tmp_path / "output.yaml"
         dump(data, str(f))
-        
+
         # Load it back to verify
         loaded = load(str(f))
         assert loaded == {"key": "val"}
@@ -283,6 +307,7 @@ class TestTopLevelAPI:
     def test_dump_file_pointer(self, tmp_path):
         import io
         from yaconfiglib import dump
+
         data = {"a": 1, "b": 2}
         fp = io.StringIO()
         dump(data, fp)
@@ -294,6 +319,7 @@ class TestTopLevelAPI:
 # ---------------------------------------------------------------------------
 # Per-call override isolation & global-state hygiene (loader_state fixes)
 # ---------------------------------------------------------------------------
+
 
 class TestLoaderStateHygiene:
     def test_merge_options_override_does_not_leak(self, tmp_path):
@@ -351,7 +377,7 @@ class TestSecurityControls:
 
         loader = ConfigLoader()  # allowed at instance level
         with pytest.raises(CommandsDisabledError):
-            loader.load("cmd://python -c \"print(1)\"", allow_commands=False)
+            loader.load('cmd://python -c "print(1)"', allow_commands=False)
 
     def test_sandbox_blocks_ssti(self):
         import pytest
@@ -368,7 +394,7 @@ class TestSecurityControls:
     def test_sandbox_allows_ordinary_interpolation(self):
         from yaconfiglib import ConfigLoader
 
-        payload = "#!\ngreeting: \"hello {{ name }}\"\nname: world\n"
+        payload = '#!\ngreeting: "hello {{ name }}"\nname: world\n'
         result = ConfigLoader(interpolate=True, sandbox=True).load(payload)
         assert result["greeting"] == "hello world"
 
@@ -382,7 +408,7 @@ class TestSecurityControls:
         # green suite hid this.
         from yaconfiglib import ConfigLoader
 
-        payload = "#!\nname: world\ngreeting: \"{{ name }}\"\n"
+        payload = '#!\nname: world\ngreeting: "{{ name }}"\n'
         result = ConfigLoader(interpolate=True, sandbox=True).load(payload)
         assert result["greeting"] == "world"
 
@@ -391,7 +417,7 @@ class TestSecurityControls:
         # so inside the sandbox rather than degrading to a rendered string.
         from yaconfiglib import ConfigLoader
 
-        payload = "#!\nbase: 21\ndoubled: \"{{ base * 2 }}\"\n"
+        payload = '#!\nbase: 21\ndoubled: "{{ base * 2 }}"\n'
         result = ConfigLoader(interpolate=True, sandbox=True).load(payload)
         assert result["doubled"] == 42
         assert isinstance(result["doubled"], int)
@@ -400,6 +426,7 @@ class TestSecurityControls:
 # ---------------------------------------------------------------------------
 # Coverage gaps: ignore_error predicate, Hash merge, override isolation
 # ---------------------------------------------------------------------------
+
 
 class TestIgnoreErrorPredicate:
     def test_predicate_skips_only_selected_errors(self, tmp_path):
@@ -453,7 +480,12 @@ class TestPerCallOverrideIsolation:
             merge=ConfigLoaderMergeMethod.Simple,
             interpolate=False,
         )
-        before = (loader.merge, loader.interpolate, loader.merge_options, loader.sandbox)
+        before = (
+            loader.merge,
+            loader.interpolate,
+            loader.merge_options,
+            loader.sandbox,
+        )
         loader.load(
             "a.yaml",
             merge=ConfigLoaderMergeMethod.Deep,
@@ -475,6 +507,7 @@ class TestPerCallOverrideIsolation:
 # resolved a `recursive` local it never used (glob expansion happens before
 # _load is reached).
 # ---------------------------------------------------------------------------
+
 
 class TestRecursiveGlob:
     @staticmethod

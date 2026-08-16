@@ -1,4 +1,5 @@
 """Tests for parse_sources edge cases: streams, in-memory docs, defaults."""
+
 import io
 
 from yaconfiglib.utils.source import parse_sources

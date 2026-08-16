@@ -115,9 +115,7 @@ class EnvVarBackend(ConfigBackend):
         prefix = self.prefix if prefix is None else prefix
         lowercase = self.lowercase if lowercase is None else lowercase
         nested_delimiter = (
-            self.nested_delimiter
-            if nested_delimiter is None
-            else nested_delimiter
+            self.nested_delimiter if nested_delimiter is None else nested_delimiter
         )
         coerce = self.coerce if coerce is None else coerce
 
@@ -125,7 +123,7 @@ class EnvVarBackend(ConfigBackend):
         for key, value in os.environ.items():
             if prefix and not key.startswith(prefix):
                 continue
-            clean_key = key[len(prefix):]
+            clean_key = key[len(prefix) :]
             if lowercase:
                 clean_key = clean_key.lower()
             parsed_value = _coerce_value(value) if coerce else value
