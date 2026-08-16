@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-08-16
+
+### Changed
+- Bounded the `pathlib-next` dependency to `>=0.9.0,<0.10` (previously
+  unversioned). It carried no bounds at all, so a resolver was free to install a
+  release predating the `Pathname`/`MemPath` surface that `backends/` and
+  `utils/source.py` import, or a future minor that changes it. Nothing in the
+  package uses API added after 0.9.0, so the floor sits at the start of the
+  series rather than at its newest patch.
+
 ## [0.11.1] - 2026-08-16
 
 ### Fixed
@@ -206,7 +216,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Legacy references and code blocks tied to `hiyapyco`.
 
-[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/jose-pr/yaconfiglib/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/jose-pr/yaconfiglib/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/jose-pr/yaconfiglib/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/jose-pr/yaconfiglib/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/jose-pr/yaconfiglib/compare/v0.9.8...v0.10.0
