@@ -17,7 +17,7 @@ except ImportError:
 
 from .backends import ConfigBackend
 from .utils.enum import IntEnum
-from .utils.log import Logger, LogLevel, getLogger
+from .utils.log import LogLevel
 from .utils.merge import Merge, MergeMethod, is_array
 from .utils.source import SourceLike, parse_sources
 
@@ -421,8 +421,6 @@ class ConfigLoader(ConfigBackend):
             if isinstance(merge, Merge)
             else (ConfigLoaderMergeMethod(merge) if merge else self.merge)
         )
-        if not merge:
-            merge = self.merge
         # Per-call override only — must NOT rewrite self.merge_options (doing so
         # made one call's override silently leak into every later load()).
         merge_options = (

@@ -11,10 +11,7 @@ This module provides the :class:`MergeMethod` enum with three built-in strategie
 from __future__ import annotations
 
 import logging
-import types
 import typing
-from argparse import Namespace
-from dataclasses import is_dataclass
 
 from .enum import IntEnum
 
@@ -97,7 +94,10 @@ class MergeMethod(IntEnum):
 
         if is_array(b):
             if is_array(a):
-                # Element-by-element replacement up to len(b); truncate extras.
+                # Element-by-element replacement up to len(b); b's extra
+                # elements are appended, and a's tail beyond len(b) is kept.
+                # (The comment used to say "truncate extras", which described
+                # neither branch — tests pin the append-and-keep behavior.)
                 result = list(a)
                 for i, v in enumerate(b):
                     if i < len(result):
