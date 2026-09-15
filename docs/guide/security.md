@@ -8,7 +8,8 @@ for untrusted input.
 
 ## Configs are code (by default)
 
-Two features execute code as a side effect of loading:
+These features execute code, or let a document decide what gets read, as a
+side effect of loading:
 
 - **Command sources.** A source matching `cmd://`, `exec://`, `sh://`, a
   `*+fmt://` variant, or a `.sh`/`.bat`/`.ps1`/`.cmd` file runs through the
@@ -45,8 +46,19 @@ including nested `!include` targets.
 Scope: `allow_commands` gates the **command** backend on every route (scheme,
 file extension, `loader="command"`, and `!include`). It does **not** restrict a
 `CommandBackend` you construct and call yourself outside a load (that is
-explicit use, not config-driven). Note the `python` backend also executes
-Python — do not feed it untrusted input.
+explicit use, not config-driven).
+
+Code runs only through command sources, non-sandboxed interpolation,
+`transform`/`%`-form `key_factory` expressions and `.j2` rendering. The
+`python` backend runs no code: `PythonBackend` passes a Python object you
+supply through unchanged.
+
+Command sources run with stdin closed, and accept an opt-in `timeout=` (in
+seconds) after which the command and its child processes are killed:
+
+```python
+config = loader.load("cmd+json://vault read -format=json secret/app", timeout=30)
+```
 
 ## A document can only tighten trust
 
@@ -81,6 +93,34 @@ sandbox — it is not an OS-level sandbox and does not limit CPU/time.
 refused while `allow_commands=False`. Passing a non-sandboxed
 `environment=` for a `.j2` source under those settings raises `ValueError`.
 
+With `inject_env=True`, templates see `env` as a read-only snapshot of
+`os.environ`: they can read environment variables (including secrets you may
+not want a third-party template to see) but cannot change them.
+
+## What the controls do not cover: reading local files
+
+`allow_commands=False` and `sandbox=True` stop **code execution** and
+**template injection**. They do not stop a document from **reading files**.
+`!include`/`!load` can read any file the process can: absolute paths and
+`..` traversal are not confined to `base_dir`. A hostile document can
+therefore pull in local files whose names match a backend (`.yaml`, `.yml`,
+`.json`, `.toml`, `.ini`, `.env`, ...), for example:
+
+```yaml
+stolen: !include '/home/app/.config/service/credentials.yaml'
+```
+
+If you load untrusted configuration, do not return, echo or log the loaded
+result verbatim, and run the process with only the file permissions it needs.
+
+## Resource use
+
+Interpolation time grows with the number of distinct nodes in the document:
+YAML anchors and aliases are interpolated once per shared node, not once per
+reference. A deliberately huge document still costs time and memory, and the
+Jinja sandbox does not limit CPU or time. An include cycle
+(`a.yaml` → `b.yaml` → `a.yaml`) raises `ValueError` instead of recursing.
+
 ## Loading third-party configuration — checklist
 
 ```python
@@ -92,9 +132,23 @@ config = yaconfiglib.load(
 )
 ```
 
+With both controls set, the following are covered, including through nested
+`!include` targets and per-call overrides:
+
+- command sources, including a command produced by rendering a `.j2` source;
+- template injection in interpolated values, in `transform`/`%`-form
+  `key_factory` expressions, and in `.j2` sources;
+- `!include` mapping keys, which can no longer re-enable commands or disable
+  the sandbox.
+
+Still up to you:
+
+- **File disclosure** — see [reading local files](#what-the-controls-do-not-cover-reading-local-files).
 - Prefer a fixed `loader="yaml"` (or the specific format) over auto-detection so
   a filename can't select an unexpected backend. This applies to the top-level
   sources only: `!include` targets are still auto-detected from their names.
-- Do not pass untrusted data to the `python` backend.
+- Only pass objects you built yourself to the `python` backend.
+- Set `timeout=` on command sources you allow, so a slow command cannot stall
+  the load indefinitely.
 - Both controls default to the permissive setting so existing trusted-config
   workflows are unchanged; opt in for untrusted input.

@@ -69,6 +69,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ValueError: include cycle: ...` naming the chain. Previously it recursed until
   `RecursionError`, or with `ignore_error=True` returned a deeply nested partial
   result.
+
+### Documentation
+- The security guide now states that `!include` can read any local file the
+  process can (absolute paths and `..` are not confined to `base_dir`), even with
+  `allow_commands=False` and `sandbox=True`: those controls stop code execution and
+  template injection, not file disclosure. Do not return or log an untrusted
+  config verbatim.
+- The security guide no longer claims the `python` backend executes Python; it
+  passes a caller-supplied object through unchanged.
 - `env` is available when rendering `.j2`/`.jinja2` sources with `inject_env=True`,
   as the templating guide's example shows. Previously it raised
   `UndefinedError: 'env' is undefined`.
