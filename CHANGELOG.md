@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on a private subclass, and only documents loaded through a `ConfigLoader` resolve
   them. Code that relied on `yaml.safe_load` resolving `!include` after a
   yaconfiglib load must load through a `ConfigLoader` instead.
+- An untrusted document can no longer weaken the caller's settings through an
+  `!include` mapping. Previously a mapping could set `allow_commands: true` or
+  `sandbox: false` for the included file, run arbitrary Python through a
+  `transform` or `%`-form `key_factory` expression, or call a method on the
+  included path through a plain `key_factory` (`key_factory: unlink` deleted the
+  file).
+- A per-call `load(..., allow_commands=False)` or `load(..., sandbox=True)` now
+  also applies to nested `!include` targets. Previously the included files were
+  loaded with the instance settings.
+
+### Changed
+- The `!include` mapping form accepts only `pathname`, `encoding`, `transform`,
+  `key_factory`, `default`, `flatten`, `merge`, `merge_options` and `recursive`;
+  other keys are ignored and logged at `WARNING`. `key_factory` there must use the
+  `"%<expr>"` form.
+- `transform` and `%`-form `key_factory` expressions are evaluated in Jinja2's
+  sandboxed environment whenever `sandbox=True` or `allow_commands=False` is in
+  effect.
+- `CommandsDisabledError` is now defined in `yaconfiglib.utils.trust`; importing it
+  from `yaconfiglib` or `yaconfiglib.loader` keeps working.
 
 ## [0.11.2] - 2026-08-16
 

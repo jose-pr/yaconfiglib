@@ -13,7 +13,7 @@ except ImportError:
 
     Pathname = Path
 
-from yaconfiglib.backends.base import ConfigBackend
+from yaconfiglib.backends.base import ConfigBackend, _filter_include_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -184,10 +184,13 @@ class YamlConfig(ConfigBackend):
             elif isinstance(node, yaml.nodes.MappingNode):
                 kwargs = ldr.construct_mapping(node, deep=True)
                 pathname = kwargs.pop("pathname")
+                # A document may only pass the allowlisted options; trust settings
+                # reach the nested load through the effective policy instead.
+                kwargs = _filter_include_kwargs(kwargs)
             else:
                 raise TypeError(f"Un-supported YAML node {node!r}")
 
-            kwargs.setdefault("master", ldr)
+            kwargs["master"] = ldr
             # Route the include through the ConfigLoader driving THIS parse, never
             # one captured at registration time: that leaked the first loader's
             # settings (base_dir, allow_commands, merge, ...) into every later

@@ -50,6 +50,14 @@ overlay: !include
   encoding: "utf-8"
 ```
 
+The mapping form accepts only these keys: `pathname`, `encoding`,
+`transform`, `key_factory`, `default`, `flatten`, `merge`, `merge_options`
+and `recursive`. `key_factory` must use the `"%<jinja-expr>"` form (for
+example `"%pathname.as_posix()"`). Any other key is ignored and logged at
+`WARNING`, so a document cannot change trust settings such as
+`allow_commands` or `sandbox` for the files it includes. See
+[Security](security.md).
+
 ## Including command output
 
 Combine `!include` with a `cmd://`/`exec://` URI (see

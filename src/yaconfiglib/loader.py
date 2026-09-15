@@ -20,6 +20,12 @@ from .utils.enum import IntEnum
 from .utils.log import LogLevel
 from .utils.merge import Merge, MergeMethod, is_array
 from .utils.source import SourceLike, parse_sources
+from .utils.trust import (
+    CommandsDisabledError,
+    current_policy,
+    is_hardened,
+    use_policy,
+)
 
 __all__ = [
     "ConfigLoader",
@@ -34,31 +40,6 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 T = typing.TypeVar("T")
-
-
-_JINJA_ENVS = {}
-
-
-def _get_jinja_env(strict: bool, sandbox: bool = False) -> object:
-    key = (strict, sandbox)
-    if key not in _JINJA_ENVS:
-        from jinja2 import StrictUndefined
-
-        env_kwargs = {}
-        if strict:
-            env_kwargs["undefined"] = StrictUndefined
-        if sandbox:
-            # SandboxedEnvironment blocks attribute traversal into Python
-            # internals (SSTI) when interpolating untrusted config values.
-            from jinja2.sandbox import SandboxedEnvironment as _Env
-        else:
-            from jinja2 import Environment as _Env
-        _JINJA_ENVS[key] = _Env(extensions=["jinja2.ext.do"], **env_kwargs)
-    return _JINJA_ENVS[key]
-
-
-class CommandsDisabledError(ValueError):
-    """Raised when a command source is loaded while ``allow_commands`` is False."""
 
 
 class _ConfigLoaderMergeMethod(IntEnum):
@@ -140,6 +121,19 @@ else:
         _ConfigLoaderMergeMethod,
         name=_ConfigLoaderMergeMethod.__name__.removeprefix("_"),
     )
+
+
+def _expression_environment():
+    """Environment for ``transform``/``%``-key_factory expressions in this load.
+
+    These expressions can come from a document (an ``!include`` mapping), so they
+    are evaluated sandboxed whenever the effective policy is hardened
+    (``sandbox=True`` or ``allow_commands=False``). Otherwise ``None`` keeps
+    ``jinja2.DEFAULT_ENV``. ``strict`` is not applied: it governs interpolation only.
+    """
+    if is_hardened():
+        return jinja2.get_environment(False, True)
+    return None
 
 
 class _IgnoreError(typing.Protocol):
@@ -289,7 +283,9 @@ class ConfigLoader(ConfigBackend):
         # used to be computed here and dropped on the floor. load()/load_all()
         # now pass it to parse_sources() instead. No backend reads it either, so
         # it must not reach **reader_args.
-        allow_commands = (
+        # The effective policy (set by load()/load_all(), tightened by every
+        # enclosing load) can only narrow what this call or instance allows.
+        allow_commands = current_policy()[0] and (
             self.allow_commands if allow_commands is None else allow_commands
         )
 
@@ -309,7 +305,10 @@ class ConfigLoader(ConfigBackend):
         key_factory = key_factory or self.key_factory
         if not callable(key_factory):
             if key_factory.startswith("%"):
-                _eval = jinja2.eval(key_factory.removeprefix("%"))
+                _eval = jinja2.eval(
+                    key_factory.removeprefix("%"),
+                    environment=_expression_environment(),
+                )
 
                 def _key(path: Path, value):
                     return _eval(value=value, pathname=PurePosixPath(path.as_posix()))
@@ -347,7 +346,7 @@ class ConfigLoader(ConfigBackend):
 
         value = _loader.load(path, **_options)
         if transform:
-            value = jinja2.eval(transform)(
+            value = jinja2.eval(transform, environment=_expression_environment())(
                 value=value, pathname=PurePosixPath(path.as_posix())
             )
 
@@ -427,106 +426,114 @@ class ConfigLoader(ConfigBackend):
         # made one call's override silently leak into every later load()).
         merge_options = self.merge_options if merge_options is None else merge_options
 
-        results = default
-        _join_init = False
+        # Every source, nested !include and interpolation below runs under the
+        # effective trust policy, so a per-call allow_commands=False/sandbox=True
+        # reaches nested loads too. The policy can only tighten.
+        with use_policy(
+            self.allow_commands if allow_commands is None else allow_commands,
+            sandbox,
+            self.strict,
+        ) as (_effective_allow, effective_sandbox, _effective_strict):
+            results = default
+            _join_init = False
 
-        if not pathname:
-            pathname = ("#!\n",)
+            if not pathname:
+                pathname = ("#!\n",)
 
-        for path in parse_sources(
-            pathname,
-            base_dir=self.base_dir,
-            encoding=encoding,
-            path_factory=self.path_factory,
-            recursive=recursive,
-        ):
-            try:
-                name, result = self._load(
-                    path,
-                    encoding=encoding,
-                    loader=loader,
-                    transform=transform,
-                    key_factory=key_factory,
-                    allow_commands=allow_commands,
-                    **reader_args,
-                )
-                if _join_init:
-                    results = merge(
-                        results,
-                        result,
-                        configloaderkey=name,
-                        **merge_options,
+            for path in parse_sources(
+                pathname,
+                base_dir=self.base_dir,
+                encoding=encoding,
+                path_factory=self.path_factory,
+                recursive=recursive,
+            ):
+                try:
+                    name, result = self._load(
+                        path,
+                        encoding=encoding,
+                        loader=loader,
+                        transform=transform,
+                        key_factory=key_factory,
+                        allow_commands=allow_commands,
+                        **reader_args,
                     )
-                else:
-                    try:
-                        results = merge.init(
-                            initial=result,
+                    if _join_init:
+                        results = merge(
+                            results,
+                            result,
                             configloaderkey=name,
                             **merge_options,
                         )
-                    except AttributeError:
-                        results = result
-                    _join_init = True
-            # Deliberately broad: ``ignore_error`` is a user predicate designed
-            # to decide per-error whether to skip ANY load failure (a YAML parse
-            # error, a missing file, a backend error...), so narrowing the tuple
-            # would break that contract. KeyboardInterrupt/SystemExit are
-            # BaseException and already excluded. The error is never swallowed
-            # silently — it is handed to the predicate and logged.
-            except (
-                Exception
-            ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
-                logger.debug("load error for %s: %s", path, error)
-                if self.ignore_error(error, path=path, loader=self):
-                    continue
-                raise
-
-        if flatten:
-            if isinstance(results, typing.Mapping):
-                result = {
-                    prop: value
-                    for _key, result in results.items()
-                    for prop, value in result.items()
-                }
-            elif is_array(results):
-                result = [r for result in results for r in result]
-            else:
-                raise TypeError(
-                    "flatten=True requires merged results to be a mapping or sequence"
-                )
-        else:
-            result = results
-
-        if interpolate:
-            import os
-
-            custom_env = _get_jinja_env(self.strict, sandbox)
-
-            # Auto-inject env context if requested
-            globals_dict = {}
-            if isinstance(result, typing.Mapping):
-                globals_dict.update(result)
-            if self.inject_env:
-                globals_dict["env"] = os.environ
-
-            try:
-                result = jinja2.interpolate(
-                    result,
-                    globals=globals_dict,
-                    environment=custom_env,
-                )
-            except (
-                Exception
-            ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
-                logger.debug("interpolation error: %s", error)
-                if not self.ignore_error(error, result=result, loader=self):
+                    else:
+                        try:
+                            results = merge.init(
+                                initial=result,
+                                configloaderkey=name,
+                                **merge_options,
+                            )
+                        except AttributeError:
+                            results = result
+                        _join_init = True
+                # Deliberately broad: ``ignore_error`` is a user predicate designed
+                # to decide per-error whether to skip ANY load failure (a YAML parse
+                # error, a missing file, a backend error...), so narrowing the tuple
+                # would break that contract. KeyboardInterrupt/SystemExit are
+                # BaseException and already excluded. The error is never swallowed
+                # silently — it is handed to the predicate and logged.
+                except (
+                    Exception
+                ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
+                    logger.debug("load error for %s: %s", path, error)
+                    if self.ignore_error(error, path=path, loader=self):
+                        continue
                     raise
 
-        # Wrap dict results in a helper class that supports dot-notation
-        if isinstance(result, dict):
-            result = DotAccessibleDict(result)
+            if flatten:
+                if isinstance(results, typing.Mapping):
+                    result = {
+                        prop: value
+                        for _key, result in results.items()
+                        for prop, value in result.items()
+                    }
+                elif is_array(results):
+                    result = [r for result in results for r in result]
+                else:
+                    raise TypeError(
+                        "flatten=True requires merged results to be a mapping or sequence"
+                    )
+            else:
+                result = results
 
-        return result
+            if interpolate:
+                import os
+
+                custom_env = jinja2.get_environment(self.strict, effective_sandbox)
+
+                # Auto-inject env context if requested
+                globals_dict = {}
+                if isinstance(result, typing.Mapping):
+                    globals_dict.update(result)
+                if self.inject_env:
+                    globals_dict["env"] = os.environ
+
+                try:
+                    result = jinja2.interpolate(
+                        result,
+                        globals=globals_dict,
+                        environment=custom_env,
+                    )
+                except (
+                    Exception
+                ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
+                    logger.debug("interpolation error: %s", error)
+                    if not self.ignore_error(error, result=result, loader=self):
+                        raise
+
+            # Wrap dict results in a helper class that supports dot-notation
+            if isinstance(result, dict):
+                result = DotAccessibleDict(result)
+
+            return result
 
     def load_as(self, model_cls: type[T], *pathname: SourceLike, **kwargs) -> T:
         """Load configuration sources and instantiate as *model_cls*.
@@ -604,7 +611,9 @@ class ConfigLoader(ConfigBackend):
         """
         interpolate = self.interpolate if interpolate is None else interpolate
         encoding = encoding or self.encoding
-        custom_env = _get_jinja_env(self.strict, self.sandbox) if interpolate else None
+        custom_env = (
+            jinja2.get_environment(self.strict, self.sandbox) if interpolate else None
+        )
         for path in parse_sources(
             pathname,
             base_dir=self.base_dir,

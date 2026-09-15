@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re as _re
 import typing as _ty
 
@@ -22,6 +23,48 @@ else:
     except ImportError:
         _yaml = None
         ...
+
+logger = logging.getLogger(__name__)
+
+#: Keyword arguments an ``!include``/``!load`` mapping node may pass to the nested
+#: load. Everything else a document supplies (``allow_commands``, ``sandbox``,
+#: ``interpolate``, ``loader``, ``master``, ``environment``, unknown keys) is
+#: dropped: an included document can only narrow what the caller allowed.
+_INCLUDE_KWARGS = frozenset(
+    (
+        "encoding",
+        "transform",
+        "default",
+        "flatten",
+        "merge",
+        "merge_options",
+        "recursive",
+    )
+)
+
+
+def _filter_include_kwargs(kwargs: dict) -> dict:
+    """Keep only the include-mapping keys a document is allowed to set.
+
+    ``key_factory`` is kept only in its ``"%<jinja-expr>"`` form: the plain-name
+    form calls any zero-argument attribute of the included ``Path`` (``unlink``
+    deletes the file). Dropped keys are logged once, by name, at WARNING.
+    """
+    kept = {}
+    dropped = []
+    for key, value in kwargs.items():
+        if key in _INCLUDE_KWARGS or (
+            key == "key_factory" and isinstance(value, str) and value.startswith("%")
+        ):
+            kept[key] = value
+        else:
+            dropped.append(key)
+    if dropped:
+        logger.warning(
+            "ignoring !include/!load option(s) not allowed in a document: %s",
+            ", ".join(sorted(dropped)),
+        )
+    return kept
 
 
 class ConfigBackend(_ty.Protocol):
@@ -96,6 +139,7 @@ class ConfigBackend(_ty.Protocol):
         elif isinstance(node, _yaml.nodes.MappingNode):
             kwargs = loader.construct_mapping(node, deep=True)
             pathname = kwargs.pop("pathname")
+            kwargs = _filter_include_kwargs(kwargs)
         else:
             raise TypeError(f"Un-supported YAML node {node!r}")
 

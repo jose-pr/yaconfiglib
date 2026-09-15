@@ -34,13 +34,27 @@ config = yaconfiglib.load("untrusted.yaml", allow_commands=False)
 A command source loaded while `allow_commands=False` raises
 `yaconfiglib.CommandsDisabledError` naming the offending source, instead of
 executing it. Also settable on `ConfigLoader(...)` and overridable per
-`load()` call.
+`load()` call; a per-call value applies to everything that call loads,
+including nested `!include` targets.
 
 Scope: `allow_commands` gates the **command** backend on every route (scheme,
 file extension, `loader="command"`, and `!include`). It does **not** restrict a
-`CommandBackend` you construct and call yourself (that is explicit use, not
-config-driven). Note the `python` backend also executes Python — do not feed it
-untrusted input.
+`CommandBackend` you construct and call yourself outside a load (that is
+explicit use, not config-driven). Note the `python` backend also executes
+Python — do not feed it untrusted input.
+
+## A document can only tighten trust
+
+`allow_commands` and `sandbox` cannot be relaxed from inside a document. The
+`!include` mapping form accepts only `pathname`, `encoding`, `transform`,
+`key_factory` (in its `"%<expr>"` form), `default`, `flatten`, `merge`,
+`merge_options` and `recursive`; any other key (for example `allow_commands`,
+`sandbox`, `interpolate` or `loader`) is ignored with a warning. Nested loads
+inherit the enclosing call's settings and can only make them stricter.
+
+`transform` and `%`-form `key_factory` expressions are evaluated in the
+sandboxed environment whenever `sandbox=True` or `allow_commands=False` is in
+effect, because an included document can supply them.
 
 ## `sandbox=True` — sandbox interpolation
 

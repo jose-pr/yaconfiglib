@@ -18,6 +18,33 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ENV = Environment(extensions=["jinja2.ext.do"])
 
+_ENVIRONMENTS: dict = {}
+
+
+def get_environment(strict: bool, sandbox: bool = False) -> Environment:
+    """Return the shared interpolation environment for ``(strict, sandbox)``.
+
+    One instance per combination, created on first use and kept for the life of
+    the process, so compiled-template caches keyed on the environment stay warm.
+    ``strict`` makes undefined variables raise; ``sandbox`` uses Jinja2's
+    ``SandboxedEnvironment``, which blocks attribute traversal into Python
+    internals (SSTI) when the template text is untrusted.
+    """
+    key = (strict, sandbox)
+    if key not in _ENVIRONMENTS:
+        from jinja2 import StrictUndefined
+
+        env_kwargs = {}
+        if strict:
+            env_kwargs["undefined"] = StrictUndefined
+        if sandbox:
+            from jinja2.sandbox import SandboxedEnvironment as _Env
+        else:
+            _Env = Environment
+        _ENVIRONMENTS[key] = _Env(extensions=["jinja2.ext.do"], **env_kwargs)
+    return _ENVIRONMENTS[key]
+
+
 #: A string with none of Jinja's delimiters cannot be a template.
 _JINJA_MARKERS = ("{{", "{%", "{#")
 

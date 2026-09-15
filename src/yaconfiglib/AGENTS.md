@@ -17,10 +17,11 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 - **`ConfigLoader`** — the main orchestrator; see below.
 - **`ConfigLoaderMergeMethod`** — `MergeMethod` extended with `Last`/`List`/`Hash`; see
   "Merge strategies".
-- **`CommandsDisabledError(ValueError)`** — raised by `ConfigLoader.load()`/`._load()`
-  when a command source (`cmd://`, `exec://`, `sh://`, a `+fmt` variant, or a
-  script-extension file) is reached while `allow_commands=False`, including via a nested
-  `!include`.
+- **`CommandsDisabledError(ValueError)`** — defined in `utils.trust`, re-exported from
+  `loader` and the package root. Raised when a command source (`cmd://`, `exec://`,
+  `sh://`, a `+fmt` variant, or a script-extension file) is reached while
+  `allow_commands=False` is in effect, including via a nested `!include` (raised by
+  `ConfigLoader._load()`, with a backstop in `CommandBackend.load()` during a load).
 - **`ConfigBackend`** — the pluggable-backend protocol; see `backends/base.py` below.
 - **`MergeMethod`**, **`typed_merge`**, **`OpaqueMerge`**, **`opaque`**,
   **`TypedNamespace`** — re-exported from `utils.merge` / `utils.typing_merge`; see
@@ -49,12 +50,21 @@ All constructor args become instance defaults, overridable per-call. Notable one
   are always handed to the predicate and logged, never silently swallowed.
 - `allow_commands=False` — a command source anywhere in the load, including through a
   nested `!include`, raises `CommandsDisabledError` instead of executing. Set this when
-  loading configuration you don't fully trust. Does **not** restrict a
-  directly-constructed `CommandBackend` instance.
+  loading configuration you don't fully trust. A per-call value reaches nested includes
+  too. Does **not** restrict a `CommandBackend` constructed and called outside a load.
 - `sandbox=True` — interpolation runs in Jinja2's `SandboxedEnvironment`, blocking
   attribute traversal into Python internals (SSTI protection) for untrusted config
   values. Applies to both template strings and bare `{{ expr }}` values, and bare
-  expressions keep their non-string type under the sandbox exactly as without it.
+  expressions keep their non-string type under the sandbox exactly as without it. A
+  per-call value reaches nested includes too.
+- Trust only tightens: the effective `(allow_commands, sandbox, strict)` of a load lives
+  in a `contextvars.ContextVar` (`utils.trust.current_policy()`); nested loads and
+  included documents can disable commands or enable the sandbox, never the reverse.
+  `transform` and `%`-form `key_factory` expressions are evaluated sandboxed whenever
+  `sandbox=True` or `allow_commands=False` is in effect.
+- `!include` mapping form — accepts only `pathname`, `encoding`, `transform`,
+  `key_factory` (`"%<expr>"` form only), `default`, `flatten`, `merge`, `merge_options`,
+  `recursive`; other keys are dropped with a WARNING.
 - `inject_env=True` — with `interpolate`, exposes `os.environ` to templates as `env`.
 
 ### Methods
@@ -67,7 +77,8 @@ All constructor args become instance defaults, overridable per-call. Notable one
   `pathname` empty → loads one empty in-memory document. `flatten=True` flattens the
   final mapping-of-mappings or sequence-of-sequences by one level (error if the result
   is neither). `transform` is a Jinja2 expression evaluated per-document (as `value`)
-  before merging. Dict results are wrapped in `DotAccessibleDict`. `merge_options` is a
+  before merging; it is evaluated sandboxed when `sandbox=True` or
+  `allow_commands=False` is in effect. Dict results are wrapped in `DotAccessibleDict`. `merge_options` is a
   **per-call override only** — it is never written back onto `self.merge_options`.
 - **`.load_as(model_cls, *pathname, **kwargs) -> T`** — `.load(...)` then hydrate
   `model_cls`: a Pydantic `BaseModel` (`model_validate`/`parse_obj`, if pydantic is
@@ -231,5 +242,7 @@ distinguish merge branches.
 - **`DEFAULT_ENV`** — module-level `Environment(extensions=["jinja2.ext.do"])` used when
   `environment=` is omitted.
 
-`loader.py` caches its own `Environment` instances separately, keyed on `(strict,
-sandbox)`, so `interpolate=True` calls don't reconstruct one per load.
+- **`get_environment(strict, sandbox=False) -> Environment`** — the shared interpolation
+  environment for `(strict, sandbox)` (a `SandboxedEnvironment` when `sandbox`,
+  `StrictUndefined` when `strict`, both with `jinja2.ext.do`), created once per
+  combination so `interpolate=True` calls don't reconstruct one per load.

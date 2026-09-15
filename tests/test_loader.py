@@ -428,6 +428,206 @@ class TestSecurityControls:
 # ---------------------------------------------------------------------------
 
 
+class TestIncludeTrustPolicy:
+    """Documents and nested includes can only narrow the caller's trust settings."""
+
+    SSTI_TEXT = "{{ ''.__class__.__mro__ }}"
+    SSTI_EXPR = "''.__class__.__mro__"
+
+    @staticmethod
+    def _command(tmp_path):
+        """Return (cmd+json source that touches a marker file, marker path)."""
+        marker = tmp_path / "ran.marker"
+        script = tmp_path / "mk.py"
+        script.write_text(
+            f"import pathlib\npathlib.Path({marker.as_posix()!r}).touch()\nprint('{{}}')\n",
+            encoding="utf-8",
+        )
+        return f"cmd+json://python {script.as_posix()}", marker
+
+    @staticmethod
+    def _write(path, text):
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_mapping_cannot_reenable_commands_under_checklist(self, tmp_path):
+        import yaconfiglib
+        from yaconfiglib import CommandsDisabledError
+
+        cmd, marker = self._command(tmp_path)
+        doc = self._write(
+            tmp_path / "u.yaml",
+            f'x: !include {{pathname: "{cmd}", allow_commands: true}}\n',
+        )
+        with pytest.raises(CommandsDisabledError):
+            yaconfiglib.load(
+                str(doc),
+                allow_commands=False,
+                interpolate=True,
+                sandbox=True,
+                loader="yaml",
+            )
+        assert not marker.exists()
+
+    def test_mapping_cannot_disable_sandbox(self, tmp_path):
+        from jinja2.exceptions import SecurityError
+
+        child = self._write(tmp_path / "child.yaml", f'y: "{self.SSTI_TEXT}"\n')
+        doc = self._write(
+            tmp_path / "u.yaml",
+            f'x: !include {{pathname: "{child.as_posix()}", sandbox: false,'
+            " interpolate: true}\n",
+        )
+        with pytest.raises(SecurityError):
+            ConfigLoader(interpolate=True, sandbox=True).load(str(doc))
+
+    def test_mapping_transform_is_sandboxed(self, tmp_path):
+        from jinja2.exceptions import SecurityError
+
+        child = self._write(tmp_path / "child.yaml", "a: 1\n")
+        doc = self._write(
+            tmp_path / "u.yaml",
+            f'x: !include {{pathname: "{child.as_posix()}",'
+            f' transform: "{self.SSTI_EXPR}"}}\n',
+        )
+        with pytest.raises(SecurityError):
+            ConfigLoader(sandbox=True).load(str(doc))
+
+    def test_mapping_key_factory_expression_is_sandboxed(self, tmp_path):
+        from jinja2.exceptions import SecurityError
+
+        child = self._write(tmp_path / "child.yaml", "a: 1\n")
+        doc = self._write(
+            tmp_path / "u.yaml",
+            f'x: !include {{pathname: "{child.as_posix()}",'
+            f' key_factory: "%{self.SSTI_EXPR}"}}\n',
+        )
+        with pytest.raises(SecurityError):
+            ConfigLoader(sandbox=True).load(str(doc))
+
+    def test_mapping_transform_sandboxed_when_commands_disabled(self, tmp_path):
+        from jinja2.exceptions import SecurityError
+
+        child = self._write(tmp_path / "child.yaml", "a: 1\n")
+        doc = self._write(
+            tmp_path / "u.yaml",
+            f'x: !include {{pathname: "{child.as_posix()}",'
+            f' transform: "{self.SSTI_EXPR}"}}\n',
+        )
+        with pytest.raises(SecurityError):
+            ConfigLoader(allow_commands=False).load(str(doc))
+
+    def test_mapping_plain_key_factory_is_dropped(self, tmp_path, caplog):
+        import logging
+
+        import yaconfiglib
+
+        victim = self._write(tmp_path / "victim.yaml", "a: 1\n")
+        doc = self._write(
+            tmp_path / "u.yaml",
+            f'x: !include {{pathname: "{victim.as_posix()}", key_factory: unlink}}\n',
+        )
+        with caplog.at_level(logging.WARNING):
+            result = yaconfiglib.load(
+                str(doc),
+                allow_commands=False,
+                interpolate=True,
+                sandbox=True,
+                loader="yaml",
+            )
+        assert victim.exists()
+        assert result == {"x": {"a": 1}}
+        assert any("key_factory" in rec.getMessage() for rec in caplog.records)
+
+    def test_per_call_allow_commands_reaches_scalar_include(self, tmp_path):
+        from yaconfiglib import CommandsDisabledError
+
+        cmd, marker = self._command(tmp_path)
+        doc = self._write(tmp_path / "u.yaml", f"x: !include '{cmd}'\n")
+        with pytest.raises(CommandsDisabledError):
+            ConfigLoader().load(str(doc), allow_commands=False)
+        assert not marker.exists()
+
+    def test_per_call_sandbox_reaches_scalar_include(self, tmp_path):
+        from jinja2.exceptions import SecurityError
+
+        child = self._write(tmp_path / "child.yaml", f'y: "{self.SSTI_TEXT}"\n')
+        doc = self._write(tmp_path / "u.yaml", f"x: !include '{child.as_posix()}'\n")
+        with pytest.raises(SecurityError):
+            ConfigLoader(interpolate=True).load(str(doc), sandbox=True)
+
+    def test_hand_registered_tag_constructor_filters_mapping(self, tmp_path):
+        import yaml
+
+        from yaconfiglib import CommandsDisabledError
+
+        cmd, marker = self._command(tmp_path)
+
+        class _HandLoader(yaml.SafeLoader):
+            pass
+
+        _HandLoader.add_constructor("!include", ConfigLoader(allow_commands=False))
+        with pytest.raises(CommandsDisabledError):
+            yaml.load(
+                f'x: !include {{pathname: "{cmd}", allow_commands: true}}',
+                Loader=_HandLoader,
+            )
+        assert not marker.exists()
+
+    def test_use_policy_only_tightens(self):
+        from yaconfiglib.utils.trust import current_policy, use_policy
+
+        with use_policy(False, True, False):
+            with use_policy(True, False, False) as effective:
+                assert effective == (False, True, False)
+                assert current_policy() == (False, True, False)
+        assert current_policy() == (True, False, False)
+
+    def test_documented_transform_and_key_factory_work_sandboxed(self, tmp_path):
+        child = self._write(tmp_path / "child.yaml", "include:\n  me: true\n")
+        doc = self._write(
+            tmp_path / "u.yaml",
+            f'x: !include {{pathname: "{child.as_posix()}",'
+            ' transform: "{ pathname.name: value.include }",'
+            ' key_factory: "%pathname.as_posix()"}\n',
+        )
+        result = ConfigLoader(sandbox=True).load(str(doc))
+        assert result == {"x": {"child.yaml": {"me": True}}}
+
+    def test_mapping_loader_command_still_blocked(self, tmp_path):
+        from yaconfiglib import CommandsDisabledError
+
+        cmd, marker = self._command(tmp_path)
+        doc = self._write(
+            tmp_path / "u.yaml", f'x: !include {{pathname: "{cmd}", loader: command}}\n'
+        )
+        with pytest.raises(CommandsDisabledError):
+            ConfigLoader(allow_commands=False).load(str(doc))
+        assert not marker.exists()
+
+    def test_advanced_example_includes_still_load(self, monkeypatch):
+        repo_root = pathlib.Path(__file__).resolve().parent.parent
+        monkeypatch.chdir(repo_root)
+        result = ConfigLoader().load("examples/advanced.yaml")
+        assert result["dynamic_includes"] == {"includeme.yaml": {"me": True}}
+
+    def test_sequence_include_form(self, tmp_path):
+        child = self._write(tmp_path / "child.yaml", "b: 2\n")
+        doc = self._write(tmp_path / "u.yaml", f'x: !include ["{child.as_posix()}"]\n')
+        assert ConfigLoader().load(str(doc)) == {"x": {"b": 2}}
+
+    def test_caller_transform_still_applies(self, tmp_path):
+        doc = self._write(tmp_path / "u.yaml", "a: 5\n")
+        assert ConfigLoader().load(str(doc), transform="value.a") == 5
+
+    def test_hardened_policy_without_jinja2(self, monkeypatch):
+        monkeypatch.setattr("yaconfiglib.loader.jinja2", None)
+        result = ConfigLoader(allow_commands=False, sandbox=True).load(
+            '#!a.json\n{"a": 1}'
+        )
+        assert result == {"a": 1}
+
+
 class TestIgnoreErrorPredicate:
     def test_predicate_skips_only_selected_errors(self, tmp_path):
         (tmp_path / "good.yaml").write_text("x: 1\n")

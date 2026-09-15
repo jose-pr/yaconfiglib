@@ -11,6 +11,7 @@ try:
 except ImportError:
     from pathlib import Path
 
+from ..utils.trust import CommandsDisabledError, current_policy
 from .base import ConfigBackend
 
 __all__ = ["CommandBackend"]
@@ -101,6 +102,15 @@ class CommandBackend(ConfigBackend):
                     explicit_format = scheme_fmt
         else:
             command = path_str
+
+        # Backstop for every route that reaches this backend without passing
+        # ConfigLoader._load's gate (e.g. a rendered .j2 dispatch or a wrapper
+        # backend). Outside a load the policy allows, so a directly constructed
+        # CommandBackend keeps working.
+        if not current_policy()[0]:
+            raise CommandsDisabledError(
+                f"refusing to run command source {path_str!r}: allow_commands=False"
+            )
 
         # 2. Execute command. Decode output explicitly: text=True alone uses
         # the locale codec (cp1252 on Windows), which mangles UTF-8 output
