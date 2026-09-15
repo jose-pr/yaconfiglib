@@ -628,6 +628,134 @@ class TestIncludeTrustPolicy:
         assert result == {"a": 1}
 
 
+class TestUntrustedRobustness:
+    """A config author must not be able to hang, exhaust or mutate the host."""
+
+    def test_aliased_yaml_interpolates_in_linear_time(self):
+        import time
+
+        # 7 levels, each a list of 9 aliases of the previous: ~3.7s when every
+        # reference is walked, well under 0.1s when shared containers are walked once.
+        lines = ['l0: &l0 ["{{ 1 + 1 }}", "plain"]']
+        for level in range(1, 7):
+            aliases = ", ".join([f"*l{level - 1}"] * 9)
+            lines.append(f"l{level}: &l{level} [{aliases}]")
+        lines.append("top: *l6")
+        source = "#!aliases.yaml\n" + "\n".join(lines) + "\n"
+
+        started = time.perf_counter()
+        result = ConfigLoader(interpolate=True, sandbox=True).load(source)
+        elapsed = time.perf_counter() - started
+
+        assert elapsed < 1, f"interpolation took {elapsed:.1f}s"
+        assert result["top"][0] is result["top"][1]
+        assert result["l0"] == [2, "plain"]
+
+    def test_command_runs_with_stdin_closed(self):
+        import subprocess
+        import sys
+
+        import yaconfiglib
+
+        # The child must import the same yaconfiglib this test process imported,
+        # not whatever the interpreter's installed copy resolves to.
+        package_root = str(pathlib.Path(yaconfiglib.__file__).resolve().parent.parent)
+        inner = (
+            f'cmd+json://"{sys.executable}" -c "import sys; sys.stdin.read(); print(1)"'
+        )
+        code = (
+            f"import sys\nsys.path.insert(0, {package_root!r})\n"
+            "from yaconfiglib import ConfigLoader\n"
+            f"print(ConfigLoader().load({inner!r}))\n"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", code],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            returncode = proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            pytest.fail("the command waited on the parent's stdin")
+        finally:
+            proc.stdin.close()
+            proc.stdout.close()
+            proc.stderr.close()
+        assert returncode == 0
+
+    def test_command_timeout_kills_the_command(self):
+        import subprocess
+        import sys
+        import time
+
+        started = time.perf_counter()
+        with pytest.raises(subprocess.TimeoutExpired):
+            ConfigLoader().load(
+                f'cmd://"{sys.executable}" -c "import time; time.sleep(15)"',
+                timeout=1,
+            )
+        assert time.perf_counter() - started < 10
+
+    def test_inject_env_is_read_only(self, monkeypatch):
+        import os
+
+        from jinja2.exceptions import UndefinedError
+
+        monkeypatch.delenv("YACFG_PWN", raising=False)
+        source = "#!\nv: \"{% do env.update({'YACFG_PWN': 'x'}) %}ok\"\n"
+        with pytest.raises(UndefinedError):
+            ConfigLoader(interpolate=True, inject_env=True, sandbox=True).load(source)
+        assert "YACFG_PWN" not in os.environ
+
+    def test_include_cycle_is_a_clear_error(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("x: !include b.yaml\n", encoding="utf-8")
+        (tmp_path / "b.yaml").write_text("y: !include a.yaml\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="include cycle"):
+            ConfigLoader(base_dir=tmp_path).load("a.yaml")
+
+    def test_load_all_per_call_sandbox(self, tmp_path):
+        from jinja2.exceptions import SecurityError
+
+        doc = tmp_path / "s.yaml"
+        doc.write_text("x: \"{{ ''.__class__.__mro__ }}\"\n", encoding="utf-8")
+        with pytest.raises(SecurityError):
+            list(ConfigLoader(interpolate=True).load_all(str(doc), sandbox=True))
+
+    def test_load_all_per_call_allow_commands_reaches_includes(self, tmp_path):
+        from yaconfiglib import CommandsDisabledError
+
+        marker = tmp_path / "ran.marker"
+        script = tmp_path / "mk.py"
+        script.write_text(
+            f"import pathlib\npathlib.Path({marker.as_posix()!r}).touch()\nprint('{{}}')\n",
+            encoding="utf-8",
+        )
+        doc = tmp_path / "u.yaml"
+        doc.write_text(
+            f"x: !include 'cmd+json://python {script.as_posix()}'\n", encoding="utf-8"
+        )
+        with pytest.raises(CommandsDisabledError):
+            list(ConfigLoader().load_all(str(doc), allow_commands=False))
+        assert not marker.exists()
+
+    def test_load_all_policy_does_not_leak_into_the_loop(self, tmp_path):
+        from yaconfiglib.utils.trust import current_policy
+
+        first = tmp_path / "one.yaml"
+        first.write_text("a: 1\n", encoding="utf-8")
+        second = tmp_path / "two.yaml"
+        second.write_text("b: 2\n", encoding="utf-8")
+        seen = []
+        for _document in ConfigLoader().load_all(
+            str(first), str(second), allow_commands=False
+        ):
+            seen.append(current_policy())
+        assert seen == [(True, False, False), (True, False, False)]
+
+
 class TestIgnoreErrorPredicate:
     def test_predicate_skips_only_selected_errors(self, tmp_path):
         (tmp_path / "good.yaml").write_text("x: 1\n")

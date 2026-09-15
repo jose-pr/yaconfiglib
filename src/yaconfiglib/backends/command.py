@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import signal
 import subprocess
 import typing
 
@@ -15,6 +17,65 @@ from ..utils.trust import CommandsDisabledError, current_policy
 from .base import ConfigBackend
 
 __all__ = ["CommandBackend"]
+
+
+def _kill_process_tree(process: subprocess.Popen) -> None:
+    """Kill a shell=True process and everything it started.
+
+    Killing only the shell is not enough: a grandchild keeps the output pipes
+    open, so the read that follows would still wait for it to finish.
+    """
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        try:
+            # The command runs in its own session, so its pid is the group id.
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def _run_command(command: str, encoding: str, timeout: typing.Optional[float]) -> str:
+    """Run *command* through the shell with stdin closed; return its stdout.
+
+    Raises CalledProcessError on a non-zero exit and TimeoutExpired when
+    *timeout* elapses (after killing the whole process tree).
+    """
+    with subprocess.Popen(
+        command,
+        shell=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        # Decode explicitly: the locale codec (cp1252 on Windows) mangles UTF-8
+        # output from tools like secret managers. errors="replace" keeps the
+        # format-sniffing path total instead of raising mid-decode.
+        encoding=encoding,
+        errors="replace",
+        start_new_session=(os.name != "nt"),
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(process)
+            process.communicate()
+            raise subprocess.TimeoutExpired(command, timeout) from None
+        except BaseException:
+            # Interrupted (e.g. KeyboardInterrupt): never leave the command
+            # running. Re-raised unchanged, as subprocess.run does.
+            process.kill()
+            raise
+    if process.returncode:
+        raise subprocess.CalledProcessError(
+            process.returncode, command, output=stdout, stderr=stderr
+        )
+    return stdout
 
 
 class CommandBackend(ConfigBackend):
@@ -60,6 +121,7 @@ class CommandBackend(ConfigBackend):
         encoding: str = None,
         format: str | list[str] = None,
         path_factory: typing.Callable[[str], Path] = None,
+        timeout: typing.Optional[float] = None,
         **options,
     ) -> object:
         """Run the command encoded in *path* and parse its stdout.
@@ -75,6 +137,10 @@ class CommandBackend(ConfigBackend):
                 candidate formats to try in order. Overrides shebang
                 detection and sniffing.
             path_factory: Unused; accepted for interface consistency.
+            timeout: Seconds to wait for the command before killing it and
+                its child processes. ``None`` (the default) waits
+                indefinitely. Reachable per call, e.g.
+                ``loader.load("cmd://...", timeout=30)``.
 
         Returns:
             The parsed stdout, or the raw stripped stdout string if no
@@ -82,6 +148,7 @@ class CommandBackend(ConfigBackend):
 
         Raises:
             subprocess.CalledProcessError: If the command exits non-zero.
+            subprocess.TimeoutExpired: If *timeout* elapses first.
             ValueError: If an explicit *format*/shebang format is
                 requested but the output cannot be parsed as that format,
                 or output is empty while a format was requested.
@@ -112,19 +179,10 @@ class CommandBackend(ConfigBackend):
                 f"refusing to run command source {path_str!r}: allow_commands=False"
             )
 
-        # 2. Execute command. Decode output explicitly: text=True alone uses
-        # the locale codec (cp1252 on Windows), which mangles UTF-8 output
-        # from tools like secret managers. errors="replace" keeps the
-        # format-sniffing path total instead of raising mid-decode.
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            encoding=encoding or "utf-8",
-            errors="replace",
-            check=True,
-        )
-        output = result.stdout.strip()
+        # 2. Execute command (stdin closed, so a command can neither hang the
+        # load waiting for input nor consume the parent's stdin).
+        stdout = _run_command(command, encoding or "utf-8", timeout)
+        output = stdout.strip()
 
         # 3. Parse shebang from output if present
         shebang_format = None

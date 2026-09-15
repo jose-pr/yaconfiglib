@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import contextvars
 import logging
+import os
+import types
 import typing
 
 try:
@@ -16,6 +19,7 @@ except ImportError:
     jinja2 = None
 
 from .backends import ConfigBackend
+from .backends.command import CommandBackend
 from .utils.enum import IntEnum
 from .utils.log import LogLevel
 from .utils.merge import Merge, MergeMethod, is_array
@@ -121,6 +125,18 @@ else:
         _ConfigLoaderMergeMethod,
         name=_ConfigLoaderMergeMethod.__name__.removeprefix("_"),
     )
+
+
+#: str(path) of every source whose backend load() is on the current call stack,
+#: outermost first; used to detect include cycles.
+_LOAD_CHAIN: "contextvars.ContextVar[typing.Tuple[str, ...]]" = contextvars.ContextVar(
+    "yaconfiglib_load_chain", default=()
+)
+
+
+def _environ_snapshot() -> typing.Mapping[str, str]:
+    """``inject_env``'s ``env``: a read-only copy, so templates cannot change the process environment."""
+    return types.MappingProxyType(dict(os.environ))
 
 
 def _expression_environment():
@@ -325,14 +341,11 @@ class ConfigLoader(ConfigBackend):
             key_factory = _key
         logger.debug(f"Loading file: {path}")
         _loader = loader_factory(path)
-        if not allow_commands:
-            from .backends.command import CommandBackend
-
-            if isinstance(_loader, CommandBackend):
-                raise CommandsDisabledError(
-                    f"refusing to run command source {str(path)!r}: "
-                    "allow_commands=False"
-                )
+        is_command = isinstance(_loader, CommandBackend)
+        if is_command and not allow_commands:
+            raise CommandsDisabledError(
+                f"refusing to run command source {str(path)!r}: " "allow_commands=False"
+            )
         _options = dict(
             encoding=encoding,
             path_factory=self.path_factory,
@@ -344,7 +357,22 @@ class ConfigLoader(ConfigBackend):
         )
         _options.update(reader_args)
 
-        value = _loader.load(path, **_options)
+        if is_command:
+            # A command is not a file that can include itself.
+            value = _loader.load(path, **_options)
+        else:
+            # Sources currently being loaded, outermost first. A path that is
+            # already in the chain is an include cycle (a.yaml -> b.yaml -> a.yaml),
+            # which used to recurse until RecursionError.
+            chain = _LOAD_CHAIN.get()
+            source = str(path)
+            if source in chain:
+                raise ValueError(f"include cycle: {' -> '.join(chain + (source,))}")
+            token = _LOAD_CHAIN.set(chain + (source,))
+            try:
+                value = _loader.load(path, **_options)
+            finally:
+                _LOAD_CHAIN.reset(token)
         if transform:
             value = jinja2.eval(transform, environment=_expression_environment())(
                 value=value, pathname=PurePosixPath(path.as_posix())
@@ -505,8 +533,6 @@ class ConfigLoader(ConfigBackend):
                 result = results
 
             if interpolate:
-                import os
-
                 custom_env = jinja2.get_environment(self.strict, effective_sandbox)
 
                 # Auto-inject env context if requested
@@ -514,7 +540,7 @@ class ConfigLoader(ConfigBackend):
                 if isinstance(result, typing.Mapping):
                     globals_dict.update(result)
                 if self.inject_env:
-                    globals_dict["env"] = os.environ
+                    globals_dict["env"] = _environ_snapshot()
 
                 try:
                     result = jinja2.interpolate(
@@ -587,6 +613,8 @@ class ConfigLoader(ConfigBackend):
         *pathname: Path | typing.Sequence[Path],
         encoding: str = None,
         interpolate: bool = None,
+        sandbox: bool = None,
+        allow_commands: bool = None,
         **reader_args: object,
     ) -> typing.Iterator[object]:
         """Yield each source's parsed (and optionally interpolated) document individually, without merging.
@@ -602,6 +630,10 @@ class ConfigLoader(ConfigBackend):
             encoding: Overrides the instance's *encoding* for this call.
             interpolate: Overrides the instance's *interpolate* for this
                 call; applied independently to each yielded document.
+            sandbox: Overrides the instance's *sandbox* for this call,
+                including nested ``!include`` targets.
+            allow_commands: Overrides the instance's *allow_commands* for
+                this call, including nested ``!include`` targets.
             **reader_args: Additional keyword arguments forwarded to each
                 backend's ``load()``.
 
@@ -611,8 +643,9 @@ class ConfigLoader(ConfigBackend):
         """
         interpolate = self.interpolate if interpolate is None else interpolate
         encoding = encoding or self.encoding
-        custom_env = (
-            jinja2.get_environment(self.strict, self.sandbox) if interpolate else None
+        sandbox = self.sandbox if sandbox is None else sandbox
+        allow_commands = (
+            self.allow_commands if allow_commands is None else allow_commands
         )
         for path in parse_sources(
             pathname,
@@ -623,22 +656,34 @@ class ConfigLoader(ConfigBackend):
         ):
             value = None
             try:
-                key, value = self._load(
-                    path,
-                    encoding=encoding,
-                    **reader_args,
-                )
-                if interpolate:
-                    globals_dict = {}
-                    if isinstance(value, typing.Mapping):
-                        globals_dict.update(value)
-                    if self.inject_env:
-                        import os
-
-                        globals_dict["env"] = os.environ
-                    value = jinja2.interpolate(
-                        value, globals_dict, environment=custom_env
+                # The policy covers this source's load and interpolation only and
+                # is exited before yield: a generator runs in its consumer's
+                # context, so holding it across yield would leak it into the
+                # caller's loop body.
+                with use_policy(allow_commands, sandbox, self.strict) as (
+                    effective_allow,
+                    effective_sandbox,
+                    _effective_strict,
+                ):
+                    key, value = self._load(
+                        path,
+                        encoding=encoding,
+                        allow_commands=effective_allow,
+                        **reader_args,
                     )
+                    if interpolate:
+                        globals_dict = {}
+                        if isinstance(value, typing.Mapping):
+                            globals_dict.update(value)
+                        if self.inject_env:
+                            globals_dict["env"] = _environ_snapshot()
+                        value = jinja2.interpolate(
+                            value,
+                            globals_dict,
+                            environment=jinja2.get_environment(
+                                self.strict, effective_sandbox
+                            ),
+                        )
                 if isinstance(value, dict):
                     value = DotAccessibleDict(value)
                 yield value

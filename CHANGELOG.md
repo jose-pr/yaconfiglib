@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could run arbitrary Python even under both controls. A rendered document that
   is a command source is refused while `allow_commands=False`.
 
+### Added
+- `timeout=` for command sources, e.g. `loader.load("cmd://...", timeout=30)`: after
+  that many seconds the command and its child processes are killed and
+  `subprocess.TimeoutExpired` is raised. There is still no timeout by default.
+- `ConfigLoader.load_all()` accepts `sandbox=` and `allow_commands=` per call; they
+  also apply to nested `!include` targets.
+
 ### Changed
 - The `!include` mapping form accepts only `pathname`, `encoding`, `transform`,
   `key_factory`, `default`, `flatten`, `merge`, `merge_options` and `recursive`;
@@ -46,8 +53,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Passing a non-sandboxed `environment=` for a `.j2`/`.jinja2` source while
   `sandbox=True` or `allow_commands=False` is in effect raises `ValueError`; pass a
   `jinja2.sandbox.SandboxedEnvironment` instead.
+- With `inject_env=True`, templates receive a read-only snapshot of `os.environ`
+  as `env`. Previously `env` was the live `os.environ`, so a template could change
+  or delete process environment variables, including ones later command sources
+  saw.
 
 ### Fixed
+- Interpolating YAML that reuses anchors (`&name`/`*name`) no longer slows down
+  exponentially with nesting depth: each shared node is interpolated once, and
+  every alias refers to the same result. A seven-level document that took about
+  4 seconds now loads in well under a tenth of a second.
+- Command sources run with stdin closed. Previously a command that read stdin hung
+  the load or consumed the calling process's input.
+- An include cycle (`a.yaml` including `b.yaml` including `a.yaml`) now raises
+  `ValueError: include cycle: ...` naming the chain. Previously it recursed until
+  `RecursionError`, or with `ignore_error=True` returned a deeply nested partial
+  result.
 - `env` is available when rendering `.j2`/`.jinja2` sources with `inject_env=True`,
   as the templating guide's example shows. Previously it raised
   `UndefinedError: 'env' is undefined`.

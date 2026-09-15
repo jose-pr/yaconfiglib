@@ -40,7 +40,7 @@ All constructor args become instance defaults, overridable per-call. Notable one
 - `recursive` — whether glob sources (`**/*.yaml`) recurse into subdirectories.
   Default `False`. Forwarded to `parse_sources` by both `.load()` (which also honors a
   per-call `recursive=`) and `.load_all()` (instance setting only — it has no per-call
-  parameter).
+  `recursive` parameter).
 - `key_factory` — `(path, value) -> str` merge/document key (default: filename stem);
   as a string it's a `Path` attribute name, or `"%<jinja-expr>"` for a template.
 - `merge` — a `ConfigLoaderMergeMethod` (or any `Merge`-compatible callable) applied
@@ -65,8 +65,9 @@ All constructor args become instance defaults, overridable per-call. Notable one
 - `!include` mapping form — accepts only `pathname`, `encoding`, `transform`,
   `key_factory` (`"%<expr>"` form only), `default`, `flatten`, `merge`, `merge_options`,
   `recursive`; other keys are dropped with a WARNING.
-- `inject_env=True` — with `interpolate`, exposes `os.environ` to templates as `env`; also
-  exposed to `.j2` source rendering (as a read-only snapshot).
+- `inject_env=True` — with `interpolate`, exposes a read-only snapshot of `os.environ` to
+  templates as `env` (templates cannot change the process environment); also exposed to
+  `.j2` source rendering.
 
 ### Methods
 
@@ -86,10 +87,16 @@ All constructor args become instance defaults, overridable per-call. Notable one
   installed — strictly optional), else a `dataclasses` type (kwargs filtered to valid
   `__init__` params), else `model_cls(**data)`. Raises `TypeError` if the loaded result
   isn't a dict.
-- **`.load_all(*pathname, encoding=None, interpolate=None, **reader_args) ->
-  Iterator[object]`** — like `.load()` but yields each resolved source's document
-  individually (optionally interpolated independently) instead of merging them —
-  for a directory of unrelated config files rather than layered ones.
+- **`.load_all(*pathname, encoding=None, interpolate=None, sandbox=None,
+  allow_commands=None, **reader_args) -> Iterator[object]`** — like `.load()` but yields
+  each resolved source's document individually (optionally interpolated independently)
+  instead of merging them — for a directory of unrelated config files rather than
+  layered ones. `sandbox`/`allow_commands` override the instance settings for this call,
+  including nested `!include` targets; the policy is not held while the consumer's loop
+  body runs.
+- **Include cycles** — a source that (directly or through `!include`) loads itself raises
+  `ValueError("include cycle: a -> b -> a")`; with `ignore_error` it goes to the
+  predicate like any load error.
 
 ### `DotAccessibleDict(dict)`
 
@@ -218,7 +225,10 @@ distinguish merge branches.
   a `[`/`{`-leading value, else leaves it a string.
 - **`CommandBackend`** (`NAME="command"`) — runs `cmd://`/`exec://`/`sh://` (and `+fmt`
   variants, e.g. `cmd+json://...`) sources as a subprocess and parses stdout, routing by
-  the `+fmt` suffix or a `#!fmt` shebang line in the output.
+  the `+fmt` suffix or a `#!fmt` shebang line in the output. The command runs with stdin
+  closed. `.load(..., timeout=None)`: an opt-in number of seconds (reachable per call,
+  e.g. `loader.load("cmd://...", timeout=30)`) after which the command and its child
+  processes are killed and `subprocess.TimeoutExpired` is raised; no timeout by default.
 - **`PythonBackend`** (`NAME="python"`) — passes an in-memory Python object straight
   through as the parsed document.
 - **`Jinja2ConfigLoader`** (`NAME="jinja2"`, `.j2`/`.jinja2`) — renders the file as a
@@ -239,7 +249,9 @@ distinguish merge branches.
   with no `{{`/`{%`/`{#` marker short-circuits (returned as-is). A bare
   `{{ expr }}` (nothing else in the string) is **evaluated as an expression** so the
   original Python type is preserved (e.g. stays an `int`, not stringified); anything
-  else renders as a normal Jinja2 template (always a string).
+  else renders as a normal Jinja2 template (always a string). A container referenced
+  more than once (YAML anchors/aliases) is walked once and every reference shares the
+  result.
 - **`compile(code, environment=None, globals=None) -> Callable[..., str]`** /
   **`eval(code, environment=None, globals=None) -> Callable[..., object]`** — LRU-cached
   (1024 entries, keyed on `(code, id(env))`, weakref-guarded against an `id()` reuse

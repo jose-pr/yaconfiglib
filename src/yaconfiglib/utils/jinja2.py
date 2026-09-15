@@ -167,9 +167,22 @@ def interpolate(
 
     Returns the interpolated object (may differ in type from *data* for
     pure-expression strings).
-    """
-    globals = {} if globals is None else globals
 
+    A container reached more than once (YAML anchors/aliases share one object)
+    is walked once and every reference gets the same result, so the walk is
+    linear in the number of distinct nodes and self-referential data terminates.
+    """
+    return _interpolate(data, {} if globals is None else globals, environment, {})
+
+
+def _interpolate(
+    data: object,
+    globals: dict,
+    environment: Environment | None,
+    memo: dict,
+) -> object:
+    # memo maps id(original container) -> (original, result). Holding the
+    # original keeps it alive, so its id() cannot be reused within one pass.
     if isinstance(data, str):
         # Fast path: a string with no Jinja delimiter renders to itself, so
         # skip the cache lookup + Template.render entirely. Most config strings
@@ -190,19 +203,29 @@ def interpolate(
         return result
 
     if isinstance(data, _ty.Mapping):
+        seen = memo.get(id(data))
+        if seen is not None:
+            return seen[1]
+        original = data
         if not isinstance(data, _ty.MutableMapping):
             data = dict(data)
+        memo[id(original)] = (original, data)
         for key in list(data.keys()):
             value = data.pop(key)
-            new_key = interpolate(key, globals, environment=environment)
-            data[new_key] = interpolate(value, globals, environment=environment)
+            new_key = _interpolate(key, globals, environment, memo)
+            data[new_key] = _interpolate(value, globals, environment, memo)
         return data
 
     if isinstance(data, _ty.Iterable) and not isinstance(data, (str, bytes)):
+        seen = memo.get(id(data))
+        if seen is not None:
+            return seen[1]
+        original = data
         if not isinstance(data, _ty.MutableSequence):
             data = list(data)
+        memo[id(original)] = (original, data)
         for idx, value in enumerate(data):
-            data[idx] = interpolate(value, globals, environment=environment)
+            data[idx] = _interpolate(value, globals, environment, memo)
         return data
 
     return data
