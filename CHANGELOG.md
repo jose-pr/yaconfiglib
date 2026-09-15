@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- `!include`/`!load` are no longer registered on the shared `yaml.SafeLoader`.
+  Previously, after any yaconfiglib YAML load, every `yaml.safe_load()` call in the
+  same process resolved `!include`, so an untrusted document parsed by unrelated
+  code could run `cmd://` commands or read local files. The tags are now registered
+  on a private subclass, and only documents loaded through a `ConfigLoader` resolve
+  them. Code that relied on `yaml.safe_load` resolving `!include` after a
+  yaconfiglib load must load through a `ConfigLoader` instead.
+
 ## [0.11.2] - 2026-08-16
 
 ### Changed

@@ -177,10 +177,13 @@ distinguish merge branches.
     (`__call__` recognizes the `(loader, node)` call shape and routes to
     `_yaml_tag_constructor`, supporting scalar/sequence/mapping tag forms).
 - **`YamlConfig`** (`.yaml`/`.yml`) — auto-registers `!include`/`!load` PyYAML tag
-  constructors on the active loader class (default `yaml.SafeLoader`) the first time a
-  `ConfigLoader` (`loader=`) parses YAML; idempotent per loader class. A pre-existing
-  manual `yaml.add_constructor("!include", ...)` on the same class is overridden (with a
-  warning) — manual registration is unnecessary. `.load(path, encoding=None, master=None,
+  constructors on a private yaconfiglib-owned subclass of the loader class (default: its
+  own `SafeLoader` subclass; a `loader_cls=` or `master` class is wrapped the same way)
+  the first time a `ConfigLoader` (`loader=`) parses YAML; idempotent per owned class.
+  `yaml.SafeLoader` and caller-supplied classes are never modified, so a plain
+  `yaml.safe_load` never resolves `!include`, and a parse with no driving `ConfigLoader`
+  raises `yaml.constructor.ConstructorError` on the tags. Manual registration is
+  unnecessary. `.load(path, encoding=None, master=None,
   loader_cls=None, path_factory=None, loader=None, **options)`; `master` inherits
   anchors/aliases from an in-progress parse (used by the tag constructors themselves).
   **Gotcha**: nested `!include`/`!load` route through the driving `ConfigLoader` stashed

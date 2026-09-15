@@ -255,6 +255,73 @@ class TestYamlIncludeRegistration:
         assert not any("unnecessary" in rec.getMessage() for rec in caplog.records)
 
 
+class TestPrivateSafeLoader:
+    """!include/!load must never be armed on the shared yaml.SafeLoader."""
+
+    @staticmethod
+    def _assert_stock_safeloader_untouched(tmp_path):
+        import yaml
+
+        target = tmp_path / "t.yaml"
+        target.write_text("a: 1\n", encoding="utf-8")
+        assert "!include" not in yaml.SafeLoader.yaml_constructors
+        assert "!load" not in yaml.SafeLoader.yaml_constructors
+        # A file include, so a pre-fix run reads a file instead of running a command.
+        with pytest.raises(yaml.constructor.ConstructorError):
+            yaml.safe_load(f"x: !include '{target.as_posix()}'")
+
+    def test_loads_does_not_arm_stock_safeloader(self, tmp_path):
+        import yaconfiglib
+
+        yaconfiglib.loads("a: 1")
+        self._assert_stock_safeloader_untouched(tmp_path)
+
+    def test_explicit_loader_cls_is_not_mutated(self, tmp_path):
+        import yaml
+
+        from yaconfiglib import ConfigLoader
+
+        child = tmp_path / "child.yaml"
+        child.write_text("b: 2\n", encoding="utf-8")
+        parent = tmp_path / "parent.yaml"
+        parent.write_text(f"x: !include '{child.as_posix()}'\n", encoding="utf-8")
+
+        result = ConfigLoader().load(str(parent), loader_cls=yaml.SafeLoader)
+
+        assert result == {"x": {"b": 2}}
+        self._assert_stock_safeloader_untouched(tmp_path)
+
+    def test_owned_loader_cls_wraps_foreign_classes_only(self):
+        import yaml
+
+        from yaconfiglib.backends.yaml import _IncludeSafeLoader, _owned_loader_cls
+
+        assert _owned_loader_cls(_IncludeSafeLoader) is _IncludeSafeLoader
+        wrapped = _owned_loader_cls(yaml.SafeLoader)
+        assert wrapped is not yaml.SafeLoader
+        assert _owned_loader_cls(yaml.SafeLoader) is wrapped
+
+        class _UserLoader(_IncludeSafeLoader):
+            pass
+
+        assert _owned_loader_cls(_UserLoader) is not _UserLoader
+
+    def test_parse_without_config_loader_rejects_include(self, tmp_path):
+        import yaml
+
+        import yaconfiglib
+        from yaconfiglib.backends.yaml import YamlConfig
+
+        yaconfiglib.loads("a: 1")  # registers the tags on the owned default class
+        child = tmp_path / "child.yaml"
+        child.write_text("b: 2\n", encoding="utf-8")
+        parent = tmp_path / "parent.yaml"
+        parent.write_text(f"x: !include '{child.as_posix()}'\n", encoding="utf-8")
+
+        with pytest.raises(yaml.constructor.ConstructorError):
+            YamlConfig().load(str(parent))
+
+
 class TestDeterministicDispatch:
     def test_first_defined_backend_wins(self):
         import re

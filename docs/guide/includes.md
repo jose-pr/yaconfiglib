@@ -23,14 +23,17 @@ an alias for `!include` with identical behavior.
 Registration is automatic: as soon as `YamlConfig.load()` runs with a
 parent `ConfigLoader` in scope (the normal case when calling
 `yaconfiglib.load(...)`), the `!include`/`!load` constructors are
-registered on the active PyYAML loader class.
+registered on a private, yaconfiglib-owned subclass of the PyYAML loader
+class. `yaml.SafeLoader` itself (and any loader class you pass as
+`loader_cls=`) is never modified, so a plain `yaml.safe_load()` elsewhere in
+the process never resolves `!include`. The tags only work in documents
+loaded through a `ConfigLoader`.
 
 !!! note "You do not need `yaml.add_constructor` yourself"
     Registering `!include`/`!load` by hand
     (`yaml.add_constructor("!include", ...)`) is unnecessary — yaconfiglib
-    does it automatically on the first load. A manual registration is
-    replaced by yaconfiglib's own include handler, and the override is logged
-    at `WARNING` so it is not silent.
+    does it automatically on the first load. A manual registration on your
+    own loader class is left alone; yaconfiglib parses with its own subclass.
 
 ## Passing extra arguments
 

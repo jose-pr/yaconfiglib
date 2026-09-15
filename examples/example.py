@@ -34,8 +34,6 @@ logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 
 configloader = ConfigLoader()
-yaml.SafeLoader.add_constructor("!include", configloader)
-yaml.SafeLoader.add_constructor("!load", configloader)
 
 hieraconf = configloader.load(
     """#!test.yaml
@@ -50,8 +48,8 @@ iniconfig: !load examples/test.ini
 )
 print(yaml.dump(hieraconf, indent=2))
 
-config = yaml.safe_load(
-    "test: !load {pathname: examples/includeme.yaml, transform: '{ pathname.name: value.include }', key_factory: '%pathname.as_posix()', type: map }"
+config = configloader.load(
+    "#!inline.yaml\ntest: !load {pathname: examples/includeme.yaml, transform: '{ pathname.name: value.include }', key_factory: '%pathname.as_posix()' }"
 )
 print(yaml.dump(config, indent=2))
 

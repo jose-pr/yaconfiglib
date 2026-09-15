@@ -2,12 +2,9 @@ import yaml
 from yaconfiglib.loader import ConfigLoader
 from yaconfiglib.loader import ConfigLoaderMergeMethod as MergeMethod
 
-# Initialize the loader
+# Initialize the loader. !include / !load are registered automatically on the
+# first YAML load; no manual yaml.add_constructor call is needed.
 loader = ConfigLoader()
-
-# Register the loader as the handler for the !include and !load tags in PyYAML
-yaml.SafeLoader.add_constructor("!include", loader)
-yaml.SafeLoader.add_constructor("!load", loader)
 
 def main():
     print("=== Loading Advanced YAML with Interpolation & !include ===")

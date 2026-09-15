@@ -19,23 +19,57 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["YamlConfig"]
 
-# Tags automatically registered on SafeLoader so users can write !include / !load
-# without manual loader setup.
+# Tags registered automatically so users can write !include / !load without manual
+# loader setup. They are only ever registered on yaconfiglib-owned loader classes
+# (see _owned_loader_cls), never on yaml.SafeLoader or a caller-supplied class.
 _INCLUDE_TAGS = ("!include", "!load")
+
+
+class _IncludeSafeLoader(yaml.SafeLoader):
+    """yaconfiglib's own SafeLoader subclass, the one that carries ``!include``/``!load``."""
+
+    _yaconfiglib_owned = True
+
+
+# Owned subclasses generated for other loader bases (a caller's ``loader_cls=`` or
+# the class of a ``master`` loader), keyed by that base.
+_OWNED_LOADERS: dict = {}
+
+
+def _owned_loader_cls(base: type) -> type:
+    """Return a yaconfiglib-owned loader class for *base*, never *base* itself unless owned.
+
+    Registering the include constructors mutates the class-level
+    ``yaml_constructors`` table, so doing it on ``yaml.SafeLoader`` made every
+    later ``yaml.safe_load`` in the process resolve ``!include``. Ownership is
+    read from the class's own ``__dict__`` so a user subclass of an owned class
+    is wrapped too, rather than mutated.
+    """
+    if base.__dict__.get("_yaconfiglib_owned"):
+        return base
+    owned = _OWNED_LOADERS.get(base)
+    if owned is None:
+        owned = type(
+            "_Yaconfiglib" + base.__name__, (base,), {"_yaconfiglib_owned": True}
+        )
+        _OWNED_LOADERS[base] = owned
+    return owned
 
 
 class YamlConfig(ConfigBackend):
     """Backend for ``*.yaml``/``*.yml`` files.
 
-    Automatically registers ``!include`` and ``!load`` tag constructors on
-    the active PyYAML loader class so nested configuration files can be
-    pulled in directly from YAML, e.g. ``database: !include "db.toml"``.
-    Registration happens once per loader class and only when a parent
+    Automatically registers ``!include`` and ``!load`` tag constructors on a
+    private, yaconfiglib-owned subclass of the PyYAML loader class, so nested
+    configuration files can be pulled in directly from YAML, e.g.
+    ``database: !include "db.toml"``. ``yaml.SafeLoader`` and any
+    caller-supplied loader class are never modified. Registration happens once
+    per owned class and only when a parent
     :class:`~yaconfiglib.loader.ConfigLoader` is supplied via ``loader=``.
     """
 
     PATHNAME_REGEX = re.compile(r".*\.((yaml)|(yml))$", re.IGNORECASE)
-    DEFAULT_LOADER_CLS = yaml.SafeLoader
+    DEFAULT_LOADER_CLS = _IncludeSafeLoader
     DEFAULT_DUMPER_CLS = yaml.Dumper
 
     def load(
@@ -58,11 +92,13 @@ class YamlConfig(ConfigBackend):
                 anchors/aliases from — used when this call originates from
                 a ``!include``/``!load`` tag within another YAML document.
             loader_cls: PyYAML loader class to use. Defaults to *master*'s
-                class if given, else :attr:`DEFAULT_LOADER_CLS`.
+                class if given, else :attr:`DEFAULT_LOADER_CLS`. Parsing uses a
+                private subclass of it, so the class itself is never modified.
             path_factory: Path constructor used when *path* is a string.
             loader: The parent :class:`~yaconfiglib.loader.ConfigLoader`.
                 When supplied, ``!include``/``!load`` tags are registered
-                on *loader_cls* so nested includes resolve through it.
+                on the owned subclass of *loader_cls* so nested includes
+                resolve through it.
 
         Returns:
             The parsed YAML document (typically a ``dict``, ``list``, or
@@ -78,9 +114,10 @@ class YamlConfig(ConfigBackend):
             loader_cls = type(master)
         if loader_cls is None:
             loader_cls = self.DEFAULT_LOADER_CLS
+        loader_cls = _owned_loader_cls(loader_cls)
 
         # Auto-register !include / !load tags if a loader is provided
-        # and the tags haven't already been registered on this loader class.
+        # and the tags haven't already been registered on this owned class.
         if loader is not None:
             self._register_include_tags(loader_cls, loader, path_factory)
 
@@ -107,8 +144,10 @@ class YamlConfig(ConfigBackend):
         """Register ``!include`` and ``!load`` constructors on *loader_cls*.
 
         Idempotent — safe to call multiple times; only registers once per class.
+        The flag is read from the class's own ``__dict__``, so a subclass of a
+        registered class still gets its own registration.
         """
-        if getattr(loader_cls, "_yaconfiglib_include_registered", False):
+        if loader_cls.__dict__.get("_yaconfiglib_include_registered", False):
             return
 
         # A consumer may have manually registered an !include/!load constructor
@@ -149,14 +188,19 @@ class YamlConfig(ConfigBackend):
                 raise TypeError(f"Un-supported YAML node {node!r}")
 
             kwargs.setdefault("master", ldr)
-            # Route the include through the ConfigLoader driving THIS parse, not
-            # the one captured when the constructor was first registered on this
-            # (global) loader class. The constructor is registered once per
-            # SafeLoader, so without this every later loader's includes would
-            # inherit the first loader's settings (base_dir, allow_commands,
-            # merge, ...) — a cross-loader state leak, and a hole in
-            # allow_commands=False against `!include 'cmd://...'`.
-            active = getattr(ldr, "_yaconfiglib_config_loader", loader)
+            # Route the include through the ConfigLoader driving THIS parse, never
+            # one captured at registration time: that leaked the first loader's
+            # settings (base_dir, allow_commands, merge, ...) into every later
+            # loader. A parse with no driving ConfigLoader (e.g. a standalone
+            # YamlConfig().load) gets no include support at all.
+            active = getattr(ldr, "_yaconfiglib_config_loader", None)
+            if active is None:
+                raise yaml.constructor.ConstructorError(
+                    None,
+                    None,
+                    "!include/!load are only available through a yaconfiglib ConfigLoader",
+                    node.start_mark,
+                )
             return active.load(pathname, *args, **kwargs)
 
         for tag in _INCLUDE_TAGS:
