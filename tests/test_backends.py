@@ -322,6 +322,144 @@ class TestPrivateSafeLoader:
             YamlConfig().load(str(parent))
 
 
+class TestJinja2SourceTrust:
+    """.j2 sources follow the load's sandbox/allow_commands/strict settings."""
+
+    SSTI = "{{ ''.__class__.__mro__ }}"
+
+    @staticmethod
+    def _write(path, text):
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_top_level_j2_is_sandboxed(self, tmp_path):
+        from jinja2.exceptions import SecurityError
+
+        from yaconfiglib import ConfigLoader
+
+        self._write(tmp_path / "settings.yaml.j2", f'x: "{self.SSTI}"\n')
+        with pytest.raises(SecurityError):
+            ConfigLoader(base_dir=tmp_path, sandbox=True).load("settings.yaml.j2")
+
+    def test_in_memory_j2_include_sandboxed_under_checklist(self, tmp_path):
+        from jinja2.exceptions import SecurityError
+
+        import yaconfiglib
+
+        doc = self._write(
+            tmp_path / "u.yaml",
+            r"""x: !include "#!x.yaml.j2\ny: \"{{ ''.__class__.__mro__ }}\"\n"
+""",
+        )
+        with pytest.raises(SecurityError):
+            yaconfiglib.load(
+                str(doc),
+                allow_commands=False,
+                interpolate=True,
+                sandbox=True,
+                loader="yaml",
+            )
+
+    def test_on_disk_j2_include_sandboxed(self, tmp_path):
+        from jinja2.exceptions import SecurityError
+
+        from yaconfiglib import ConfigLoader
+
+        self._write(tmp_path / "child.yaml.j2", f'y: "{self.SSTI}"\n')
+        self._write(tmp_path / "u.yaml", "x: !include child.yaml.j2\n")
+        with pytest.raises(SecurityError):
+            ConfigLoader(base_dir=tmp_path, sandbox=True).load("u.yaml")
+
+    def test_j2_include_sandboxed_when_only_commands_disabled(self, tmp_path):
+        from jinja2.exceptions import SecurityError
+
+        import yaconfiglib
+
+        marker = tmp_path / "ssti.marker"
+        payload = (
+            f"{{{{ cycler.__init__.__globals__.os.makedirs('{marker.as_posix()}') }}}}"
+        )
+        doc = self._write(
+            tmp_path / "u.yaml",
+            'x: !include "#!x.yaml.j2\\ny: \\"' + payload + '\\"\\n"\n',
+        )
+        with pytest.raises(SecurityError):
+            yaconfiglib.load(str(doc), allow_commands=False)
+        assert not marker.exists()
+
+    @pytest.mark.parametrize("without_pathlib_next", [False, True])
+    def test_rendered_command_source_refused(
+        self, tmp_path, monkeypatch, without_pathlib_next
+    ):
+        from yaconfiglib import CommandsDisabledError, ConfigLoader
+        from yaconfiglib.backends import jinja2 as jinja2_backend
+
+        monkeypatch.chdir(tmp_path)
+        marker = tmp_path / "pwned.marker"
+        if without_pathlib_next:
+            monkeypatch.setattr(jinja2_backend, "MemPath", None)
+            self._write(tmp_path / "x.cmd.j2", "echo pwned> pwned.marker\n")
+            source = "x.cmd.j2"
+        else:
+            # The in-memory name itself is the shell payload once rendered.
+            source = "#!x & echo pwned> pwned.marker & rem .cmd.j2\nrem\n"
+        with pytest.raises(CommandsDisabledError):
+            ConfigLoader(base_dir=tmp_path, allow_commands=False).load(source)
+        assert not marker.exists()
+
+    def test_per_call_sandbox_reaches_j2_include(self, tmp_path):
+        from jinja2.exceptions import SecurityError
+
+        from yaconfiglib import ConfigLoader
+
+        child = self._write(tmp_path / "child.yaml.j2", f'y: "{self.SSTI}"\n')
+        doc = self._write(tmp_path / "u.yaml", f"x: !include '{child.as_posix()}'\n")
+        with pytest.raises(SecurityError):
+            ConfigLoader().load(str(doc), sandbox=True)
+
+    def test_strict_reaches_j2(self, tmp_path):
+        from jinja2.exceptions import UndefinedError
+
+        from yaconfiglib import ConfigLoader
+
+        self._write(tmp_path / "x.yaml.j2", 'v: "{{ missing }}"\n')
+        with pytest.raises(UndefinedError):
+            ConfigLoader(base_dir=tmp_path, strict=True).load("x.yaml.j2")
+
+    def test_non_sandboxed_environment_refused_when_hardened(self, tmp_path):
+        from jinja2 import Environment
+
+        from yaconfiglib import ConfigLoader
+
+        self._write(tmp_path / "x.yaml.j2", "a: 1\n")
+        with pytest.raises(ValueError):
+            ConfigLoader(base_dir=tmp_path, sandbox=True).load(
+                "x.yaml.j2", environment=Environment()
+            )
+
+    def test_env_available_with_inject_env(self, tmp_path, monkeypatch):
+        import yaconfiglib
+
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        template = self._write(
+            tmp_path / "settings.yaml.j2",
+            'replicas: {{ 2 if env.ENVIRONMENT == "production" else 1 }}\n',
+        )
+        assert yaconfiglib.load(str(template), inject_env=True) == {"replicas": 2}
+
+    def test_ordinary_j2_renders_the_same_sandboxed(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        self._write(
+            tmp_path / "x.yaml.j2",
+            'a: {{ 1 + 1 }}\nname: "{{ pathname.name }}"\n'
+            "{% set items = [] %}{% do items.append(3) %}b: {{ items[0] }}\n",
+        )
+        plain = ConfigLoader(base_dir=tmp_path).load("x.yaml.j2")
+        sandboxed = ConfigLoader(base_dir=tmp_path, sandbox=True).load("x.yaml.j2")
+        assert plain == sandboxed == {"a": 2, "name": "x.yaml.j2", "b": 3}
+
+
 class TestDeterministicDispatch:
     def test_first_defined_backend_wins(self):
         import re

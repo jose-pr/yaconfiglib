@@ -86,8 +86,17 @@ replicas: {{ 2 if env.ENVIRONMENT == "production" else 1 }}
 ```
 
 ```python
-config = yaconfiglib.load("settings.yaml.j2")
+config = yaconfiglib.load("settings.yaml.j2", inject_env=True)
 ```
 
+The template sees `pathname` (the source path) and, with `inject_env=True`,
+`env` (a read-only snapshot of `os.environ`).
+
+`.j2` rendering follows the load's trust settings: it runs in Jinja2's
+`SandboxedEnvironment` when `sandbox=True` or `allow_commands=False` is in
+effect, and undefined variables raise when `strict=True`.
+
 Pass a custom `jinja2.Environment` with `environment=` if you need custom
-filters, extensions, or undefined-handling beyond the default.
+filters, extensions, or undefined-handling beyond the default. Under
+`sandbox=True` or `allow_commands=False` it must be a
+`jinja2.sandbox.SandboxedEnvironment`, otherwise loading raises `ValueError`.

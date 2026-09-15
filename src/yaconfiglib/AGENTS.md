@@ -65,7 +65,8 @@ All constructor args become instance defaults, overridable per-call. Notable one
 - `!include` mapping form — accepts only `pathname`, `encoding`, `transform`,
   `key_factory` (`"%<expr>"` form only), `default`, `flatten`, `merge`, `merge_options`,
   `recursive`; other keys are dropped with a WARNING.
-- `inject_env=True` — with `interpolate`, exposes `os.environ` to templates as `env`.
+- `inject_env=True` — with `interpolate`, exposes `os.environ` to templates as `env`; also
+  exposed to `.j2` source rendering (as a read-only snapshot).
 
 ### Methods
 
@@ -220,8 +221,16 @@ distinguish merge branches.
   the `+fmt` suffix or a `#!fmt` shebang line in the output.
 - **`PythonBackend`** (`NAME="python"`) — passes an in-memory Python object straight
   through as the parsed document.
-- **`Jinja2ConfigLoader`** (`NAME="jinja2"`) — a backend wrapping `utils.jinja2` for
-  loader-driven use.
+- **`Jinja2ConfigLoader`** (`NAME="jinja2"`, `.j2`/`.jinja2`) — renders the file as a
+  Jinja2 template, then parses the result with the backend matching the name minus the
+  suffix (`settings.yaml.j2` → YAML). `.load(path, encoding=None, loader=None,
+  environment=None, **kwargs)`. The render context is `pathname`, plus `env` (read-only
+  `os.environ` snapshot) when the parent loader has `inject_env=True`. Follows the load's
+  effective policy: sandboxed (`utils.jinja2.get_environment(strict, True)`) when
+  `sandbox=True` or `allow_commands=False` is in effect, `StrictUndefined` when `strict`;
+  a non-`SandboxedEnvironment` `environment=` under a hardened policy raises
+  `ValueError`, and a rendered command source raises `CommandsDisabledError` when
+  commands are disabled.
 
 ## Jinja2 interpolation (`utils/jinja2.py`)
 

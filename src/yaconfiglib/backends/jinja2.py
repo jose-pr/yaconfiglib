@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
 import re
+import types
 
 from jinja2 import Environment
+from jinja2.sandbox import SandboxedEnvironment
 
 try:
     from pathlib_next import Path, PosixPathname
@@ -14,8 +17,10 @@ except ImportError:
     MemPath = None  # type: ignore[assignment,misc]
 
 from yaconfiglib.backends.base import ConfigBackend
+from yaconfiglib.backends.command import CommandBackend
 from yaconfiglib.utils import jinja2
 from yaconfiglib.utils.source import _materialize_temp
+from yaconfiglib.utils.trust import CommandsDisabledError, current_policy, is_hardened
 
 __all__ = ["Jinja2ConfigLoader"]
 
@@ -57,24 +62,54 @@ class Jinja2ConfigLoader(ConfigBackend):
                 forwarded to the resolved backend so nested
                 ``!include``/``!load`` directives keep working.
             environment: A :class:`jinja2.Environment` to render with.
-                Defaults to :data:`yaconfiglib.utils.jinja2.DEFAULT_ENV`.
-                The legacy keyword ``envoriment`` (a historical typo) is
-                still accepted as a fallback for backward compatibility —
-                prefer ``environment``.
+                Defaults to :data:`yaconfiglib.utils.jinja2.DEFAULT_ENV`, or
+                to the shared sandboxed/strict environment when the load's
+                ``sandbox=True``, ``allow_commands=False`` or ``strict=True``
+                is in effect. Under ``sandbox=True`` or
+                ``allow_commands=False`` it must be a
+                :class:`jinja2.sandbox.SandboxedEnvironment`. The legacy
+                keyword ``envoriment`` (a historical typo) is still accepted
+                as a fallback — prefer ``environment``.
 
         Returns:
             The parsed object produced by the backend matching the
             rendered filename (with the ``.j2``/``.jinja2`` suffix
             stripped).
+
+        Raises:
+            ValueError: If a non-sandboxed *environment* is supplied while
+                ``sandbox=True`` or ``allow_commands=False`` is in effect.
+            CommandsDisabledError: If the rendered document is a command
+                source while ``allow_commands=False`` is in effect.
         """
         encoding = encoding or self.DEFAULT_ENCODING
+        # A .j2 body is template code, so it follows the load's effective trust
+        # policy: sandboxed whenever commands are disabled or the sandbox is on,
+        # and strict whenever strict is in effect.
+        policy = current_policy()
+        hardened = is_hardened(policy)
+        strict = policy[2]
         environment = environment or kwargs.pop("envoriment", None)
+        if environment is None:
+            if hardened or strict:
+                environment = jinja2.get_environment(strict, hardened)
+            else:
+                environment = jinja2.DEFAULT_ENV
+        elif hardened and not isinstance(environment, SandboxedEnvironment):
+            raise ValueError(
+                f"refusing to render {path.as_posix()!r} with a non-sandboxed "
+                "environment: sandbox=True or allow_commands=False is in effect"
+            )
         template = jinja2.load_template(
             path.read_text(encoding=encoding),
-            environment=environment or jinja2.DEFAULT_ENV,
+            environment=environment,
         )
-        pathname = PosixPathname(path.as_posix())
-        rendered = template.render(pathname=pathname)
+        context = {"pathname": PosixPathname(path.as_posix())}
+        if getattr(loader, "inject_env", False):
+            # A read-only snapshot: a template must not be able to change the
+            # process environment.
+            context["env"] = types.MappingProxyType(dict(os.environ))
+        rendered = template.render(**context)
         # Name the rendered document after the template minus its .j2/.jinja2
         # suffix, so backend auto-detection resolves settings.yaml.j2 -> YAML.
         rendered_name = path.with_name(path.stem).as_posix()
@@ -92,6 +127,11 @@ class Jinja2ConfigLoader(ConfigBackend):
             target.write_text(rendered, encoding=encoding)
         parent_loader = loader
         rendered_loader = ConfigBackend.get_class_by_path(target)()
+        if isinstance(rendered_loader, CommandBackend) and not policy[0]:
+            raise CommandsDisabledError(
+                f"refusing to run rendered command source {str(target)!r} "
+                f"from {path.as_posix()!r}: allow_commands=False"
+            )
 
         rendered = rendered_loader.load(
             target,

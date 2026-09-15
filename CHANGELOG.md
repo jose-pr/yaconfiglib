@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A per-call `load(..., allow_commands=False)` or `load(..., sandbox=True)` now
   also applies to nested `!include` targets. Previously the included files were
   loaded with the instance settings.
+- `.j2`/`.jinja2` sources now render in Jinja2's sandbox whenever `sandbox=True` or
+  `allow_commands=False` is in effect, including ones reached through `!include`
+  (an in-memory `#!name.yaml.j2` document included the same way). Previously
+  they always rendered in the non-sandboxed default environment, so a template
+  could run arbitrary Python even under both controls. A rendered document that
+  is a command source is refused while `allow_commands=False`.
 
 ### Changed
 - The `!include` mapping form accepts only `pathname`, `encoding`, `transform`,
@@ -35,6 +41,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   effect.
 - `CommandsDisabledError` is now defined in `yaconfiglib.utils.trust`; importing it
   from `yaconfiglib` or `yaconfiglib.loader` keeps working.
+- With `strict=True`, an undefined variable in a `.j2`/`.jinja2` source now raises
+  `UndefinedError` instead of rendering as an empty string.
+- Passing a non-sandboxed `environment=` for a `.j2`/`.jinja2` source while
+  `sandbox=True` or `allow_commands=False` is in effect raises `ValueError`; pass a
+  `jinja2.sandbox.SandboxedEnvironment` instead.
+
+### Fixed
+- `env` is available when rendering `.j2`/`.jinja2` sources with `inject_env=True`,
+  as the templating guide's example shows. Previously it raised
+  `UndefinedError: 'env' is undefined`.
 
 ## [0.11.2] - 2026-08-16
 

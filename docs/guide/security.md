@@ -18,6 +18,11 @@ Two features execute code as a side effect of loading:
 - **Interpolation.** With `interpolate=True`, every string value is rendered as
   a Jinja2 template. In a normal Jinja environment a hostile string can reach
   Python internals via attribute traversal (server-side template injection).
+- **Templated sources.** A `.j2`/`.jinja2` source is rendered as a Jinja2
+  template before it is parsed, regardless of `interpolate`.
+- **Backend selection by name.** An `!include` target is always auto-detected
+  from its name, and an in-memory `#!<name>` document picks its backend from
+  that name, so a document can choose which backend reads what it includes.
 
 For **trusted, local configuration** — the common case — the defaults are fine.
 For **configuration from an untrusted source**, use the controls below.
@@ -70,6 +75,12 @@ Interpolation then runs in Jinja2's `SandboxedEnvironment`, which blocks the
 attribute traversal used for template-injection attacks. This is Jinja's
 sandbox — it is not an OS-level sandbox and does not limit CPU/time.
 
+`.j2`/`.jinja2` sources render in the sandbox whenever `sandbox=True` **or**
+`allow_commands=False` is in effect, including ones reached through
+`!include`. A rendered document that turns out to be a command source is
+refused while `allow_commands=False`. Passing a non-sandboxed
+`environment=` for a `.j2` source under those settings raises `ValueError`.
+
 ## Loading third-party configuration — checklist
 
 ```python
@@ -82,7 +93,8 @@ config = yaconfiglib.load(
 ```
 
 - Prefer a fixed `loader="yaml"` (or the specific format) over auto-detection so
-  a filename can't select an unexpected backend.
+  a filename can't select an unexpected backend. This applies to the top-level
+  sources only: `!include` targets are still auto-detected from their names.
 - Do not pass untrusted data to the `python` backend.
 - Both controls default to the permissive setting so existing trusted-config
   workflows are unchanged; opt in for untrusted input.
