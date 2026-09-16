@@ -382,6 +382,13 @@ marker, and would add a BOM there.
   closed. `.load(..., timeout=None)`: an opt-in number of seconds (reachable per call,
   e.g. `loader.load("cmd://...", timeout=30)`) after which the command and its child
   processes are killed and `subprocess.TimeoutExpired` is raised; no timeout by default.
+  With no `format=`/`+fmt`/shebang it **sniffs**: json (any value), yaml **only for a
+  mapping or list**, toml, dotenv **strict** (every non-comment line an assignment), ini,
+  else the raw stdout string. The yaml and dotenv restrictions are what make the later
+  candidates reachable — YAML turns any text into a scalar and lenient dotenv turns a
+  word into a bare key — so a candidate's result must be *checked*, not just produced.
+  Explicit `format=`, `+fmt` and shebang routes keep lenient dotenv and propagate a
+  single candidate's parse error.
 - **`PythonBackend`** (`NAME="python"`) — passes an in-memory Python object straight
   through as the parsed document.
 - **`Jinja2ConfigLoader`** (`NAME="jinja2"`, `.j2`/`.jinja2`) — renders the file as a

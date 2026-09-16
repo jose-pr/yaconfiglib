@@ -7,6 +7,7 @@ import re
 import signal
 import subprocess
 import typing
+from collections.abc import Mapping
 
 try:
     from pathlib_next import Path
@@ -15,6 +16,7 @@ except ImportError:
 
 from ..utils.trust import CommandsDisabledError, current_policy
 from .base import ConfigBackend
+from .dotenv import DotenvBackend
 
 __all__ = ["CommandBackend"]
 
@@ -93,10 +95,15 @@ class CommandBackend(ConfigBackend):
     1. An explicit ``format=`` argument.
     2. The ``+fmt`` suffix on the scheme (e.g. ``cmd+yaml://...``).
     3. A ``#!fmt`` shebang line at the start of the command's stdout.
-    4. Sniffing: try json, yaml, toml, dotenv, ini in turn.
+    4. Sniffing: json (any JSON value), yaml (only when the result is a
+       mapping or a list), toml, dotenv (strict, so only when every
+       non-comment line is an assignment), then ini.
 
-    If parsing fails and no format was requested, the raw stdout string is
-    returned as a fallback rather than raising.
+    If no candidate accepts the output and no format was requested, the raw
+    stdout string is returned as a fallback rather than raising. The yaml
+    restriction is what makes the later candidates reachable at all: YAML
+    reads arbitrary text as a scalar, so it used to accept INI output as one
+    string. Pass ``cmd+yaml://`` to force a YAML scalar.
     """
 
     PATHNAME_REGEX = re.compile(
@@ -226,11 +233,30 @@ class CommandBackend(ConfigBackend):
         else:
             candidates = ["json", "yaml", "toml", "dotenv", "ini"]
 
+        sniffing = not (explicit_format or shebang_format)
         for fmt in candidates:
             if fmt == "command":
                 continue
+            reader = fmt
+            if sniffing and fmt == "dotenv":
+                # Strict, so that one line of prose is not read as a bare key
+                # and the output handed back as an empty mapping. Passed as an
+                # instance because a reader option named `strict` would be
+                # routed to the ConfigLoader, where it means Jinja strictness.
+                reader = DotenvBackend(strict=True)
             try:
-                return loads(output, loader=fmt, **loads_options)
+                result = loads(output, loader=reader, **loads_options)
+                if (
+                    sniffing
+                    and fmt == "yaml"
+                    and not isinstance(result, (Mapping, list))
+                ):
+                    # YAML reads arbitrary text as a scalar, so accepting one
+                    # here would stop every later candidate from being tried -
+                    # that is how INI output became a flattened dotenv-looking
+                    # dict. JSON scalars are unambiguous and stay accepted.
+                    continue
+                return result
             except (
                 Exception
             ):  # noqa: BLE001 - format sniffing must survive ANY parse error

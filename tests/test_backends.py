@@ -1092,3 +1092,36 @@ class TestDotenvParsing:
         (tmp_path / "c.env").write_bytes(b"MSG=wait\x85done\nPORT=1\n")
         result = ConfigLoader(base_dir=tmp_path).load("c.env", encoding="latin-1")
         assert result == {"msg": "wait\x85done", "port": "1"}
+
+
+class TestCommandSniffing:
+    @staticmethod
+    def _run(tmp_path, body):
+        script = tmp_path / "emit.py"
+        script.write_text(body)
+        return CommandBackend().load(f'cmd://"{sys.executable}" "{script}"')
+
+    def test_ini_output_keeps_sections(self, tmp_path):
+        result = self._run(
+            tmp_path,
+            "print('[db]')\nprint('host = dbhost')\nprint('[web]')\n"
+            "print('port = 8080')\n",
+        )
+        assert result == {"db": {"host": "dbhost"}, "web": {"port": "8080"}}
+
+    def test_dotenv_output_parsed_as_dotenv(self, tmp_path):
+        result = self._run(
+            tmp_path, "print('DB_HOST=localhost')\nprint('DB_PORT=5432')\n"
+        )
+        assert result == {"db_host": "localhost", "db_port": "5432"}
+
+    def test_unparseable_output_returns_raw_string(self, tmp_path):
+        result = self._run(tmp_path, "print('{{{ not: valid: [')\n")
+        assert result.strip() == "{{{ not: valid: ["
+
+    def test_plain_text_returns_raw_string(self, tmp_path):
+        result = self._run(tmp_path, "print('hello world')\n")
+        assert result.strip() == "hello world"
+
+    def test_json_scalar_still_parsed(self, tmp_path):
+        assert self._run(tmp_path, "print(42)\n") == 42

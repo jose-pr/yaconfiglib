@@ -113,9 +113,19 @@ secrets: !include 'cmd+json://python -c "import json; print(json.dumps({\"token\
 
 Format resolution order: an explicit `format=` argument, the `+fmt`
 suffix on the scheme (`cmd+yaml://...`), a `#!fmt` shebang line in the
-command's own output, then sniffing (json, yaml, toml, dotenv, ini in
-turn). If nothing matches and no format was requested, the raw stdout
+command's own output, then sniffing.
+
+Sniffing tries, in turn: **json** (any JSON value, so `42` stays the
+number), **yaml** but only when the result is a mapping or a list,
+**toml**, **dotenv** but only when every non-comment line is a `KEY=value`
+assignment, and **ini**. If none of them accepts the output, the raw stdout
 string is returned instead of raising.
+
+The yaml restriction matters because YAML reads arbitrary text as a string:
+without it, INI output was accepted as a single scalar and never reached the
+INI parser. The cost is that output only YAML would read as a scalar — a bare
+date such as `2026-09-15`, or `yes`, or `~` — now comes back as the raw
+string. Use `cmd+yaml://` to force a YAML scalar.
 
 ## In-memory Python objects
 

@@ -141,6 +141,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Command output with no `format=`, `+fmt` or `#!fmt` shebang is sniffed as documented.
+  INI output keeps its sections, where it used to be flattened as dotenv and lose keys;
+  `KEY=value` output is parsed as dotenv, where it used to come back as one folded
+  string; and output no format accepts comes back as the raw stdout string, where it used
+  to be an empty mapping. While sniffing, YAML is accepted only for a mapping or a list,
+  so output that only YAML read as a scalar — a bare date such as `2026-09-15`, `yes` or
+  `~` — now comes back as the raw string; use `cmd+yaml://` to force a YAML scalar.
 - A multi-line quoted `.env` value loads whole. A PEM key or any other value spanning
   several lines was truncated at the first line break.
 - An apostrophe in an unquoted `.env` value no longer disables comment stripping, so
