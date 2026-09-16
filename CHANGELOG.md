@@ -81,6 +81,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saw.
 
 ### Fixed
+- `env` is available when rendering `.j2`/`.jinja2` sources with `inject_env=True`,
+  as the templating guide's example shows. Previously it raised
+  `UndefinedError: 'env' is undefined`.
+- `utils.jinja2.compile()` and `eval()` honour `globals=` on every call. The first
+  call's globals were baked into the cached template, so a later call with different
+  globals got the first call's values.
+- The compiled-template caches are safe to use from several threads: a lookup can no
+  longer fail with `KeyError` when another thread evicts an entry at the same moment.
+- A `.j2`/`.jinja2` file with no format extension in front of the suffix (`config.j2`)
+  now raises `NotImplementedError` naming the template and the expected
+  `name.<format>.j2` form, before the file is read. The error used to name a stripped
+  path that does not exist, or an unrelated temporary file.
 - Values pulled in with `!include`/`!load` are now rendered together with the document
   that includes them when `interpolate=True`: an included file's templates can refer to
   the including document's keys, and an escaped literal such as `{{ '{{ x }}' }}` in an
@@ -114,9 +126,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   config verbatim.
 - The security guide no longer claims the `python` backend executes Python; it
   passes a caller-supplied object through unchanged.
-- `env` is available when rendering `.j2`/`.jinja2` sources with `inject_env=True`,
-  as the templating guide's example shows. Previously it raised
-  `UndefinedError: 'env' is undefined`.
 
 ## [0.11.2] - 2026-08-16
 

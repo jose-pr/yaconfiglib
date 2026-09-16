@@ -83,7 +83,10 @@ config keys early.
 ## Templated source files (`.j2`)
 
 Append `.j2` or `.jinja2` to any filename to render the *entire file* as a
-Jinja2 template before it's parsed by its underlying format:
+Jinja2 template before it's parsed by its underlying format. Keep the format
+extension in front of the suffix — `config.yaml.j2`, not `config.j2` — since
+that is what selects the backend the rendered text is parsed with; a template
+without one raises `NotImplementedError` naming the file:
 
 ```
 config.yaml.j2  ->  rendered as Jinja2  ->  parsed as YAML
