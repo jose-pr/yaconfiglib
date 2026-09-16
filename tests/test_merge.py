@@ -638,3 +638,139 @@ class TestTypedMergeHooks:
         for name in ("OpaqueMerge", "opaque", "TypedNamespace"):
             assert name in yaconfiglib.__all__
             assert getattr(yaconfiglib, name) is not None
+
+
+# ---------------------------------------------------------------------------
+# typed_merge: None sources, unions, Any, Annotated and unresolvable hints
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _DB:
+    host: str = ""
+    port: int = 0
+
+
+@dataclass
+class _App:
+    db: typing.Optional[_DB] = None
+    name: str = ""
+
+
+class _Zone(OpaqueMerge, Namespace):
+    pass
+
+
+@dataclass
+class _PartiallyTyped:
+    port: int = 0
+    later: "NotDefinedAnywhere" = None  # noqa: F821 - unresolvable on purpose
+
+
+class _Recorder:
+    seen = None
+
+    @classmethod
+    def __merge__(cls, *objects, init=True):
+        _Recorder.seen = objects
+        return objects[-1]
+
+
+class TestTypedMergeNoneUnionsAndHints:
+    def test_optional_scalar_field_none_keeps_earlier_value(self):
+        @dataclass
+        class Cfg:
+            name: typing.Optional[str] = None
+            debug: typing.Optional[bool] = None
+
+        merged = typed_merge(Cfg, Cfg(name="x", debug=True), Cfg())
+        assert merged.name == "x"
+        assert merged.debug is True
+
+    def test_optional_dataclass_field_none_in_any_position(self):
+        db = _DB(host="h", port=5)
+        assert typed_merge(_App, _App(db=db), _App()).db == db
+        assert typed_merge(_App, _App(), _App(db=db)).db == db
+        # The same through mappings, which is how a config document arrives.
+        merged = typed_merge(_App, {"db": {"host": "h", "port": "5"}}, {"db": None})
+        assert merged.db == _DB(host="h", port=5)
+
+    def test_none_source_does_not_stringify_or_falsify(self):
+        assert typed_merge(str, "a", None) == "a"
+        assert typed_merge(bool, True, None) is True
+        assert typed_merge(int, 7, None) == 7
+
+    def test_untyped_mapping_none_value_keeps_earlier_value(self):
+        assert typed_merge(dict, {"a": 1}, {"a": None}) == {"a": 1}
+        assert typed_merge(dict, {"a": 1}, {"a": None}, {"a": 3}) == {"a": 3}
+
+    def test_all_none_sources_give_none(self):
+        assert typed_merge(str, None, None) is None
+        assert typed_merge(_App, None) is None
+        assert typed_merge(typing.Optional[typing.List[str]], ["a"], None) == ["a"]
+        assert typed_merge(dict, {"a": None}, {"a": None}) == {"a": None}
+
+    def test_union_skips_nonetype_member(self):
+        assert typed_merge(typing.Union[None, int], "5") == 5
+        assert typed_merge(typing.Optional[typing.Dict[str, int]], {"a": "1"}) == {
+            "a": 1
+        }
+
+    def test_union_keeps_value_matching_a_later_member(self):
+        assert typed_merge(typing.Union[str, int], 5) == 5
+        assert typed_merge(typing.Union[int, str], "abc") == "abc"
+        # Documented change: a string a str member already accepts is kept.
+        assert typed_merge(typing.Union[int, str], "8080") == "8080"
+
+    def test_union_coerces_non_matching_value_through_first_member(self):
+        # A pin on the documented first-member rule for a value no member takes.
+        assert typed_merge(typing.Union[int, float], "2") == 2
+
+    def test_opaque_type_inside_optional_stays_opaque(self):
+        z1, z2 = _Zone(x="a"), _Zone(x="z")
+        assert typed_merge(typing.Optional[_Zone], z1, z2) is z2
+
+        @dataclass
+        class Cfg:
+            zone: typing.Optional[_Zone] = None
+
+        merged = typed_merge(Cfg, Cfg(zone=z1), Cfg(zone=z2))
+        assert merged.zone is z2
+
+    def test_merge_hook_never_receives_none(self):
+        _Recorder.seen = None
+        r = _Recorder()
+        assert typed_merge(_Recorder, r, None) is r
+        assert _Recorder.seen == (r,)
+
+    def test_any_hint_last_value_wins(self):
+        assert typed_merge(typing.Any, {"a": 1}, "last") == "last"
+        assert typed_merge(typing.Optional[typing.Any], 1, "last") == "last"
+        assert typed_merge(typing.List[typing.Any], [1, "a", {"b": 2}]) == [
+            1,
+            "a",
+            {"b": 2},
+        ]
+        assert typed_merge(
+            typing.Dict[str, typing.Any], {"a": {"x": 1}}, {"a": "flat"}
+        ) == {"a": "flat"}
+
+    def test_dataclass_any_field(self):
+        @dataclass
+        class Cfg:
+            extra: typing.Any = None
+
+        merged = typed_merge(Cfg, Cfg(extra={"a": 1}), Cfg(extra=[1, 2]))
+        assert merged.extra == [1, 2]
+
+    def test_annotated_hint_is_unwrapped(self):
+        assert typed_merge(typing.Annotated[int, "port"], "5") == 5
+        assert typed_merge(
+            typing.Dict[str, typing.Annotated[int, "port"]], {"a": "5"}
+        ) == {"a": 5}
+        assert typed_merge(typing.Optional[typing.Annotated[int, "port"]], "5") == 5
+
+    def test_unresolvable_field_annotation_keeps_other_hints(self):
+        merged = typed_merge(_PartiallyTyped, _PartiallyTyped(port="8080"))
+        assert merged.port == 8080
+        assert merged.later is None

@@ -126,13 +126,28 @@ result = loader.load("a.yaml", "b.yaml", merge=ConfigLoaderMergeMethod.Deep)
 
 `typed_merge` merges several objects into one instance of a target type,
 guided by its type hints: mappings and dataclasses/namespaces merge field by
-field, sequences element by element, and scalars last-object-wins.
+field, sequences take the last object's value with each element coerced
+through the element type, and scalars last-object-wins.
 
 ```python
 from yaconfiglib import typed_merge
 
 merged = typed_merge(MyConfig, base_cfg, override_cfg)
 ```
+
+`None` objects are skipped at every level, so a later `None` never overrides
+an earlier value; a field whose every value is `None` stays `None`, and if
+nothing but `None` is given the result is `None`. To clear a field, pass an
+explicit empty value (`""`, `[]`, `{}`) rather than `None`.
+
+An `Optional[X]` or `Union[...]` hint drops its `None` member and then coerces
+through the **first member the value is already an instance of** — so a hint
+that already accepts the value leaves it alone (`Union[int, str]` keeps
+`"8080"` as a string). A value no member accepts is coerced through the first
+member. To force a coercion, narrow the hint to the one type you want (`int`,
+not `Union[int, str]`); reordering the union does not change the result.
+`Annotated[X, ...]` is stripped and coerces through `X`, and an `Any` member
+anywhere in the union makes the whole hint `Any` — last object wins, uncoerced.
 
 Two per-type hooks let a class customize how it is merged.
 
@@ -155,10 +170,13 @@ class Zone(argparse.Namespace):
     ...
 ```
 
-Use it when a config object's `__init__` already normalized its fields, or
-when a field is annotated by a factory function rather than a class:
+Use it when a config object's `__init__` already normalized its fields:
 `typed_merge` then returns the last object unchanged instead of introspecting
-its fields (which would otherwise fail on a non-class annotation).
+its fields and coercing them. A field annotated by a factory function rather
+than a class needs no mixin — it is coerced through that callable per field —
+so reach for `OpaqueMerge` to skip the introspection, not to survive it. The
+hook is found through `Optional[Zone]` and other unions, not only on a direct
+class hint.
 
 ### `_parse_<field>` — coerce a field as it is merged
 

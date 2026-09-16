@@ -210,21 +210,42 @@ distinguish merge branches.
   `None`. `init=False` builds via `cls.__new__` + attribute/item assignment instead of
   `cls(**merged)` — use when `__init__` has required positional-only args or side
   effects you want to skip.
+  - **`None` sources are skipped at every level**, before any hint resolution or hook
+    call: a later `None` never overrides an earlier value, a field whose every value is
+    `None` stays `None`, and all-`None` (or no) objects give `None`. Pass an explicit
+    empty value to clear a field.
   - **Parametrized generics** are honored: `Dict[str, int]` coerces each value to the
     mapping's value type, `List[str]`/`Tuple[str, ...]` coerce each element, and an
-    unparametrized `dict`/`list` leaves element types alone. A `Union`/`Optional`
-    wrapper is unwrapped to its first concrete member first, so
-    `Optional[Dict[str, int]]` behaves exactly like `Dict[str, int]`. `str`/`bytes`
-    hints are never treated as element sequences.
+    unparametrized `dict`/`list` leaves element types alone. `str`/`bytes` hints are
+    never treated as element sequences.
+  - A **`Union`/`Optional`** hint is resolved against the value being merged: `NoneType`
+    members are dropped (so `Optional[Dict[str, int]]` behaves exactly like
+    `Dict[str, int]`), then the first member the value is already an instance of wins —
+    `Union[int, str]` keeps `"8080"` a string — and failing that the first member, which
+    is the coercing case. Narrow the hint to force a coercion; reordering the union does
+    nothing. `Annotated[X, ...]` is stripped and coerces through `X`. **`typing.Any`** —
+    directly, as a type arg, or as any union member — means last object wins, uncoerced
+    (`Any` is a class on 3.11+, so this is an explicit short-circuit, not the non-class
+    path).
+  - **Annotations are resolved per entry.** `typing.get_type_hints` is all-or-nothing, so
+    when it raises the fallback walks the MRO base-first and resolves each class's own
+    annotations one at a time: one unresolvable forward reference no longer leaves every
+    sibling field uncoerced. On 3.14+ a class `__dict__` has no `__annotations__` (PEP
+    649) — read them with `annotationlib.get_annotations(..., Format.FORWARDREF)`.
   - A field annotated with a **non-class hint** (e.g. a factory function like
     `netutils.IPNetwork`) is treated as opaque: last value wins, coerced through the
     callable when possible.
   - Two per-type hooks: a classmethod **`__merge__(cls, *objects, init=True)`**
     overrides merging entirely for that type; a per-field **`_parse_<field>(value)`**
-    coerces that field's value as it's collected from each source object.
+    coerces that field's value as it's collected from each source object. `__merge__` is
+    looked up on the hint's stripped origin, so it is found through `Optional[Zone]`,
+    `MyGeneric[int]` and any other parameterized spelling — typing aliases do not forward
+    dunders, so a lookup on the alias itself found nothing. It never receives `None`.
 - **`OpaqueMerge`** — mixin: `__merge__` returns the last object unchanged (no
-  field-by-field introspection). Use for a fully-built config object, or one whose
-  annotations aren't classes.
+  field-by-field introspection or coercion), including under `Optional[...]`. Use for a
+  fully-built config object whose `__init__` already normalized its fields. A field
+  annotated by a factory function needs no mixin — it is already coerced through that
+  callable per field.
 - **`opaque(cls) -> cls`** — class decorator equivalent of `OpaqueMerge`, without
   altering `cls`'s base classes.
 - **`TypedNamespace(argparse.Namespace)`** — applies `_parse_<field>` coercers at

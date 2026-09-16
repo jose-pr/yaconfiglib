@@ -45,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `typed_merge`: a `None` source no longer overrides a value from an earlier source. To
+  clear a field, pass an explicit empty value (`""`, `[]`, `{}`) instead of `None`.
+- `typed_merge`: in a multi-member union, a value that is already an instance of one of
+  the members is kept as it is instead of being coerced through the first member —
+  `Union[int, str]` fed `"8080"` now returns `"8080"`, and `Union[str, int]` fed `5`
+  returns `5`. To force a coercion, narrow the hint to the one type you want (`int`, not
+  `Union[int, str]`); reordering the union members does not restore the old result.
 - `is_array()` returns `False` for `bytearray` and `memoryview`, matching `bytes`. Binary
   buffers are values, so merging replaces them instead of combining them byte-wise.
 - `load_as` builds dataclass fields that are annotated as a dataclass or Pydantic model
@@ -106,6 +113,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `typed_merge` skips `None` sources at every level instead of merging them: an
+  `Optional[...]` field set to `None` by a later source no longer crashes
+  (`vars(None)`) or replaces the earlier value with `None`, `'None'` or `False`.
+- `typed_merge` honours a `typing.Any` hint on Python 3.11+, where `Any` became a class
+  and reached the coercion path (`isinstance() with typing.Any`). Directly, as a type
+  argument, or as a union member, `Any` takes the last object unchanged.
+- `typed_merge` strips `Annotated[X, ...]` and coerces through `X`; the annotation used
+  to be returned uncoerced.
+- `typed_merge` resolves type hints one field at a time when the whole set cannot be
+  resolved, so a single unresolvable forward reference no longer leaves every sibling
+  field uncoerced.
+- `OpaqueMerge`, `opaque` and any `__merge__` classmethod are honoured through
+  `Optional[...]`, `Union[...]` and parameterized generics, not only on a direct class
+  hint.
+- A `Union` hint whose first member is `None` (`Union[None, int]`) no longer merges
+  through `NoneType` and fails.
 - An error raised inside a custom merge strategy's `init()` propagates instead of being
   swallowed as "this strategy has no `init`", which silently skipped the hook.
 - `List` and `Hash` work on an enum built with `ConfigLoaderMergeMethod.extend(...)`.
