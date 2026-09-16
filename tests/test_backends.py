@@ -1125,3 +1125,63 @@ class TestCommandSniffing:
 
     def test_json_scalar_still_parsed(self, tmp_path):
         assert self._run(tmp_path, "print(42)\n") == 42
+
+
+class TestIniBackend:
+    def test_interpolation_none_keeps_percent_values(self, tmp_path):
+        (tmp_path / "log.ini").write_text(
+            "[formatter_generic]\n"
+            "format = %(levelname)-5.5s [%(name)s] %(message)s\n"
+            "[auth]\n"
+            "password = p%ss\n"
+            "ratio = 100%%\n"
+        )
+        result = ConfigLoader(base_dir=tmp_path).load("log.ini", ini_interpolation=None)
+        assert result["formatter_generic"]["format"] == (
+            "%(levelname)-5.5s [%(name)s] %(message)s"
+        )
+        assert result["auth"]["password"] == "p%ss"
+        assert result["auth"]["ratio"] == "100%%"
+
+    def test_extended_interpolation(self, tmp_path):
+        (tmp_path / "e.ini").write_text("[s]\na = 1\n[t]\nb = ${s:a}-2\n")
+        result = ConfigLoader(base_dir=tmp_path).load(
+            "e.ini", ini_interpolation="extended"
+        )
+        assert result["t"]["b"] == "1-2"
+
+    def test_invalid_interpolation_raises(self, tmp_path):
+        (tmp_path / "c.ini").write_text("[s]\nk = v\n")
+        with pytest.raises(ValueError):
+            ConfigLoader(base_dir=tmp_path).load("c.ini", ini_interpolation="bogus")
+
+    def test_basic_interpolation_is_default(self, tmp_path):
+        (tmp_path / "c.ini").write_text("[s]\na = 1\nb = %(a)s-2\nc = 100%%\n")
+        result = ConfigLoader(base_dir=tmp_path).load("c.ini")
+        assert result["s"]["b"] == "1-2"
+        assert result["s"]["c"] == "100%"
+
+    def test_default_only_file_warns(self, tmp_path, caplog):
+        import logging
+
+        (tmp_path / "d.ini").write_text("[DEFAULT]\ntimeout = 30\n")
+        with caplog.at_level(logging.WARNING):
+            result = ConfigLoader(base_dir=tmp_path).load("d.ini")
+        assert result == {}
+        assert "ini_default_section" in caplog.text
+
+    def test_default_section_escape_hatch(self, tmp_path):
+        (tmp_path / "d.ini").write_text("[DEFAULT]\ntimeout = 30\n")
+        result = ConfigLoader(base_dir=tmp_path).load(
+            "d.ini", ini_default_section="__none__"
+        )
+        assert result == {"DEFAULT": {"timeout": "30"}}
+
+    def test_cfg_extension_dispatches_to_ini(self, tmp_path):
+        import pathlib
+
+        from yaconfiglib.backends.ini import IniConfig
+
+        (tmp_path / "app.cfg").write_text("[s]\nk = v\n")
+        assert ConfigLoader(base_dir=tmp_path).load("app.cfg") == {"s": {"k": "v"}}
+        assert ConfigBackend.get_class_by_path(pathlib.Path("x.env.cfg")) is IniConfig

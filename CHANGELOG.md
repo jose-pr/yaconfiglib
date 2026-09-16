@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `ini_interpolation` (per call) and `IniConfig(interpolation=...)` choose how `%` is
+  handled in an INI file: `"basic"` (the default, unchanged), `"extended"` for
+  `${section:key}` references, or `None` to read values verbatim. A logging or alembic
+  formatter value such as `%(levelname)-5.5s [%(name)s] %(message)s` could not be loaded
+  at all before — it raised `InterpolationSyntaxError` with no way to opt out.
 - `DotenvBackend(strict=True)` and the per-call `dotenv_strict=True` make an unparseable
   `.env` line, or a file with no assignment at all, raise `ValueError`.
 - `yaconfiglib.load_as(model_cls, *sources, **options)`: the top-level form the README
@@ -141,6 +146,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `.cfg` files are detected as INI, which the API reference already stated. A `.cfg`
+  file previously raised `NotImplementedError`, so a glob loaded with
+  `ignore_error=True` skipped it silently and now merges it in.
+- An INI file containing only `[DEFAULT]` logs a warning explaining that those keys are
+  inherited by other sections rather than returned, and how to load them as a section.
+  It used to load as an empty mapping, indistinguishable from an empty file.
 - Command output with no `format=`, `+fmt` or `#!fmt` shebang is sniffed as documented.
   INI output keeps its sections, where it used to be flattened as dotenv and lose keys;
   `KEY=value` output is parsed as dotenv, where it used to come back as one folded

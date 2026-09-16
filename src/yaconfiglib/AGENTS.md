@@ -348,8 +348,18 @@ marker, and would add a BOM there.
   `.load(path, encoding=None, path_factory=None, **options)`.
 - **`JsonConfig`** (`.json`) —
   `.load(path, encoding=None, json_decoder_options=None, path_factory=None, **options)`.
-- **`IniConfig`** (`.ini`/`.cfg`) —
-  `.load(path, encoding=None, path_factory=None, **options)`.
+- **`IniConfig`** (`.ini`/`.cfg`) — `IniConfig(interpolation="basic")`;
+  `.load(path, encoding=None, path_factory=None, ini_default_section=None,
+  ini_interpolation=<unset>, **options)`. `ini_interpolation` takes `"basic"`,
+  `"extended"` (`${section:key}`), `"none"`/`None`, or a `configparser.Interpolation`;
+  anything else raises `ValueError`. Its default is a module sentinel, not `None`,
+  because `None` is itself a valid choice. Interpolation stays **on** by default —
+  `%(here)s` references are deliberate in alembic-style files — so a logging formatter
+  value needs `ini_interpolation=None`; through an `!include` that comes from
+  `loader_factory`, since reader options are not in the include allowlist. `[DEFAULT]`
+  keys are inherited by sections and not returned; a DEFAULT-only file logs a warning
+  naming the `ini_default_section="<unused name>"` escape hatch (adding a `DEFAULT` key
+  to the result instead would break section iteration for every file that uses it).
 - **`DotenvBackend`** (`NAME="dotenv"`, `.env`, `*.env`, `.env.<stage>[.<more>]`) —
   `DotenvBackend(lowercase=True, strict=False)`;
   `.load(path, encoding=None, path_factory=None, lowercase=None, dotenv_strict=None,

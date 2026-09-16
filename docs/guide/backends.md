@@ -40,12 +40,45 @@ No extra dependency — uses the standard library `json` module.
 ## INI
 
 ```python
-config = yaconfiglib.load("config.ini")
+config = yaconfiglib.load("config.ini")   # or config.cfg
 # {"section": {"key": "value", ...}, ...}
 ```
 
-Parsed with the standard library `configparser.ConfigParser`. All values
-come back as strings, matching `configparser` semantics.
+Parsed with the standard library `configparser.ConfigParser`. Both `.ini`
+and `.cfg` are detected. All values come back as strings, matching
+`configparser` semantics.
+
+`%` interpolation is on by default, as `configparser` does it: `%(name)s`
+refers to another key and a literal percent is written `%%`. A logging or
+alembic formatter line is not a reference, so reading such a file needs the
+interpolation turned off:
+
+```python
+config = yaconfiglib.load("logging.ini", ini_interpolation=None)
+# format: "%(levelname)-5.5s [%(name)s] %(message)s", verbatim
+```
+
+`ini_interpolation` accepts `"basic"` (the default), `"extended"` for
+`${section:key}` references, `None`/`"none"` for raw values, or a
+`configparser.Interpolation` instance. For `!include`d INI files, set the
+default on the backend instead — reader options are not passed through an
+include:
+
+```python
+from yaconfiglib.backends.ini import IniConfig
+
+loader = ConfigLoader(loader_factory=lambda path: IniConfig(interpolation=None))
+```
+
+Keys in `[DEFAULT]` are inherited by every section and are not returned as a
+section of their own, so a file containing nothing else loads as `{}` (with a
+warning). To read those keys as a section, point `default_section` at a name
+the file does not use:
+
+```python
+config = yaconfiglib.load("defaults.ini", ini_default_section="__none__")
+# {"DEFAULT": {"timeout": "30"}}
+```
 
 ## `.env` files
 
