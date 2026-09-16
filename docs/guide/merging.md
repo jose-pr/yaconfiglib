@@ -157,6 +157,10 @@ loader = ConfigLoader(
 attribute name looked up on the path object, or a `"%<jinja-expr>"`
 string evaluated with `pathname` and `value` in scope.
 
+For a command source, `pathname` — and therefore the default key — is the
+**whole source text**, `cmd+json://...` included, since a command has no
+filename to key on.
+
 The default key is the **filename stem**, which a directory glob repeats: every
 match of `services/*/config.yaml` is keyed `config`, so all but the last are
 dropped (with a warning). Key on the directory instead:

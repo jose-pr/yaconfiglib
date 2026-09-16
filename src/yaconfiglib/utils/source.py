@@ -35,15 +35,78 @@ logger = logging.getLogger(__name__)
 
 SourceLike = _ty.Union[str, _ty.Any, _io.IOBase, bytes]
 
-_CMD_REGEX = _re.compile(
-    r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:)", _re.IGNORECASE
-)
+#: A command source's scheme. The `:\\` and `:/` separators are deliberately
+#: absent: they existed only to re-parse text a Path factory had already
+#: mangled, and they made `cmd:/usr/bin/env` lose its leading slash.
+_CMD_REGEX = _re.compile(r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:)", _re.IGNORECASE)
+
 
 #: Monotonic counter giving every stream / unnamed in-memory source a unique
 #: virtual name. Without it every stream materialized to the SAME
 #: ``MemPath("stream")``, so callers that resolved sources up front
 #: (``list(parse_sources(...))``) saw every path holding the LAST stream's
 #: content.
+class CommandSource(str):
+    """A command URI, carried as the exact text the caller wrote.
+
+    `parse_sources` yields one of these for every ``exec://``/``cmd://``/``sh://``
+    source instead of a path object, because a path factory rewrites the text:
+    on Windows it turns ``/`` into ``\\``, and on POSIX it collapses ``//``,
+    ``/./`` and trailing slashes — which corrupts URLs, division in an inline
+    script, and anything else after the scheme.
+
+    It subclasses `str`, so ``str(source)``, logging, cycle keys and the
+    `CommandsDisabledError` message are byte-identical to the text. The few
+    path-like attributes callbacks use (`name`, `stem`, `suffix`, `as_posix()`)
+    resolve to the full text, so a default `key_factory` or a
+    ``transform="pathname.name"`` sees the command rather than a fragment.
+    """
+
+    # A str subclass may only declare empty slots; this keeps instances
+    # dict-free, and every property below is derived from the text.
+    __slots__ = ()
+
+    def __new__(cls, text: str) -> "CommandSource":
+        if not _CMD_REGEX.match(text):
+            raise ValueError(f"not a command source: {text!r}")
+        return super().__new__(cls, text)
+
+    @property
+    def _match(self):
+        return _CMD_REGEX.match(self)
+
+    @property
+    def scheme(self) -> str:
+        """The scheme, lower-cased: ``"cmd"``, ``"cmd+json"``, ..."""
+        return self._match.group(1).lower()
+
+    @property
+    def format(self) -> "_ty.Optional[str]":
+        """The ``+fmt`` part, lower-cased, or None."""
+        scheme = self.scheme
+        return scheme.split("+", 1)[1] if "+" in scheme else None
+
+    @property
+    def command(self) -> str:
+        """Everything after the scheme separator, exactly as written."""
+        return self[self._match.end() :]
+
+    @property
+    def name(self) -> str:
+        return str(self)
+
+    @property
+    def stem(self) -> str:
+        return str(self)
+
+    @property
+    def suffix(self) -> str:
+        return ""
+
+    def as_posix(self) -> str:
+        return str(self)
+
+
 _SOURCE_COUNTER = _itertools.count()
 
 # Temp files created by the no-pathlib_next fallback (delete=False so the
@@ -279,11 +342,17 @@ def _classify_source(source, base_dir, encoding, path_factory, recursive):
     if isinstance(source, (str, bytes)) and source.startswith(path_marker):
         return "inline", (source, path_marker)
 
+    # A command is recognized ONLY from string text, and before any path
+    # factory can rewrite it. A Path object is always a file, however its text
+    # reads: a data file really named "sh:hosts.json" must load by its
+    # extension, not run as a program.
+    if isinstance(source, str) and _CMD_REGEX.match(source):
+        return "command", (CommandSource(source),)
+
     glob_base = None
     if isinstance(source, Path):
-        is_cmd = bool(_CMD_REGEX.match(str(source)))
         path = source
-        if base_dir and not is_cmd:
+        if base_dir:
             was_relative = _is_relative_source(source)
             try:
                 path = base_dir / source
@@ -298,9 +367,8 @@ def _classify_source(source, base_dir, encoding, path_factory, recursive):
                     source,
                 )
     else:
-        is_cmd = isinstance(source, str) and bool(_CMD_REGEX.match(source))
         path = path_factory(source)
-        if base_dir and not is_cmd:
+        if base_dir:
             was_relative = _is_relative_source(path)
             try:
                 path = base_dir / source
@@ -312,9 +380,6 @@ def _classify_source(source, base_dir, encoding, path_factory, recursive):
                     base_dir,
                     source,
                 )
-
-    if is_cmd:
-        return "command", (path,)
 
     # Classified on the SOURCE, not the joined path: only what the caller wrote
     # can be pattern text. A base_dir named "proj [v2]" would otherwise turn
@@ -412,8 +477,10 @@ def parse_sources(
       *base_dir* if relative and not a command URI, and glob-expanded if it
       contains glob magic characters.
     * A command URI (``exec://``, ``cmd://``, ``sh://``, or a ``+fmt``
-      variant) — passed through unresolved and unexpanded so
-      :class:`~yaconfiglib.backends.command.CommandBackend` can run it.
+      variant) — yielded as a :class:`CommandSource`, the text exactly as
+      written, so :class:`~yaconfiglib.backends.command.CommandBackend` can run
+      it. Only a **string** source can be a command: a path object is always a
+      file, whatever its text looks like.
     * An in-memory document: a string/bytes value whose first line starts
       with ``#!``. The rest of that line is a virtual filename
       (``"#!app.yaml\nkey: value"``); ``"#!\n..."`` gets a unique

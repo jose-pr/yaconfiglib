@@ -158,6 +158,12 @@ files) run a shell command and parse its stdout:
 secrets: !include 'cmd+json://python -c "import json; print(json.dumps({\"token\": \"super-secret\"}))"'
 ```
 
+Everything after the scheme separator is passed to the shell **exactly as
+written** — no path normalization, so a URL keeps its `//`, a relative path
+keeps its `./`, and `print(10/4)` still divides. Only a *string* source can be
+a command: a path object is always a file, so a data file named
+`sh:hosts.json` loads by its extension instead of being run.
+
 Format resolution order: an explicit `format=` argument, the `+fmt`
 suffix on the scheme (`cmd+yaml://...`), a `#!fmt` shebang line in the
 command's own output, then sniffing.

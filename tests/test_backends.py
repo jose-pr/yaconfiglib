@@ -1392,3 +1392,82 @@ class TestPythonBackendDocs:
             "base_key": "from_base",
             "override_key": "override_value",
         }
+
+
+class TestCommandSourceText:
+    """A command's text reaches the shell exactly as written."""
+
+    def test_command_text_reaches_the_shell_unchanged(self):
+        script = "import sys,json; print(json.dumps(sys.argv[1:]))"
+        source = (
+            f'cmd+json://python -c "{script}" '
+            "prod/db https://vault.example.com/v1/secret a//b ./rel s/./x/"
+        )
+        # Through the loader, so parse_sources' path factory gets a chance to
+        # rewrite the text - which is the defect this pins.
+        assert ConfigLoader().load(source) == [
+            "prod/db",
+            "https://vault.example.com/v1/secret",
+            "a//b",
+            "./rel",
+            "s/./x/",
+        ]
+
+    def test_command_with_python_division(self):
+        assert ConfigLoader().load('cmd+json://python -c "print(10/4)"') == 2.5
+
+    def test_parse_sources_yields_command_source(self):
+        import pathlib
+
+        from pathlib_next import LocalPath
+
+        from yaconfiglib.utils.source import CommandSource, parse_sources
+
+        yielded = list(parse_sources(["cmd+json://echo a//b"]))
+        assert yielded == ["cmd+json://echo a//b"]
+        source = yielded[0]
+        assert isinstance(source, CommandSource)
+        assert (source.scheme, source.format, source.command) == (
+            "cmd+json",
+            "json",
+            "echo a//b",
+        )
+        assert CommandSource("CMD+JSON://echo 1").format == "json"
+        assert CommandSource("cmd:/usr/bin/env").command == "/usr/bin/env"
+        # A path object is a file, whatever its text says.
+        assert not isinstance(
+            next(iter(parse_sources([LocalPath("sh:x.json")]))), CommandSource
+        )
+
+    @pytest.mark.parametrize(
+        "name, expected",
+        [
+            ("sh:hosts.json", "JsonConfig"),
+            ("cmd:settings.yaml", "YamlConfig"),
+            ("exec:pyproject.toml", "TomlConfig"),
+            ("SH:HOSTS.JSON", "JsonConfig"),
+        ],
+    )
+    def test_scheme_named_file_dispatches_by_extension(self, name, expected):
+        from pathlib_next import LocalPath
+
+        got = ConfigBackend.get_class_by_path(LocalPath("conf") / name)
+        assert got.__name__ == expected
+
+    def test_hash_merge_key_for_command_is_its_source_text(self):
+        first = 'cmd+json://python -c "print(1)"'
+        second = 'cmd+json://python -c "import json; print(json.dumps(2))"'
+        loaded = ConfigLoader(merge="hash").load(first, second)
+        assert sorted(loaded) == sorted([first, second])
+
+    def test_transform_pathname_for_command_is_its_source_text(self):
+        source = 'cmd+json://python -c "print(1)"'
+        assert ConfigLoader().load(source, transform="pathname.name") == source
+
+    def test_can_load_path_on_paths_matches_script_extension_only(self):
+        import pathlib
+
+        assert CommandBackend.can_load_path(pathlib.Path("gen.SH")) is True
+        assert CommandBackend.can_load_path(pathlib.Path("app.env")) is False
+        assert CommandBackend.can_load_path(pathlib.PurePosixPath("x.yaml")) is False
+        assert CommandBackend.can_load_path("cmd://echo 1") is True

@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `yaconfiglib.utils.source.CommandSource`, the `str` subclass `parse_sources` yields
+  for a command URI. It exposes `scheme`, `format` and `command`, and answers `name`,
+  `stem` and `as_posix()` with the whole text.
 - Python 3.14 is tested in CI and declared in the package classifiers.
 - `ini_interpolation` (per call) and `IniConfig(interpolation=...)` choose how `%` is
   handled in an INI file: `"basic"` (the default, unchanged), `"extended"` for
@@ -53,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- A command source's default merge key and its `pathname` in a `key_factory` or
+  `transform` expression are now its **full source text** rather than a fragment of it. A
+  `Hash` merge keyed on the old value has to use the whole `cmd+json://...` string.
+- `CommandBackend.PATHNAME_REGEX` matches script extensions only (`.sh`, `.bat`, `.ps1`,
+  `.cmd`); scheme recognition moved to the source type. `CMD+JSON://` (any case) now
+  selects the `json` format.
 - A source of an unsupported type raises `ValueError` before any source loads, rather
   than after the earlier ones have been read.
 - A directory that cannot be listed during glob expansion (a permission error, say) is
@@ -180,6 +189,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `cmd://`, `exec://` and `sh://` text reaches the shell exactly as written. A path
+  factory used to rewrite it first: on Windows every `/` became `\`, and on POSIX `//`,
+  `/./` and trailing slashes were collapsed — so a secrets-manager URL, a relative path
+  argument, or even `print(10/4)` in an inline script arrived corrupted.
+- A file whose name merely starts with `sh:`, `cmd:` or `exec:` loads by its extension
+  instead of being executed. Only a string source can be a command; a path object is
+  always a file.
 - A `Hash` merge logs a warning when two sources produce the same key — for example
   `services/*/config.yaml`, whose stems are all `config`, where only the last document
   was kept and nothing said so. The later document still wins; pass `key_factory` (such

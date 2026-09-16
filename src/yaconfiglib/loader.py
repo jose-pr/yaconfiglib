@@ -32,7 +32,7 @@ from .backends import ConfigBackend
 from .backends.command import CommandBackend
 from .utils.enum import IntEnum
 from .utils.merge import Merge, MergeMethod, is_array
-from .utils.source import SourceLike, parse_sources
+from .utils.source import CommandSource, SourceLike, parse_sources
 from .utils.trust import (
     CommandsDisabledError,
     current_policy,
@@ -358,6 +358,18 @@ class _IgnoreError(typing.Protocol):
     def __call__(self, error: Exception, *args, **kwargs) -> bool: ...
 
 
+def _pathname(path: object) -> object:
+    """What a `key_factory` or `transform` expression sees as ``pathname``.
+
+    A command source is its own text (a `CommandSource` already answers `name`,
+    `stem` and `as_posix()` with the whole command), so an expression never sees
+    a fragment of it. Everything else is a POSIX-spelled path, as before.
+    """
+    if isinstance(path, CommandSource):
+        return path
+    return PurePosixPath(path.as_posix())
+
+
 def _require_jinja2(feature: str):
     """Return the Jinja2 helper module, or explain what to install.
 
@@ -558,7 +570,7 @@ class ConfigLoader(ConfigBackend):
                 )
 
                 def _key(path: Path, value):
-                    return _eval(value=value, pathname=PurePosixPath(path.as_posix()))
+                    return _eval(value=value, pathname=_pathname(path))
 
             else:
                 _keyname = key_factory
@@ -609,7 +621,7 @@ class ConfigLoader(ConfigBackend):
                 _LOAD_CHAIN.reset(token)
         if transform:
             value = jinja2.eval(transform, environment=_expression_environment())(
-                value=value, pathname=PurePosixPath(path.as_posix())
+                value=value, pathname=_pathname(path)
             )
 
         return key_factory(path, value), value

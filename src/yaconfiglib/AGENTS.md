@@ -290,7 +290,11 @@ distinguish merge branches.
 - **`parse_sources(sources, base_dir=None, encoding=None, memo=None, path_factory=None,
   recursive=None) -> Iterator[Path]`** — flattens `sources` (paths — a `str`, a
   pathlib-next path, or any other `os.PathLike` such as `pathlib.Path`; glob patterns,
-  command URIs, in-memory `"#!<name>\n<content>"` strings (`"#!\n<content>"` for an
+  command URIs — yielded as a `CommandSource`, a `str` subclass carrying the text
+  **verbatim** (a path factory would rewrite `/` on Windows and collapse `//`, `/./`
+  and trailing slashes on POSIX), with `scheme`/`format`/`command` properties and
+  `name`/`stem`/`as_posix()` all answering the full text; only a **string** source can
+  be a command; in-memory `"#!<name>\n<content>"` strings (`"#!\n<content>"` for an
   unnamed document, auto-named `mem-N.yaml`), open streams, or nested
   iterables) into concrete `Path`-like objects. Command URIs (`exec://`, `cmd://`,
   `sh://`, `+fmt` variants) pass through unresolved/unexpanded. In-memory content and
@@ -433,7 +437,10 @@ marker, and would add a BOM there.
   (`os.name == "nt"`) so tests can exercise both modes anywhere. Collision bookkeeping is
   skipped entirely when `nested_delimiter` is unset — every variable is then a leaf, and
   that is the hot path.
-- **`CommandBackend`** (`NAME="command"`) — runs `cmd://`/`exec://`/`sh://` (and `+fmt`
+- **`CommandBackend`** (`NAME="command"`, `PATHNAME_REGEX` = script extensions
+  `.sh`/`.bat`/`.ps1`/`.cmd` **only**) — claims a `CommandSource` by type, and a bare
+  string by scheme for a direct caller; a *path* is claimed by extension alone, so a
+  file named `sh:hosts.json` is never run. Runs `cmd://`/`exec://`/`sh://` (and `+fmt`
   variants, e.g. `cmd+json://...`) sources as a subprocess and parses stdout, routing by
   the `+fmt` suffix or a `#!fmt` shebang line in the output. The command runs with stdin
   closed. `.load(..., timeout=None)`: an opt-in number of seconds (reachable per call,

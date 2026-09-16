@@ -14,6 +14,7 @@ try:
 except ImportError:
     from pathlib import Path
 
+from ..utils.source import _CMD_REGEX, CommandSource
 from ..utils.trust import CommandsDisabledError, current_policy
 from .base import ConfigBackend
 from .dotenv import DotenvBackend
@@ -106,21 +107,26 @@ class CommandBackend(ConfigBackend):
     string. Pass ``cmd+yaml://`` to force a YAML scalar.
     """
 
-    PATHNAME_REGEX = re.compile(
-        r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:).*|.*?\.(sh|bat|ps1|cmd)$",
-        re.IGNORECASE,
-    )
+    # Filenames only. A command URI is recognized by its own type
+    # (CommandSource) or, for a direct caller, by _CMD_REGEX in can_load_path —
+    # never by matching a scheme against a path's text, which is how a data file
+    # named "sh:hosts.json" used to be run as a program.
+    PATHNAME_REGEX = re.compile(r".*\.(sh|bat|ps1|cmd)$", re.IGNORECASE)
     NAME = "command"
 
     @classmethod
-    def can_load_path(cls, path: Path) -> bool:
-        """Return True if *path* matches a command scheme prefix or script extension."""
-        path_str = str(path)
-        return cls.PATHNAME_REGEX.match(path_str) is not None or (
-            cls.PATHNAME_REGEX.match(path.name) is not None
-            if cls.PATHNAME_REGEX
-            else False
-        )
+    def can_load_path(cls, path) -> bool:
+        """Return True for a command source, or a path named like a script.
+
+        Must not raise for any path type: backend selection probes every
+        registered backend with arbitrary paths, including pure ones.
+        """
+        if isinstance(path, CommandSource):
+            return True
+        if isinstance(path, str):
+            # A direct caller may still pass the text itself.
+            return bool(_CMD_REGEX.match(path)) or bool(cls.PATHNAME_REGEX.match(path))
+        return cls.PATHNAME_REGEX.match(path.name) is not None
 
     def load(
         self,
@@ -163,17 +169,16 @@ class CommandBackend(ConfigBackend):
         path_str = str(path)
         explicit_format = format
 
-        # 1. Parse inline command schemes using regex to handle normalized slashes
-        m = re.match(
-            r"^(exec|cmd|sh|exec\+\w+|cmd\+\w+)(://|:\\|:/|:)", path_str, re.IGNORECASE
-        )
-        if m:
-            scheme = m.group(1)
-            command = path_str[m.end() :]
-            if "+" in scheme:
-                _, scheme_fmt = scheme.split("+", 1)
-                if not explicit_format:
-                    explicit_format = scheme_fmt
+        # 1. A command source carries its own text and scheme. A bare string is
+        # wrapped when it names a scheme; anything else runs as written, which
+        # is the documented "bare shell command" form.
+        source = path if isinstance(path, CommandSource) else None
+        if source is None and isinstance(path, str) and _CMD_REGEX.match(path):
+            source = CommandSource(path)
+        if source is not None:
+            command = source.command
+            if not explicit_format and source.format:
+                explicit_format = source.format
         else:
             command = path_str
 
