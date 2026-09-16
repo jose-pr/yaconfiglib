@@ -1,0 +1,126 @@
+{
+  "name": "0.11.2-cpython3.14-nt-arm64",
+  "version": "0.11.2",
+  "commit": null,
+  "python": "3.14.7",
+  "implementation": "CPython",
+  "processor": "ARMv8 (64-bit) Family 8 Model 2 Revision 201, Qualcomm Technologies Inc",
+  "platform": "Windows-11-10.0.28000-SP0",
+  "source": "local",
+  "created": "2026-09-16T12:39:37+00:00",
+  "metrics": {
+    "sources.parse_mixed_sources_500": {
+      "min_ms": 0.03495120001025498,
+      "median_ms": 0.035544199985451996,
+      "max_ms": 0.03690800000913441,
+      "calls": 500,
+      "samples": 5
+    },
+    "sources.glob_expansion_yaml_200": {
+      "min_ms": 0.03706099989358336,
+      "median_ms": 0.038292499957606196,
+      "max_ms": 0.039530000067315996,
+      "calls": 200,
+      "samples": 5
+    },
+    "sources.has_glob_pattern_pair_20k": {
+      "min_ms": 0.00046200500219129026,
+      "median_ms": 0.0004628300026524812,
+      "max_ms": 0.000500854998244904,
+      "calls": 20000,
+      "samples": 5
+    },
+    "merge.deep_merge_append_list_dicts_1k": {
+      "min_ms": 0.008329999982379377,
+      "median_ms": 0.008683099993504584,
+      "max_ms": 0.00900670001283288,
+      "calls": 1000,
+      "samples": 5
+    },
+    "merge.deep_merge_positional_list_dicts_1k": {
+      "min_ms": 0.011321300000417978,
+      "median_ms": 0.011434499989263713,
+      "max_ms": 0.011696100002154708,
+      "calls": 1000,
+      "samples": 5
+    },
+    "merge.loader_deep_merge_options_mergelists_200": {
+      "min_ms": 0.2772334998007864,
+      "median_ms": 0.2859659999376163,
+      "max_ms": 0.2972915000282228,
+      "calls": 200,
+      "samples": 5
+    },
+    "jinja.interpolate_nested_structure_100": {
+      "min_ms": 0.0071340001886710525,
+      "median_ms": 0.0071969995042309165,
+      "max_ms": 0.007889000116847456,
+      "calls": 100,
+      "samples": 5
+    },
+    "jinja.load_all_inline_docs_with_interpolate_5_x_50_docs": {
+      "min_ms": 5.695519992150366,
+      "median_ms": 5.715119990054518,
+      "max_ms": 5.743620009161532,
+      "calls": 5,
+      "samples": 3
+    },
+    "dot.dotted_hit_50k": {
+      "min_ms": 0.00039467799942940476,
+      "median_ms": 0.00040259400033392016,
+      "max_ms": 0.000405962000368163,
+      "calls": 50000,
+      "samples": 5
+    },
+    "dot.exact_dotted_key_hit_50k": {
+      "min_ms": 0.00011990400031208991,
+      "median_ms": 0.00011992799933068453,
+      "max_ms": 0.000120749999769032,
+      "calls": 50000,
+      "samples": 5
+    },
+    "dot.dotted_miss_50k": {
+      "min_ms": 0.0004445739998482167,
+      "median_ms": 0.0004557740001473576,
+      "max_ms": 0.00047825400019064546,
+      "calls": 50000,
+      "samples": 5
+    },
+    "env.flat_env_scan_200": {
+      "min_ms": 0.10385599976871163,
+      "median_ms": 0.10802250006236136,
+      "max_ms": 0.1795839998521842,
+      "calls": 200,
+      "samples": 5
+    },
+    "env.nested_coerced_env_scan_200": {
+      "min_ms": 0.1577160001033917,
+      "median_ms": 0.1593039999715984,
+      "max_ms": 0.16073549981229007,
+      "calls": 200,
+      "samples": 5
+    }
+  },
+  "checks": {
+    "sources.duplicate_path_behavior": "1 yielded path(s)",
+    "sources.nested_iterable_behavior": "3 yielded path(s)",
+    "sources.command_glob_metacharacter_behavior": "cmd+json:\\echo {\"x\":[1]}",
+    "merge.positional_merge_correctness": {
+      "items": [
+        {
+          "name": "a",
+          "enabled": true
+        }
+      ]
+    },
+    "dot.exact_key_outranks_traversal": "literal",
+    "env.nested_coerced_correctness": {
+      "cache": true,
+      "rate": 1.5,
+      "items": [
+        "a",
+        2
+      ]
+    }
+  }
+}
