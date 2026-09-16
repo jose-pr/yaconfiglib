@@ -443,7 +443,16 @@ marker, and would add a BOM there.
   file named `sh:hosts.json` is never run. Runs `cmd://`/`exec://`/`sh://` (and `+fmt`
   variants, e.g. `cmd+json://...`) sources as a subprocess and parses stdout, routing by
   the `+fmt` suffix or a `#!fmt` shebang line in the output. The command runs with stdin
-  closed. `.load(..., timeout=None)`: an opt-in number of seconds (reachable per call,
+  closed. A **script file** is launched with `shell=False` through its interpreter,
+  so its own name is never shell syntax: `.bat`/`.cmd` via `%COMSPEC% /d /v:off /s /c`
+  (Windows only; a `%` in the path is refused, since cmd expands `%VAR%` inside
+  quotes), `.ps1` via `pwsh`/`powershell -NoProfile -NonInteractive -File` (execution
+  policy honoured, never overridden), `.sh` via `sh` on Windows and directly on POSIX
+  when executable with a `#!` line else under `/bin/sh`. The path is made absolute
+  first (no `PATH` search, and immune to `NoDefaultCurrentDirectoryInExePath`). An
+  **in-memory** source (a `#!name` document or a rendered `.j2`) must carry a script
+  extension and is written to a private temp directory, run, and removed — so the
+  promised body runs rather than a same-named file on disk. `.load(..., timeout=None)`: an opt-in number of seconds (reachable per call,
   e.g. `loader.load("cmd://...", timeout=30)`) after which the command and its child
   processes are killed and `subprocess.TimeoutExpired` is raised; no timeout by default.
   With no `format=`/`+fmt`/shebang it **sniffs**: json (any value), yaml **only for a

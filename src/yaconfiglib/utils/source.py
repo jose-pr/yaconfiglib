@@ -145,6 +145,24 @@ def _materialize_temp(content: str | bytes, encoding: str, suffix: str) -> Path:
     return Path(name)
 
 
+def _materialize_script(content: bytes, suffix: str) -> "tuple[str, str]":
+    """Write *content* to a private temp directory as ``script<suffix>``.
+
+    Returns ``(directory, file)``. Deliberately NOT `_materialize_temp`, which
+    keeps its files for later reads: a script is executed once and the caller
+    removes the whole directory afterwards, so the file never sits in a shared
+    or globbed location. On POSIX the file is mode 0o700, so a ``#!`` line can
+    run it directly.
+    """
+    directory = _tempfile.mkdtemp(prefix="yaconfiglib-script-")
+    target = _os.path.join(directory, f"script{suffix}")
+    with open(target, "wb") as handle:
+        handle.write(content)
+    if _os.name != "nt":
+        _os.chmod(target, 0o700)
+    return directory, target
+
+
 def _is_materialized_source(path: object) -> bool:
     """True for a source that has no meaningful directory of its own.
 

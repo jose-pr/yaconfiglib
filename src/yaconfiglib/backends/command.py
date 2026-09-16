@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import signal
 import subprocess
+import sys
 import typing
 from collections.abc import Mapping
 
@@ -14,6 +16,7 @@ try:
 except ImportError:
     from pathlib import Path
 
+from ..utils import source as _source
 from ..utils.source import _CMD_REGEX, CommandSource
 from ..utils.trust import CommandsDisabledError, current_policy
 from .base import ConfigBackend
@@ -44,15 +47,90 @@ def _kill_process_tree(process: subprocess.Popen) -> None:
             pass
 
 
-def _run_command(command: str, encoding: str, timeout: typing.Optional[float]) -> str:
-    """Run *command* through the shell with stdin closed; return its stdout.
+_SCRIPT_SUFFIX_REGEX = re.compile(r"\.(sh|bat|ps1|cmd)$", re.IGNORECASE)
+
+
+def _script_command(path_str: str) -> "typing.Union[str, list[str]]":
+    """How to launch the script at *path_str*, without a shell.
+
+    Returns either an argv list, or — for `.bat`/`.cmd` — a full command line
+    string whose program is COMSPEC. Either way the caller uses
+    ``shell=False``, so the file's own name is never parsed as shell syntax:
+    a script called ``x&copy nul MARK&.bat`` runs instead of injecting.
+
+    The path is made absolute first. A relative path would otherwise be
+    searched on PATH (POSIX), be refused when
+    ``NoDefaultCurrentDirectoryInExePath`` is set (Windows), or — if it began
+    with ``-`` — be read as an interpreter option.
+    """
+    path_str = os.path.abspath(path_str)
+    suffix = os.path.splitext(path_str)[1].lower()
+
+    if suffix in (".bat", ".cmd"):
+        if sys.platform != "win32":
+            raise ValueError(
+                f"{path_str!r} is a Windows batch file and cannot run on this platform"
+            )
+        if "%" in path_str:
+            # cmd expands %VAR% even inside quotes, so a path containing % can
+            # rewrite the command line. There is no escape that survives it.
+            raise ValueError(
+                f"refusing to run {path_str!r}: a batch file's path cannot contain '%'"
+            )
+        comspec = os.environ.get("COMSPEC", "cmd.exe")
+        # /d skips AutoRun, /v:off disables delayed expansion, /s makes the
+        # outer quotes wrap the whole command rather than being stripped.
+        return f'"{comspec}" /d /v:off /s /c ""{path_str}""'
+
+    if suffix == ".ps1":
+        exe = shutil.which("pwsh") or shutil.which("powershell")
+        if not exe:
+            raise FileNotFoundError(
+                f"cannot run {path_str!r}: neither pwsh nor powershell is on PATH"
+            )
+        # No -ExecutionPolicy: a locked-down host should still refuse.
+        return [exe, "-NoProfile", "-NonInteractive", "-File", path_str]
+
+    if suffix == ".sh":
+        if sys.platform == "win32":
+            shell = shutil.which("sh")
+            if not shell:
+                raise FileNotFoundError(f"cannot run {path_str!r}: no 'sh' on PATH")
+            return [shell, path_str]
+        # Direct execution only when the file really is executable (os.access
+        # also reports a noexec mount) and carries a #! line; otherwise hand it
+        # to /bin/sh, so a 0644 script still runs.
+        if os.access(path_str, os.X_OK):
+            try:
+                with open(path_str, "rb") as handle:
+                    if handle.read(2) == b"#!":
+                        return [path_str]
+            except OSError:
+                pass
+        return ["/bin/sh", path_str]
+
+    # An explicit loader="command" on some other file: run it directly.
+    return [path_str]
+
+
+def _run_command(
+    command: "typing.Union[str, list[str]]",
+    encoding: str,
+    timeout: typing.Optional[float],
+    shell: bool = True,
+) -> str:
+    """Run *command* with stdin closed; return its stdout.
+
+    *shell* is True for a command URI or a bare command string (the documented
+    behaviour) and False for a script file, whose launch line is built by
+    `_script_command`.
 
     Raises CalledProcessError on a non-zero exit and TimeoutExpired when
     *timeout* elapses (after killing the whole process tree).
     """
     with subprocess.Popen(
         command,
-        shell=True,
+        shell=shell,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -191,9 +269,34 @@ class CommandBackend(ConfigBackend):
                 f"refusing to run command source {path_str!r}: allow_commands=False"
             )
 
-        # 2. Execute command (stdin closed, so a command can neither hang the
-        # load waiting for input nor consume the parent's stdin).
-        stdout = _run_command(command, encoding or "utf-8", timeout)
+        # 2. Execute (stdin closed, so a command can neither hang the load
+        # waiting for input nor consume the parent's stdin).
+        if source is not None or isinstance(path, str):
+            # A command URI, or a bare command string: shell, as documented.
+            stdout = _run_command(command, encoding or "utf-8", timeout)
+        elif _source._is_materialized_source(path):
+            # An in-memory document or a rendered template: run ITS body, not
+            # whatever file happens to bear that virtual name on disk.
+            suffix = path.suffix
+            if not _SCRIPT_SUFFIX_REGEX.match(suffix or ""):
+                raise ValueError(
+                    f"in-memory source {path.name!r} has no script extension: "
+                    "name it .sh/.bat/.ps1/.cmd, or use a cmd:// source to run a "
+                    "shell command"
+                )
+            directory, script = _source._materialize_script(path.read_bytes(), suffix)
+            try:
+                stdout = _run_command(
+                    _script_command(script), encoding or "utf-8", timeout, shell=False
+                )
+            finally:
+                shutil.rmtree(directory, ignore_errors=True)
+        else:
+            # A script file on disk: launched through its interpreter with
+            # shell=False, so its own name is never shell syntax.
+            stdout = _run_command(
+                _script_command(path_str), encoding or "utf-8", timeout, shell=False
+            )
         output = stdout.strip()
 
         # 3. Parse shebang from output if present

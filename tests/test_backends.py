@@ -1471,3 +1471,187 @@ class TestCommandSourceText:
         assert CommandBackend.can_load_path(pathlib.Path("app.env")) is False
         assert CommandBackend.can_load_path(pathlib.PurePosixPath("x.yaml")) is False
         assert CommandBackend.can_load_path("cmd://echo 1") is True
+
+
+WIN = sys.platform == "win32"
+
+
+def _script(directory, stem):
+    """Write a script named *stem* that prints {"ok": true}; return its path."""
+    directory.mkdir(parents=True, exist_ok=True)
+    if WIN:
+        path = directory / f"{stem}.bat"
+        path.write_text('@echo off\necho {"ok": true}\n', encoding="utf-8")
+    else:
+        path = directory / f"{stem}.sh"
+        path.write_text("#!/bin/sh\necho '{\"ok\": true}'\n", encoding="utf-8")
+        path.chmod(0o755)
+    return path
+
+
+class TestScriptLaunch:
+    """A script file is launched through its interpreter, never through a shell."""
+
+    MARK = "MARK"
+
+    def _mark(self, tmp_path):
+        return tmp_path / self.MARK
+
+    def test_script_name_metacharacter_direct(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        stem = "x&copy nul MARK&" if WIN else "a;touch MARK;"
+        path = _script(tmp_path / "conf", stem)
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        assert loader.load(f"conf/{path.name}") == {"ok": True}
+        assert not (tmp_path / "conf" / self.MARK).exists()
+        assert not self._mark(tmp_path).exists()
+
+    def test_script_name_metacharacter_glob(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        stem = "x&copy nul MARK&" if WIN else "a;touch MARK;"
+        _script(tmp_path / "conf", stem)
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        assert loader.load("conf/*") == {"ok": True}
+        assert not (tmp_path / "conf" / self.MARK).exists()
+
+    def test_script_name_metacharacter_ignore_error(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        stem = "x&copy nul MARK&" if WIN else "a;touch MARK;"
+        _script(tmp_path / "conf", stem)
+        loader = ConfigLoader(base_dir=str(tmp_path), ignore_error=True)
+        assert loader.load("conf/*") == {"ok": True}
+        assert not (tmp_path / "conf" / self.MARK).exists()
+
+    def test_script_dir_with_ampersand_and_space(self, tmp_path):
+        path = _script(tmp_path / "R&D dir", "gen")
+        assert ConfigLoader().load(str(path)) == {"ok": True}
+
+    @pytest.mark.skipif(not WIN, reason="Windows batch files only")
+    def test_percent_in_batch_path_refused(self, tmp_path):
+        path = _script(tmp_path / "conf", "%OS%")
+        with pytest.raises(ValueError, match="%"):
+            ConfigLoader().load(str(path))
+
+    @pytest.mark.skipif(not WIN, reason="Windows batch files only")
+    def test_caret_in_batch_path_runs(self, tmp_path):
+        path = _script(tmp_path / "conf", "a^b")
+        assert ConfigLoader().load(str(path)) == {"ok": True}
+
+    def test_legit_named_script_runs(self, tmp_path):
+        path = _script(tmp_path, "gen")
+        assert ConfigLoader().load(str(path)) == {"ok": True}
+
+    @pytest.mark.skipif(not WIN, reason="Windows .cmd only")
+    def test_cmd_extension_runs(self, tmp_path):
+        path = tmp_path / "gen.cmd"
+        path.write_text('@echo off\necho {"ok": true}\n', encoding="utf-8")
+        assert ConfigLoader().load(str(path)) == {"ok": True}
+
+    @pytest.mark.skipif(WIN, reason="POSIX permissions only")
+    def test_non_executable_sh_runs(self, tmp_path):
+        path = tmp_path / "gen.sh"
+        path.write_text("echo '{\"ok\": true}'\n", encoding="utf-8")
+        path.chmod(0o644)
+        assert ConfigLoader().load(str(path)) == {"ok": True}
+
+    @pytest.mark.skipif(WIN, reason="POSIX only")
+    def test_bat_on_posix_raises(self, tmp_path):
+        path = tmp_path / "gen.bat"
+        path.write_text('echo {"ok": true}\n', encoding="utf-8")
+        with pytest.raises(ValueError, match="batch"):
+            ConfigLoader().load(str(path))
+
+    @pytest.mark.skipif(WIN, reason="POSIX only")
+    def test_executable_shebang_script_runs(self, tmp_path):
+        path = _script(tmp_path, "gen")
+        assert ConfigLoader().load(str(path)) == {"ok": True}
+
+    def test_in_memory_script_runs_body_mempath(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        # A decoy of the same name on disk: the memory body must win.
+        decoy = _script(tmp_path, "gen")
+        decoy.write_text(
+            (
+                '@echo off\necho {"ok": false}\n'
+                if WIN
+                else "#!/bin/sh\necho '{\"ok\": false}'\n"
+            ),
+            encoding="utf-8",
+        )
+        name = "gen.bat" if WIN else "gen.sh"
+        body = (
+            f'#!{name}\n@echo off\necho {{"who": "memory"}}\n'
+            if WIN
+            else f'#!{name}\n#!/bin/sh\necho \'{{"who": "memory"}}\'\n'
+        )
+        assert ConfigLoader().load(body, loader="command") == {"who": "memory"}
+
+    def test_in_memory_script_runs_body_tempfile(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("yaconfiglib.utils.source.MemPath", None)
+        name = "gen.bat" if WIN else "gen.sh"
+        body = (
+            f'#!{name}\n@echo off\necho {{"who": "memory"}}\n'
+            if WIN
+            else f'#!{name}\n#!/bin/sh\necho \'{{"who": "memory"}}\'\n'
+        )
+        assert ConfigLoader().load(body, loader="command") == {"who": "memory"}
+
+    def test_in_memory_without_script_extension_refused(self, tmp_path, monkeypatch):
+        import yaconfiglib
+
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ValueError, match="script extension"):
+            yaconfiglib.loads("echo 1", loader="command")
+
+    def test_loads_command_loader_named_non_script_refused(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ValueError, match="script extension"):
+            ConfigLoader().load('#!data.yaml\n{"a": 1}', loader="command")
+
+    # --- Windows interpreter cases. Named "gui" because a mis-dispatch opens
+    # the file association instead of running the script.
+
+    @staticmethod
+    def _powershell_allows_scripts():
+        import shutil
+        import subprocess
+
+        exe = shutil.which("pwsh") or shutil.which("powershell")
+        if not exe:
+            return False
+        done = subprocess.run(
+            [exe, "-NoProfile", "-Command", "Get-ExecutionPolicy"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        return done.stdout.strip() not in ("Restricted", "AllSigned")
+
+    @pytest.mark.skipif(not WIN, reason="Windows PowerShell only")
+    def test_ps1_runs_powershell_gui(self, tmp_path):
+        if not self._powershell_allows_scripts():
+            pytest.skip("PowerShell execution policy forbids running scripts")
+        path = tmp_path / "it's R&D.ps1"
+        path.write_text("Write-Output '{\"ok\": true}'\n", encoding="utf-8")
+        assert ConfigLoader().load(str(path)) == {"ok": True}
+
+    @pytest.mark.skipif(not WIN, reason="Windows PowerShell only")
+    def test_ps1_metacharacter_path_gui(self, tmp_path):
+        if not self._powershell_allows_scripts():
+            pytest.skip("PowerShell execution policy forbids running scripts")
+        directory = tmp_path / "R&D dir"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / "gen.ps1"
+        path.write_text("Write-Output '{\"ok\": true}'\n", encoding="utf-8")
+        assert ConfigLoader().load(str(path)) == {"ok": True}
+
+    @pytest.mark.skipif(not WIN, reason="Windows .sh-through-sh only")
+    def test_sh_on_windows_uses_sh_gui(self, tmp_path):
+        import shutil
+
+        if not shutil.which("sh"):
+            pytest.skip("no 'sh' on PATH")
+        path = tmp_path / "gen.sh"
+        path.write_text("echo '{\"ok\": true}'\n", encoding="utf-8")
+        assert ConfigLoader().load(str(path)) == {"ok": True}

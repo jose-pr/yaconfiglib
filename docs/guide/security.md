@@ -8,6 +8,13 @@ for untrusted input.
 
 ## Configs are code (by default)
 
+With the default `allow_commands=True`, that includes **every** `.sh`, `.bat`,
+`.ps1` or `.cmd` file a glob matches — a directory of configs with one script
+in it runs that script. The script's own *path* is handled by the interpreter
+rather than parsed by a shell, so a name containing `&`, `;` or a space cannot
+inject a second command; that narrows the blast radius but does not change the
+rule. Set `allow_commands=False` for untrusted trees.
+
 These features execute code, or let a document decide what gets read, as a
 side effect of loading:
 

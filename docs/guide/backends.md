@@ -158,6 +158,21 @@ files) run a shell command and parse its stdout:
 secrets: !include 'cmd+json://python -c "import json; print(json.dumps({\"token\": \"super-secret\"}))"'
 ```
 
+A **script file** (`.sh`, `.bat`, `.ps1`, `.cmd`) is launched through its
+interpreter, never through a shell, so its own name is not shell syntax — a
+script called `R&D report.sh` runs instead of being split apart. Per platform:
+
+- `.bat`/`.cmd` run on Windows only, through `%COMSPEC%`; a path containing
+  `%` is refused, because `cmd` expands `%VAR%` even inside quotes.
+- `.ps1` needs `pwsh` or `powershell` on `PATH` and obeys the machine's
+  execution policy (yaconfiglib does not override it).
+- `.sh` on Windows needs `sh` on `PATH`. On POSIX it runs directly when it is
+  executable *and* starts with `#!`, otherwise under `/bin/sh` — so a
+  non-executable script still works.
+- A relative script path is resolved against the current directory before
+  launching, never searched on `PATH`.
+- A template such as `gen.sh.j2` runs its **rendered** script.
+
 Everything after the scheme separator is passed to the shell **exactly as
 written** — no path normalization, so a URL keeps its `//`, a relative path
 keeps its `./`, and `print(10/4)` still divides. Only a *string* source can be

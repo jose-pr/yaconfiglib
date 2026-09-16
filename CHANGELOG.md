@@ -56,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `.bat`/`.cmd` sources run on Windows only and refuse a path containing `%`; `.ps1`
+  requires `pwsh` or `powershell` and obeys the machine's execution policy; `.sh` on
+  Windows requires `sh` on `PATH`. Each raises a clear `ValueError`/`FileNotFoundError`
+  instead of failing obscurely.
+- An in-memory source handed to the command backend must have a script extension
+  (`.sh`, `.bat`, `.ps1`, `.cmd`). Use a `cmd://` source to run a shell command.
 - A command source's default merge key and its `pathname` in a `key_factory` or
   `transform` expression are now its **full source text** rather than a fragment of it. A
   `Hash` merge keyed on the old value has to use the whole `cmd+json://...` string.
@@ -189,6 +195,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Script files run through the right interpreter on each platform: a `.ps1` runs
+  PowerShell instead of whatever the file association opens, a POSIX `.sh` needs no
+  execute bit (it falls back to `/bin/sh`), and a script path containing a space, `&`,
+  `^` or quotes neither breaks nor injects a second command — script files are launched
+  with `shell=False`, so their names are no longer shell syntax. A relative script path
+  always runs the file in the current directory rather than searching `PATH`.
+- An in-memory `#!name.sh` document, and a `gen.sh.j2`/`gen.bat.j2` template, run their
+  own (rendered) body. They previously ran whatever program of that name the shell
+  happened to resolve.
 - `cmd://`, `exec://` and `sh://` text reaches the shell exactly as written. A path
   factory used to rewrite it first: on Windows every `/` became `\`, and on POSIX `//`,
   `/./` and trailing slashes were collapsed — so a secrets-manager URL, a relative path
