@@ -114,7 +114,10 @@ All constructor args become instance defaults, overridable per-call. Notable one
   raises `TypeError` naming it. `transform` is a Jinja2 expression evaluated per-document (as `value`)
   before merging; it is evaluated sandboxed when `sandbox=True` or
   `allow_commands=False` is in effect. `encoding` also applies to every
-  `!include`/`!load` target that names none of its own, at every depth. With
+  `!include`/`!load` target that names none of its own, at every depth, and to files,
+  bytes documents and binary streams; a `str` document or text stream is already text,
+  so it is stored in that codec (or UTF-8 when the codec cannot represent it) and read
+  back accordingly. With
   `interpolate`, the merged result is rendered once at the end of the call (never
   per source, and never inside an include). `default=` is returned only when **no**
   source loads (nothing matched, or every source failed under `ignore_error`); it is
@@ -343,6 +346,17 @@ distinguish merge branches.
   Sources are **classified before any of them loads** (so an unsupported type raises
   up front), which is also what lets a file named explicitly anywhere in the call
   beat a glob match for it while keeping its own position.
+  **`encoding` is the codec bytes documents are read with and in-memory text is stored
+  in** (UTF-8 by default, on every platform — never the locale codec). In-memory text is
+  stored as **bytes**, so a document keeps its own line endings (a `\r\n` block scalar
+  loads as it would from a file) and text the codec cannot represent raises
+  `UnicodeEncodeError` here (`ConfigLoader.load` stores it as UTF-8 instead and reads it
+  back that way). A marker name is whitespace-stripped, so `"#!x.json\r\n..."` names
+  `x.json`. A **bytes** document whose codec does not spell `#!` in ASCII (UTF-16/32,
+  `utf-8-sig`) is decoded to find its marker; any other bytes document is stored
+  byte-for-byte, so a byte-oriented backend reads exactly what was passed. A `bytes`
+  source that is not an in-memory document raises `TypeError` — a path belongs in a
+  `str` or a path object.
   **Glob expansion is pathlib-next's**, not reimplemented here: a relative pattern is
   expanded by `base_dir.glob(pattern, recursive=...)` so the base stays literal (a
   `proj [v2]` base_dir needs no escaping), and an absolute one by `path.glob(None, ...)`

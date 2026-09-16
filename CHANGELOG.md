@@ -210,6 +210,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- YAML strings and text streams holding Windows line endings (`\r\n`) no longer gain a
+  blank line per line break on Windows. Block (`|`), folded (`>`) and multi-line quoted
+  values now load exactly as they do from a file.
+- A string or text-stream source with characters the loader's `encoding=` cannot
+  represent (for example Japanese text with `encoding="cp1252"`) now loads instead of
+  raising `UnicodeEncodeError`. The document is stored as UTF-8 and read back as UTF-8.
+- `parse_sources()` without `encoding=` stores in-memory text as UTF-8 on every platform;
+  it used the locale codec (cp1252 on Windows), so a document with non-Latin-1 characters
+  failed to load there and could not load at all.
+- An in-memory document whose `#!name` line ends in `\r\n` now loads; it raised
+  `Not reader for name`.
+- `ConfigLoader.load()` of a bytes document in a BOM or UTF-16/UTF-32 `encoding=` now
+  loads; it raised `ValueError: not enough values to unpack`.
 - A missing attribute on a loaded configuration raises `AttributeError` naming the real
   class, with no chained `KeyError` behind it.
 - `copy()`, `|` and `|=` on a loaded configuration keep returning a dot-accessible
