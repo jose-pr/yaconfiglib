@@ -250,6 +250,19 @@ no backend recognizes (`sys.stdin`, whose name is `<stdin>`, or a `.gz` file)
 is parsed as YAML; pass `loader=` to choose. A file object's content is always
 data: a file named `deploy.sh` is parsed, never run.
 
+A **string or bytes** passed to `yaconfiglib.loads()` is parsed as YAML, which is
+this library's default format. Name the format explicitly, or let the
+document name itself on its first line:
+
+```python
+yaconfiglib.loads(text, loader="toml")
+yaconfiglib.loads("#!app.toml\n" + text)
+```
+
+Only a name a backend recognizes counts, so a real shebang line
+(`#!/usr/bin/env python`) stays part of the document, and a script name never
+runs. Bytes are read with `encoding=` (UTF-8 by default, BOM ignored).
+
 An `!include` inside an open file resolves against the loader's `base_dir`,
 not the file's own directory, because there is no directory to resolve
 against once the content has been read — pass the path instead of the file

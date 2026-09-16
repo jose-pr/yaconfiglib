@@ -11,7 +11,14 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
   one-shot load from a file path, an open file object (anything with `read()` — parsed by
   the backend its file **name** selects, so `load(open("settings.toml"))` reads TOML; an
   unrecognized name such as `<stdin>` or `x.yaml.gz` is YAML, and `loader=` overrides), or
-  an in-memory string/bytes; constructs a fresh `ConfigLoader` per call. Routing rule: a keyword named in `ConfigLoader.__init__`
+  an in-memory string/bytes; constructs a fresh `ConfigLoader` per call.
+  `loads()` parses **YAML** unless `loader=` is given or the first line is `#!<name>`
+  naming a format a backend claims (`"#!app.toml\n..."`); any other first line — a real
+  shebang, a script name — is content. `bytes`/`bytearray` are read with `encoding=`
+  (UTF-8 default, BOM ignored) and reach a byte-oriented `loader=` backend unchanged; any
+  other type raises `TypeError`. `load(None)` raises `TypeError` and `load("")` raises
+  `ValueError` — for optional layers pass them among `ConfigLoader().load(...)`'s sources,
+  which skips a falsy one (logged at DEBUG). Routing rule: a keyword named in `ConfigLoader.__init__`
   (`base_dir`, `encoding`, `recursive`, `key_factory`, `interpolate`, `merge`,
   `merge_options`, `allow_commands`, `sandbox`, ...) configures that loader, so it also
   governs nested `!include` targets and command-output parses; **every other** keyword

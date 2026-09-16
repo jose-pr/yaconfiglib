@@ -14,7 +14,7 @@ Zero required runtime dependencies (except standard pathlib, with optional packa
 
 ## Features
 
-- **Standard Library API Parity**: Drop-in replacements for standard serialization modules using `yaconfiglib.load()`, `loads()`, `dump()`, and `dumps()`.
+- **Standard-library-style API**: `yaconfiglib.load()`, `loads()`, `dump()` and `dumps()`. `loads()` reads YAML unless `loader=` or a `#!name.ext` first line picks another format.
 - **Backend Registry & Plugins**: Core loaders for TOML, YAML, JSON, INI, and `.env`. Easily extend the library by registering custom configuration loader classes.
 - **Model Validation (`load_as`)**: Automatic hydration and verification of Pydantic models or standard Python `dataclasses` directly from loaded configuration files.
 - **Dot-Notation Access**: Configuration results are wrapped in a `DotAccessibleDict` supporting deep traversal like `config.database.credentials.user` and toggleable `dig` options. Paths also index lists (`config.get("servers.0.host")`), and a tuple path (`config.get(("labels", "app.kubernetes.io/name"))`) reaches keys that themselves contain dots. Nested mappings are converted once when the result is built, so item and attribute access always return the same object, and reads never modify the configuration.

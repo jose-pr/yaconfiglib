@@ -15,7 +15,8 @@ strictly optional and only imported when you actually use it.
 - **One API, many formats.** `yaconfiglib.load()` reads YAML, TOML, JSON,
   INI, and `.env` files interchangeably — the backend is picked from the
   file extension (for an open file, its file name) or an explicit `loader=`
-  argument.
+  argument. A string passed to `yaconfiglib.loads()` is YAML unless `loader=`
+  or a `#!name.ext` first line says otherwise.
 - **Hiera-style layering.** Pass multiple sources and yaconfiglib merges
   them in order — deep-merge dicts, extend lists, or replace outright,
   your choice per call.
