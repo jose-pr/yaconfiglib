@@ -459,9 +459,59 @@ class TestLoaderStateHygiene:
 
         mod_logger = logging.getLogger("yaconfiglib.loader")
         before = mod_logger.level
-        ConfigLoader(log_level=logging.DEBUG)
+        with pytest.warns(DeprecationWarning):
+            ConfigLoader(log_level=logging.DEBUG)
         ConfigLoader()
         assert mod_logger.level == before
+
+    def test_log_level_is_deprecated_and_accepts_any_int(self):
+        # 25 is not a LogLevel member; it used to raise ValueError.
+        with pytest.warns(DeprecationWarning, match="no effect"):
+            ConfigLoader(log_level=25)
+
+    def test_default_construction_emits_no_deprecation_warning(self):
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            ConfigLoader()
+        assert [w for w in caught if issubclass(w.category, DeprecationWarning)] == []
+
+    def test_utils_no_longer_exports_get_logger(self):
+        from yaconfiglib import utils
+        from yaconfiglib.utils import log
+
+        assert not hasattr(utils, "getLogger")
+        assert not hasattr(log, "getLogger")
+
+    def test_flatten_skips_empty_hash_member(self, tmp_path):
+        (tmp_path / "one.yaml").write_text("a: 1\n", encoding="utf-8")
+        (tmp_path / "empty.yaml").write_text("", encoding="utf-8")
+
+        result = ConfigLoader(base_dir=tmp_path, merge="hash").load(
+            "one.yaml", "empty.yaml", flatten=True
+        )
+
+        assert result == {"a": 1}
+
+    def test_flatten_skips_empty_list_member(self, tmp_path):
+        (tmp_path / "one.yaml").write_text("- 1\n", encoding="utf-8")
+        (tmp_path / "empty.yaml").write_text("", encoding="utf-8")
+
+        result = ConfigLoader(base_dir=tmp_path, merge="list").load(
+            "one.yaml", "empty.yaml", flatten=True
+        )
+
+        assert result == [1]
+
+    def test_flatten_non_mapping_member_raises_type_error(self, tmp_path):
+        (tmp_path / "one.yaml").write_text("a: 1\n", encoding="utf-8")
+        (tmp_path / "scalar.yaml").write_text("42\n", encoding="utf-8")
+
+        with pytest.raises(TypeError, match="scalar"):
+            ConfigLoader(base_dir=tmp_path, merge="hash").load(
+                "one.yaml", "scalar.yaml", flatten=True
+            )
 
 
 class TestSecurityControls:

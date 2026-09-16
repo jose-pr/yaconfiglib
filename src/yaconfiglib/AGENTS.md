@@ -43,7 +43,7 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 ## `ConfigLoader` (`loader.py`)
 
 `ConfigLoader(base_dir="", *, encoding=None, path_factory=None, loader_factory=None,
-recursive=None, key_factory=None, log_level=LogLevel.Warning, interpolate=None,
+recursive=None, key_factory=None, log_level=None, interpolate=None,
 merge=ConfigLoaderMergeMethod.Simple, merge_options=None, ignore_error=False,
 inject_env=False, strict=False, allow_commands=True, sandbox=False)`
 
@@ -89,6 +89,8 @@ All constructor args become instance defaults, overridable per-call. Notable one
 - `!include` mapping form — accepts only `pathname`, `encoding`, `transform`,
   `key_factory` (`"%<expr>"` form only), `default`, `flatten`, `merge`, `merge_options`,
   `recursive`; other keys are dropped with a WARNING.
+- `log_level` — **deprecated and ignored**; it never changed anything. Passing it warns
+  (`DeprecationWarning`); configure the `yaconfiglib` logger with `logging` instead.
 - `inject_env=True` — with `interpolate`, exposes a read-only snapshot of `os.environ` to
   templates as `env` (templates cannot change the process environment); also exposed to
   `.j2` source rendering.
@@ -102,7 +104,8 @@ All constructor args become instance defaults, overridable per-call. Notable one
   strings, streams, command URIs), parse each with its backend, and merge in order.
   `pathname` empty → loads one empty in-memory document. `flatten=True` flattens the
   final mapping-of-mappings or sequence-of-sequences by one level (error if the result
-  is neither). `transform` is a Jinja2 expression evaluated per-document (as `value`)
+  is neither); an empty (`None`) member is skipped, and any other non-mergeable member
+  raises `TypeError` naming it. `transform` is a Jinja2 expression evaluated per-document (as `value`)
   before merging; it is evaluated sandboxed when `sandbox=True` or
   `allow_commands=False` is in effect. `encoding` also applies to every
   `!include`/`!load` target that names none of its own, at every depth. With
@@ -205,7 +208,8 @@ distinguish merge branches.
 
 - **`parse_sources(sources, base_dir=None, encoding=None, memo=None, path_factory=None,
   recursive=None) -> Iterator[Path]`** — flattens `sources` (paths, glob patterns,
-  command URIs, in-memory `"#!\n<name>\n<content>"` strings, open streams, or nested
+  command URIs, in-memory `"#!<name>\n<content>"` strings (`"#!\n<content>"` for an
+  unnamed document, auto-named `mem-N.yaml`), open streams, or nested
   iterables) into concrete `Path`-like objects. Command URIs (`exec://`, `cmd://`,
   `sh://`, `+fmt` variants) pass through unresolved/unexpanded. In-memory content and
   streams materialize to a `pathlib_next` `MemPath` when available, else a tracked temp

@@ -148,9 +148,10 @@ def parse_sources(
     * A command URI (``exec://``, ``cmd://``, ``sh://``, or a ``+fmt``
       variant) — passed through unresolved and unexpanded so
       :class:`~yaconfiglib.backends.command.CommandBackend` can run it.
-    * An in-memory document: a string/bytes value starting with the
-      ``"#!\\n"`` marker, where the first line (after the marker) is
-      treated as a virtual filename and the remainder as its content. The
+    * An in-memory document: a string/bytes value whose first line starts
+      with ``#!``. The rest of that line is a virtual filename
+      (``"#!app.yaml\\n<content>"``); when it is empty (``"#!\\n<content>"``)
+      the document is auto-named ``mem-N.yaml``. The
       content is materialized to a ``MemPath`` (or a real temp file as a
       fallback) so downstream backends can read it like any other file.
     * An open stream (:class:`io.IOBase`) — read fully and materialized

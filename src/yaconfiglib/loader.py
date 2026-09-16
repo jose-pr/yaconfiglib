@@ -8,6 +8,7 @@ import os
 import sys
 import types
 import typing
+import warnings
 
 try:
     from pathlib_next import Path
@@ -24,7 +25,6 @@ except ImportError:
 from .backends import ConfigBackend
 from .backends.command import CommandBackend
 from .utils.enum import IntEnum
-from .utils.log import LogLevel
 from .utils.merge import Merge, MergeMethod, is_array
 from .utils.source import SourceLike, parse_sources
 from .utils.trust import (
@@ -357,7 +357,7 @@ class ConfigLoader(ConfigBackend):
         loader_factory: type[ConfigBackend] = None,
         recursive: bool = None,
         key_factory: typing.Callable[[Path, object], str] = None,
-        log_level: int | LogLevel = LogLevel.Warning,
+        log_level: object = None,
         interpolate: bool = None,
         merge: ConfigLoaderMergeMethod | Merge = ConfigLoaderMergeMethod.Simple,
         merge_options: dict[str] = None,
@@ -390,7 +390,9 @@ class ConfigLoader(ConfigBackend):
                 for :attr:`ConfigLoaderMergeMethod.Hash`). Defaults to the
                 source's filename stem. May also be set per-call as a
                 string attribute name or a ``"%<jinja-expr>"`` template.
-            log_level: Logging verbosity for this loader's module logger.
+            log_level: Deprecated and ignored. It never changed anything:
+                library code must not call ``setLevel`` on a shared logger.
+                Configure the ``yaconfiglib`` logger through :mod:`logging`.
             interpolate: If True, run Jinja2 interpolation over the merged
                 result after loading (see :func:`yaconfiglib.utils.jinja2.interpolate`).
             merge: The merge strategy applied between successive sources —
@@ -425,12 +427,17 @@ class ConfigLoader(ConfigBackend):
         self.interpolate = False if interpolate is None else bool(interpolate)
         self.inject_env = bool(inject_env)
         self.strict = bool(strict)
-        # Stored for introspection only. Library code must never call
-        # logger.setLevel() on the module logger: doing it here made every
-        # ConfigLoader construction (including the module-import-time
-        # DEFAULT_LOADER) mutate global logging state, and two loaders with
-        # different levels fought over one logger. Callers configure logging.
-        self._log_level = LogLevel(log_level or LogLevel.Warning)
+        if log_level is not None:
+            # Never had an effect: setting the level here made every construction
+            # (including the import-time DEFAULT_LOADER) mutate global logging
+            # state, so it was removed — but the parameter stayed, silently
+            # ignoring valid values and rejecting ints that are not a LogLevel.
+            warnings.warn(
+                "ConfigLoader(log_level=...) has no effect and will be removed; "
+                "configure the 'yaconfiglib' logger with the logging module instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.path_factory = path_factory or self.DEFAULT_PATH_FACTORY
         self.base_dir = base_dir or ""
         self.encoding = encoding or self.DEFAULT_ENCODING
@@ -607,7 +614,8 @@ class ConfigLoader(ConfigBackend):
                 mapping-of-mappings or sequence-of-sequences) is flattened
                 one level — useful when each source contributes items to a
                 shared top-level collection instead of being keyed by
-                itself.
+                itself. Empty (``None``) members are skipped; any other
+                member that cannot be flattened raises ``TypeError``.
             interpolate: Overrides the instance's *interpolate* for this
                 call.
             merge: Overrides the instance's *merge* strategy for this call.
@@ -698,13 +706,29 @@ class ConfigLoader(ConfigBackend):
 
             if flatten:
                 if isinstance(results, typing.Mapping):
-                    result = {
-                        prop: value
-                        for _key, result in results.items()
-                        for prop, value in result.items()
-                    }
+                    result = {}
+                    for member_key, member in results.items():
+                        # An empty document (a placeholder file in a conf.d glob)
+                        # loads as None and contributes nothing.
+                        if member is None:
+                            continue
+                        if not isinstance(member, typing.Mapping):
+                            raise TypeError(
+                                f"flatten=True: member {member_key!r} is a "
+                                f"{type(member).__name__}, not a mapping"
+                            )
+                        result.update(member)
                 elif is_array(results):
-                    result = [r for result in results for r in result]
+                    result = []
+                    for index, member in enumerate(results):
+                        if member is None:
+                            continue
+                        if isinstance(member, (str, bytes)) or not is_array(member):
+                            raise TypeError(
+                                f"flatten=True: member {index} is a "
+                                f"{type(member).__name__}, not a sequence"
+                            )
+                        result.extend(member)
                 else:
                     raise TypeError(
                         "flatten=True requires merged results to be a mapping or sequence"
