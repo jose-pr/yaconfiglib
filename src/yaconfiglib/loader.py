@@ -210,9 +210,9 @@ def _add_encoding_hint(error: BaseException, encoding: typing.Optional[str]) -> 
 def _error_phase(error: BaseException) -> str:
     """``"include"`` when *error* came from a nested include, else ``"load"``.
 
-    Read from the frames Phase 2 records, not guessed from the error type: the
-    same exception is offered once for the included file (as ``"load"``, before
-    any include frame exists) and again for each file that included it, and a
+    Read from `error.config_frames`, not guessed from the error type: the same
+    exception is offered once for the included file (as ``"load"``, before any
+    include frame exists) and again for each file that included it, and a
     predicate has to be able to tell those offers apart.
     """
     for frame in getattr(error, "config_frames", ()) or ():
