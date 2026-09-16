@@ -424,7 +424,9 @@ def save_results(
         "metrics": metrics,
         "checks": checks,
     }
-    target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    # The newline is pinned: these files are committed, and the repo is LF-only.
+    with target.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(payload, indent=2) + "\n")
     return target
 
 
