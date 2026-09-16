@@ -45,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `typed_merge` coerces mapping **keys** through a `Dict[K, V]` hint's key type, so
+  `Dict[int, str]` can be satisfied by JSON, TOML, INI or env sources, which only
+  produce string keys. Keys that differ only by type (`"80"` and `80`) now merge into
+  one entry.
+- `typed_merge` into a `TypedNamespace` subclass assembles the result without calling
+  `__init__`, to avoid re-parsing values. If a subclass's `__init__` did more than apply
+  `_parse_<field>` hooks, move that work into a hook or into `__merge__`.
 - `typed_merge` parses string booleans for a `bool` hint: `true/yes/on/1` and
   `false/no/off/0` (stripped, case-insensitive). Any other string now raises
   `ValueError`, where every non-empty string used to become `True` — including
@@ -121,6 +128,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `typed_merge` builds a mapping target positionally, so **non-string keys** no longer
+  fail with "keywords must be strings", an abstract `Mapping[...]` hint no longer raises
+  "Can't instantiate abstract class", and a `defaultdict` target keeps its
+  `default_factory` instead of losing it.
+- `typed_merge` leaves a dataclass's `field(init=False)` names out of the constructor
+  call, where passing them raised "unexpected keyword argument".
+- `typed_merge` applies a `_parse_<field>` hook exactly once per value. A
+  `TypedNamespace` source was parsed again while being collected and a third time by the
+  target's constructor, so any parser that is not idempotent — the documented
+  comma-splitting example included — failed or corrupted the value.
 - `typed_merge` handles the sequence hints that broke in 0.11.1, when the element
   coercion branch first became reachable: abstract `Sequence[...]`/`MutableSequence[...]`
   hints (which raised "Can't instantiate abstract class"), `NamedTuple` hints (rebuilt

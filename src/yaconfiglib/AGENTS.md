@@ -209,15 +209,21 @@ distinguish merge branches.
   last object, coerced through `cls` if not already an instance — a **`bool`** hint
   parses `true/yes/on/1` and `false/no/off/0` (stripped, case-insensitive) and raises
   `ValueError` on any other string, where `bool('false')` would be `True`. `objects` empty →
-  `None`. `init=False` builds via `cls.__new__` + attribute/item assignment instead of
-  `cls(**merged)` — use when `__init__` has required positional-only args or side
-  effects you want to skip.
+  `None`. A **mapping** target is built positionally, `cls(merged)`, with a single
+  `cls(**merged)` retry for a keyword-only `dict` subclass and a plain `dict` for an
+  abstract origin; a `defaultdict` origin carries over the last source's
+  `default_factory`. A **dataclass** target is built `cls(**merged)` with its declared
+  `field(init=False)` names popped (unknown keys still pass through, which a custom
+  `**kwargs` `__init__` relies on). A **`TypedNamespace`** target is always assembled
+  without `__init__`. `init=False` builds via `cls.__new__` + attribute/item assignment
+  instead of `cls(**merged)` — use when `__init__` has required positional-only args or
+  side effects you want to skip.
   - **`None` sources are skipped at every level**, before any hint resolution or hook
     call: a later `None` never overrides an earlier value, a field whose every value is
     `None` stays `None`, and all-`None` (or no) objects give `None`. Pass an explicit
     empty value to clear a field.
-  - **Parametrized generics** are honored: `Dict[str, int]` coerces each value to the
-    mapping's value type, `List[str]`/`Tuple[str, ...]` coerce each element, and an
+  - **Parametrized generics** are honored: `Dict[str, int]` coerces each key to the
+    mapping's key type and each value to its value type, `List[str]`/`Tuple[str, ...]` coerce each element, and an
     unparametrized `dict`/`list` leaves element types alone. `str`/`bytes` hints are
     never treated as element sequences.
   - **Sequence hints** require a sequence value: a `str`, a `Mapping`, or a non-iterable
@@ -249,7 +255,11 @@ distinguish merge branches.
     callable when possible.
   - Two per-type hooks: a classmethod **`__merge__(cls, *objects, init=True)`**
     overrides merging entirely for that type; a per-field **`_parse_<field>(value)`**
-    coerces that field's value as it's collected from each source object. `__merge__` is
+    coerces that field's value as it's collected from each source object — but never on
+    a source that is already a `TypedNamespace`, which parsed its fields at
+    construction; for a `TypedNamespace` target, a raw source's values go through the
+    target's own hooks instead, so every value is parsed exactly once and a parser need
+    not be idempotent. `__merge__` is
     looked up on the hint's stripped origin, so it is found through `Optional[Zone]`,
     `MyGeneric[int]` and any other parameterized spelling — typing aliases do not forward
     dunders, so a lookup on the alias itself found nothing. It never receives `None`.
@@ -262,7 +272,10 @@ distinguish merge branches.
   altering `cls`'s base classes.
 - **`TypedNamespace(argparse.Namespace)`** — applies `_parse_<field>` coercers at
   construction time, so a built instance is already normalized. Compose with
-  `OpaqueMerge`/`opaque` when such an instance should also skip re-merging.
+  `OpaqueMerge`/`opaque` when such an instance should also skip re-merging. A
+  `typed_merge` into a `TypedNamespace` subclass does **not** call its `__init__` (that
+  would re-parse already-parsed values): put any other `__init__` work in a
+  `_parse_<field>` hook or `__merge__`.
 
 ## Source resolution (`utils/source.py`)
 

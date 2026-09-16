@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import collections
 import collections.abc as _abc
 import inspect
 import sys
 import types
 import typing
 from argparse import Namespace
+from dataclasses import fields as _dc_fields
 from dataclasses import is_dataclass
 
 T = typing.TypeVar("T")
@@ -207,6 +209,107 @@ def _merge_sequence(
     return _construct_sequence(origin, value, items)
 
 
+def _construct_mapping(origin: type, objects: tuple, merged: dict) -> object:
+    """Build *merged* into mapping type *origin*."""
+    if inspect.isabstract(origin):
+        # Mapping[str, int] resolves to an abstract class, the way an abstract
+        # sequence hint does; dict is the concrete stand-in.
+        return dict(merged)
+    if issubclass(origin, collections.defaultdict):
+        # defaultdict's first positional argument is the factory, and it
+        # refuses a mapping there. Carry the last source's factory over.
+        factory = None
+        for obj in objects:
+            if isinstance(obj, collections.defaultdict):
+                factory = obj.default_factory
+        return origin(factory, merged)
+    try:
+        # Positional: mapping keys are data, not identifiers. dict, OrderedDict
+        # and TypedDict classes all accept a mapping.
+        return origin(merged)
+    except TypeError:
+        if all(isinstance(key, str) for key in merged):
+            # A dict subclass whose __init__ takes only **kwargs. The values are
+            # already merged, so this retry cannot hide a nested error.
+            return origin(**merged)
+        raise
+
+
+def _merge_fields(
+    origin: type, cls_args: tuple, hints: dict, objects: tuple, init: bool
+) -> object:
+    """Collect every object's fields, merge each, and build one *origin*."""
+    is_mapping = issubclass(origin, _abc.Mapping)
+    key_cls = cls_args[0] if is_mapping and len(cls_args) > 1 else None
+    child_cls = cls_args[1] if is_mapping and len(cls_args) > 1 else None
+
+    # A TypedNamespace normalizes its fields in __init__, so build the instance
+    # up front and apply its hooks once, here, rather than calling __init__ on
+    # values that have already been parsed.
+    target = origin.__new__(origin) if issubclass(origin, TypedNamespace) else None
+
+    collected: dict[object, list] = {}
+    for obj in objects:
+        props = obj if isinstance(obj, _abc.Mapping) else vars(obj)
+        # A TypedNamespace source was normalized at construction; re-running its
+        # own hooks would parse the same value twice.
+        parsed_source = isinstance(obj, TypedNamespace)
+        for prop, value in props.items():
+            if key_cls is not None:
+                # Coerce keys during collection, so '80' and 80 group as ONE
+                # entry: JSON, TOML, INI, dotenv and env only produce str keys,
+                # which would otherwise make Dict[int, str] unsatisfiable.
+                prop = typed_merge(key_cls, prop, init=init)
+            if not parsed_source:
+                parser = getattr(obj, f"_parse_{prop}", None)
+                if parser is None and target is not None:
+                    parser = getattr(target, f"_parse_{prop}", None)
+                if parser is not None:
+                    value = parser(value)
+            collected.setdefault(prop, []).append(value)
+
+    merged: dict[object, object] = {}
+    for name, values in collected.items():
+        # The fallback hint comes from the last NON-None value: type(None)
+        # would drive the merge into NoneType and crash. A field whose every
+        # value is None stays None.
+        present = [value for value in values if value is not None]
+        if not present:
+            merged[name] = None
+            continue
+        hint = hints.get(name, child_cls or type(present[-1]))
+        merged[name] = typed_merge(hint, *values, init=init) if hint else present[-1]
+
+    if target is not None:
+        for prop, value in merged.items():
+            setattr(target, prop, value)
+        return target
+
+    if is_mapping:
+        if init:
+            return _construct_mapping(origin, objects, merged)
+        if inspect.isabstract(origin):
+            return dict(merged)
+        inst = origin.__new__(origin)
+        for prop, value in merged.items():
+            inst[prop] = value
+        return inst
+
+    if init:
+        if is_dataclass(origin):
+            # A field(init=False) name is not a constructor parameter — it is
+            # recomputed by __post_init__ or its default. Unknown keys still
+            # pass through, which a custom **kwargs __init__ relies on.
+            for name in (f.name for f in _dc_fields(origin) if not f.init):
+                merged.pop(name, None)
+        return origin(**merged)
+
+    inst = origin.__new__(origin)
+    for prop, value in merged.items():
+        setattr(inst, prop, value)
+    return inst
+
+
 def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
     """Recursively merge *objects* into an instance of *cls*.
 
@@ -274,9 +377,6 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
 
     hints = _type_hints(origin)
 
-    if issubclass(origin, typing.Mapping) and len(cls_args) > 1:
-        child_cls = cls_args[1]
-
     # Sequence type: use the last object, converting each element.
     # The test is a CLASS test on the unwrapped origin. It used to be
     # `is_array(origin) and not is_scalar(origin)` — instance checks applied to a
@@ -288,40 +388,8 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
         return _merge_sequence(origin, cls_args, hints, objects[-1], init)
 
     # Mapping / Namespace / dataclass: merge field by field.
-    if issubclass(origin, (typing.Mapping, Namespace)) or is_dataclass(origin):
-        fields: dict[str, list] = {}
-        for obj in objects:
-            props = obj if isinstance(obj, typing.Mapping) else vars(obj)
-            for prop, value in props.items():
-                parser = getattr(obj, f"_parse_{prop}", None)
-                if parser:
-                    value = parser(value)
-                fields.setdefault(prop, []).append(value)
-
-        merged: dict[str, object] = {}
-        for name, values in fields.items():
-            # The fallback hint comes from the last NON-None value: type(None)
-            # would drive the merge into NoneType and crash. A field whose every
-            # value is None stays None.
-            present = [value for value in values if value is not None]
-            if not present:
-                merged[name] = None
-                continue
-            hint = hints.get(name, child_cls or type(present[-1]))
-            merged[name] = (
-                typed_merge(hint, *values, init=init) if hint else present[-1]
-            )
-
-        if init:
-            return origin(**merged)
-
-        inst = origin.__new__(origin)
-        for prop, value in merged.items():
-            if issubclass(origin, typing.MutableMapping):
-                inst[prop] = value
-            else:
-                setattr(inst, prop, value)
-        return inst
+    if issubclass(origin, (_abc.Mapping, Namespace)) or is_dataclass(origin):
+        return _merge_fields(origin, cls_args, hints, objects, init)
 
     # Scalar / unknown: last value wins.
     value = objects[-1]
@@ -390,6 +458,13 @@ class TypedNamespace(Namespace):
     build time so a constructed object is already normalized (e.g. a raw string
     field turned into an ``ipaddress`` object). Compose with :class:`OpaqueMerge`
     when such a built object should also be opaque to re-merging.
+
+    Every value is parsed exactly once when merged: :func:`typed_merge` applies
+    these hooks to raw sources while collecting them, skips them for a source
+    that is already a ``TypedNamespace``, and then assembles the result without
+    calling ``__init__`` — so a parser need not be idempotent. A subclass whose
+    ``__init__`` does more than parse fields should put that work in a
+    ``_parse_<field>`` hook or in ``__merge__``.
     """
 
     def __init__(self, **kwargs: object) -> None:

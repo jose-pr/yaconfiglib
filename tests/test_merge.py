@@ -870,3 +870,136 @@ class TestTypedMergeSequencesAndScalars:
     def test_bool_hint_rejects_unrecognized_string(self):
         with pytest.raises(ValueError):
             typed_merge(bool, "maybe")
+
+
+# ---------------------------------------------------------------------------
+# typed_merge: mapping, dataclass and namespace construction
+# ---------------------------------------------------------------------------
+
+
+class _HostsNS(TypedNamespace):
+    def _parse_hosts(self, value):
+        # Deliberately NOT idempotent: a second pass raises AttributeError.
+        return value.split(",")
+
+
+class _KwOnlyDict(dict):
+    """A dict subclass that takes no positional argument."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+
+@dataclass
+class _Derived:
+    a: int
+    b: int = field(init=False, default=0)
+
+    def __post_init__(self):
+        self.b = self.a * 2
+
+
+class TestTypedMergeMappingConstruction:
+    def test_mapping_with_non_string_keys(self):
+        assert typed_merge(dict, {80: "http"}, {443: "https"}) == {
+            80: "http",
+            443: "https",
+        }
+
+    def test_mapping_keys_coerced_through_key_type(self):
+        merged = typed_merge(typing.Dict[int, str], {"80": "http"}, {80: "web"})
+        assert merged == {80: "web"}
+        assert list(merged) == [80]
+
+    def test_dataclass_field_non_string_key_mapping(self):
+        @dataclass
+        class Cfg:
+            ports: typing.Dict[int, str] = None
+
+        merged = typed_merge(Cfg, Cfg(ports={"80": "http"}), Cfg(ports={"443": "tls"}))
+        assert merged.ports == {80: "http", 443: "tls"}
+
+    def test_abstract_mapping_hint_builds_dict(self):
+        merged = typed_merge(typing.Mapping[str, int], {"a": "1"}, {"b": "2"})
+        assert merged == {"a": 1, "b": 2}
+        assert type(merged) is dict
+
+    def test_concrete_mapping_origins_kept(self):
+        import collections
+
+        merged = typed_merge(
+            collections.OrderedDict, collections.OrderedDict(a=1), {"b": 2}
+        )
+        assert type(merged) is collections.OrderedDict
+        assert merged == {"a": 1, "b": 2}
+
+        kw = typed_merge(_KwOnlyDict, {"a": 1}, {"b": 2})
+        assert type(kw) is _KwOnlyDict
+        assert kw == {"a": 1, "b": 2}
+
+    def test_defaultdict_origin_keeps_default_factory(self):
+        import collections
+
+        source = collections.defaultdict(list, {"a": [1]})
+        merged = typed_merge(collections.defaultdict, source, {"b": [2]})
+        assert type(merged) is collections.defaultdict
+        assert merged.default_factory is list
+        assert merged == {"a": [1], "b": [2]}
+        assert merged["fresh"] == []
+
+    def test_typeddict_origin_still_merges(self):
+        class TD(typing.TypedDict):
+            host: str
+            port: int
+
+        merged = typed_merge(TD, {"host": "h", "port": "1"}, {"port": "2"})
+        assert merged == {"host": "h", "port": 2}
+
+    def test_dataclass_constructor_drops_only_init_false_fields(self):
+        merged = typed_merge(_Derived, _Derived(1), _Derived(2))
+        assert merged.a == 2
+        assert merged.b == 4
+
+        # The examples/example.py shape: a custom **kwargs __init__ plus a
+        # non-field attribute. Unknown keys must still reach the constructor.
+        @dataclass
+        class Test:
+            field_1: str
+            field_2: int
+            field_3: str
+
+            def __init__(self, **kwargs):
+                for arg in kwargs:
+                    setattr(self, arg, kwargs[arg])
+                self.field_4 = f"{self.field_1}_{self.field_2}"
+
+        example = typed_merge(
+            Test,
+            Test(field_1=11, field_2=22, field_3=33),
+            dict(field_1=1, field_2=2),
+            init=True,
+        )
+        assert vars(example) == {
+            "field_1": "1",
+            "field_2": 2,
+            "field_3": "33",
+            "field_4": "1_2",
+        }
+
+    def test_typed_namespace_non_idempotent_parser_runs_once(self):
+        merged = typed_merge(_HostsNS, _HostsNS(hosts="a,b"))
+        assert merged.hosts == ["a", "b"]
+        assert isinstance(merged, _HostsNS)
+
+    def test_typed_namespace_mixed_sources_parse_once(self):
+        merged = typed_merge(_HostsNS, _HostsNS(hosts="a,b"), {"hosts": "c,d"})
+        assert merged.hosts == ["c", "d"]
+        assert typed_merge(_HostsNS, {"hosts": "c,d"}).hosts == ["c", "d"]
+
+    def test_plain_namespace_source_parse_hook_still_applied(self):
+        class Source(Namespace):
+            def _parse_port(self, value):
+                return int(value)
+
+        merged = typed_merge(Namespace, Source(port="8080"))
+        assert merged.port == 8080

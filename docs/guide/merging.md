@@ -207,5 +207,20 @@ class ServerConfig(TypedNamespace):
 ServerConfig(port="8080").port      # -> 8080 (int)
 ```
 
+Every value is parsed **exactly once**, so a parser need not be idempotent
+(the `split` above would fail on a second pass). Merging into a
+`TypedNamespace` target skips the hooks of any source that is already a
+`TypedNamespace`, applies the target's own hooks to raw sources such as a
+plain dict, and assembles the result without calling `__init__`. Put anything
+else a subclass's `__init__` does into a `_parse_<field>` hook or `__merge__`.
+
 Compose `TypedNamespace` with `OpaqueMerge` for a config object that both
 coerces its fields at build time and is opaque to re-merging.
+
+A mapping target is built positionally (`origin(merged)`), so keys stay data:
+non-string keys work, and `Dict[int, str]` coerces each key through the key
+type — useful because JSON, TOML, INI and env sources can only produce string
+keys. Abstract hints (`Mapping[str, int]`) build a plain `dict`, a
+`defaultdict` origin keeps the last source's `default_factory`, and a
+dataclass's `field(init=False)` names are left out of the constructor call so
+`__post_init__` recomputes them.
