@@ -164,21 +164,6 @@ class MergeMethod(IntEnum):
         if b is None:
             return a
 
-        if is_array(b):
-            if is_array(a):
-                # Element-by-element replacement up to len(b); b's extra
-                # elements are appended, and a's tail beyond len(b) is kept.
-                # (The comment used to say "truncate extras", which described
-                # neither branch — tests pin the append-and-keep behavior.)
-                result = list(a)
-                for i, v in enumerate(b):
-                    if i < len(result):
-                        result[i] = self._simple(result[i], v, memo=memo, **options)
-                    else:
-                        result.append(v)
-                return _sequence_with(a, result)
-            return b
-
         if isinstance(b, typing.Mapping):
             if isinstance(a, typing.Mapping):
                 merged = dict(a)

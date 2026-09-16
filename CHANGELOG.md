@@ -106,6 +106,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `Simple`, the default strategy, replaces a list with the later list when two top-level
+  list documents (or two lists passed directly) merge, as the strategy table, the module
+  docstring and the API header all said. It used to replace positionally and keep the
+  earlier list's extra tail, so `[a, b, c]` overridden by `[x]` gave `[x, b, c]`. Lists
+  under a mapping key already replaced and are unchanged. Write the full list in the
+  override if you relied on the old result.
 - `Deep` and `Substitute` no longer raise `TypeError` on ordinary configuration values
   they had no rule for — dates, datetimes, times, `Decimal`, sets, enum members, objects
   a backend produced. Two YAML files with an unquoted `release: 2024-01-01` used to fail

@@ -110,6 +110,14 @@ class TestMergeMethods:
         assert isinstance(result, list)
         assert len(result) == 2
 
+    def test_simple_top_level_list_documents_replace(self, tmp_path):
+        (tmp_path / "a.yaml").write_text("- a\n- b\n- c\n", encoding="utf-8")
+        (tmp_path / "b.yaml").write_text("- x\n", encoding="utf-8")
+
+        result = ConfigLoader(base_dir=tmp_path).load("a.yaml", "b.yaml")
+
+        assert result == ["x"]
+
     def test_flatten_scalar_result_raises_clear_error(self):
         from yaconfiglib.backends.python_backend import PythonBackend
 

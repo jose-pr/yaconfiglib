@@ -92,9 +92,12 @@ class TestSimpleMerge:
     def test_dict_replaces_scalar(self):
         assert self.m("old", {"k": "v"}) == {"k": "v"}
 
-    def test_list_element_replace(self):
+    def test_list_replaced_wholesale(self):
         result = self.m([1, 2, 3], [10, 20])
-        assert result == [10, 20, 3]
+        assert result == [10, 20]
+
+    def test_list_under_key_replaced(self):
+        assert self.m({"a": [1, 2, 3]}, {"a": [9]}) == {"a": [9]}
 
     def test_list_extends_when_b_longer(self):
         result = self.m([1], [10, 20, 30])
