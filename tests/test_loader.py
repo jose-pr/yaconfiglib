@@ -281,6 +281,82 @@ class TestDXFeatures:
 
 
 class TestTopLevelAPI:
+    def test_loads_forwards_json_decoder_options(self):
+        import decimal
+
+        import yaconfiglib
+
+        result = yaconfiglib.loads(
+            '{"rate": 1.5}',
+            loader="json",
+            json_decoder_options={"parse_float": decimal.Decimal},
+        )
+
+        assert result["rate"] == decimal.Decimal("1.5")
+
+    def test_load_forwards_ini_default_section(self, tmp_path):
+        import yaconfiglib
+
+        config = tmp_path / "cfg.ini"
+        config.write_text("[common]\nx = 1\n\n[app]\ny = 2\n", encoding="utf-8")
+
+        result = yaconfiglib.load(str(config), ini_default_section="common")
+
+        assert result["app"]["y"] == "2"
+
+    def test_load_forwards_j2_environment(self, tmp_path):
+        from jinja2 import Environment
+
+        import yaconfiglib
+
+        template = tmp_path / "cfg.yaml.j2"
+        template.write_text("value: {{ injected }}\n", encoding="utf-8")
+        environment = Environment()
+        environment.globals["injected"] = "from-env"
+
+        result = yaconfiglib.load(str(template), environment=environment)
+
+        assert result == {"value": "from-env"}
+
+    def test_module_load_allow_commands_false_blocks_include(self, tmp_path):
+        import yaconfiglib
+        from yaconfiglib import CommandsDisabledError
+
+        doc = tmp_path / "main.yaml"
+        doc.write_text(
+            "x: !include 'cmd+json://python -c \"print(1)\"'\n", encoding="utf-8"
+        )
+
+        with pytest.raises(CommandsDisabledError):
+            yaconfiglib.load(str(doc), allow_commands=False)
+
+    def test_loads_constructor_only_strict_option(self):
+        from jinja2.exceptions import UndefinedError
+
+        import yaconfiglib
+
+        with pytest.raises(UndefinedError):
+            yaconfiglib.loads("a: '{{ missing }}'", interpolate=True, strict=True)
+
+    def test_module_load_merge_applies_to_include_glob(self, tmp_path):
+        import yaconfiglib
+
+        conf_d = tmp_path / "conf.d"
+        conf_d.mkdir()
+        (conf_d / "a.yaml").write_text("db:\n  host: a\n  port: 1\n", encoding="utf-8")
+        (conf_d / "b.yaml").write_text("db:\n  port: 2\n", encoding="utf-8")
+        app = tmp_path / "app.yaml"
+        app.write_text('conf: !include "conf.d/*.yaml"\n', encoding="utf-8")
+
+        result = yaconfiglib.load(str(app), base_dir=str(tmp_path), merge="deep")
+
+        assert result["conf"]["db"] == {"host": "a", "port": 2}
+
+    def test_loads_merge_none_uses_default(self):
+        import yaconfiglib
+
+        assert yaconfiglib.loads("a: 1", merge=None) == {"a": 1}
+
     def test_load_file(self, tmp_path):
         from yaconfiglib import load
 

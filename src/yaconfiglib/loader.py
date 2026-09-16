@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextvars
+import inspect
 import logging
 import os
 import types
@@ -848,44 +849,57 @@ class DotAccessibleDict(dict):
         return val
 
 
+#: Every keyword :class:`ConfigLoader` itself accepts. The module-level helpers
+#: route those to the constructor and everything else to ``.load()``; only this
+#: side can be enumerated, because backends are pluggable and their reader
+#: options are open-ended.
+_LOADER_INIT_PARAMS = frozenset(
+    name
+    for name in inspect.signature(ConfigLoader.__init__).parameters
+    if name != "self"
+)
+
+
+def _split_loader_kwargs(kwargs: dict) -> "tuple[dict, dict]":
+    """Split *kwargs* into ``(ConfigLoader(...) kwargs, .load(...) kwargs)``.
+
+    A constructor keyword configures the whole one-shot load, so it also governs
+    what nested ``!include`` targets do. Anything else — backend reader options
+    such as ``json_decoder_options`` or ``environment`` — goes to ``.load()``,
+    which forwards it to the backend.
+    """
+    loader_kwargs = {}
+    load_kwargs = {}
+    for key, value in kwargs.items():
+        if key in _LOADER_INIT_PARAMS:
+            # `merge=None` means "use the default" for .load(); the constructor
+            # would reject it, so drop it and let the default apply.
+            if key == "merge" and value is None:
+                continue
+            loader_kwargs[key] = value
+        else:
+            load_kwargs[key] = value
+    return loader_kwargs, load_kwargs
+
+
 def load(fp: typing.Any, **kwargs) -> object:
-    """Load configuration from a file pointer or file path."""
-    load_keys = {
-        "recursive",
-        "encoding",
-        "loader",
-        "transform",
-        "default",
-        "key_factory",
-        "flatten",
-        "interpolate",
-        "merge",
-        "merge_options",
-        "master",
-    }
-    loader_kwargs = {k: v for k, v in kwargs.items() if k not in load_keys}
-    load_kwargs = {k: v for k, v in kwargs.items() if k in load_keys}
+    """Load configuration from a file pointer or file path.
+
+    Keyword arguments :class:`ConfigLoader` accepts configure the loader (and so
+    also apply to nested ``!include`` targets); every other keyword is passed to
+    :meth:`ConfigLoader.load`, which forwards unknown ones to the backend.
+    """
+    loader_kwargs, load_kwargs = _split_loader_kwargs(kwargs)
     loader_inst = ConfigLoader(**loader_kwargs)
     return loader_inst.load(fp, **load_kwargs)
 
 
 def loads(s: str | bytes, **kwargs) -> object:
-    """Load configuration from a string or bytes in memory."""
-    load_keys = {
-        "recursive",
-        "encoding",
-        "loader",
-        "transform",
-        "default",
-        "key_factory",
-        "flatten",
-        "interpolate",
-        "merge",
-        "merge_options",
-        "master",
-    }
-    loader_kwargs = {k: v for k, v in kwargs.items() if k not in load_keys}
-    load_kwargs = {k: v for k, v in kwargs.items() if k in load_keys}
+    """Load configuration from a string or bytes in memory.
+
+    Keyword arguments are routed as in :func:`load`.
+    """
+    loader_kwargs, load_kwargs = _split_loader_kwargs(kwargs)
     loader_inst = ConfigLoader(**loader_kwargs)
     # Use parse_sources inline memory doc marker
     marker = "#!\n"

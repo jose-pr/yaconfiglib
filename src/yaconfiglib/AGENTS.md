@@ -8,9 +8,16 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 ## Top-level (`import yaconfiglib`)
 
 - **`load(fp, **kwargs) -> object`** / **`loads(s: str | bytes, **kwargs) -> object`** —
-  one-shot load from a file path/pointer or an in-memory string/bytes. Splits `kwargs`
-  between `ConfigLoader(...)` construction and `.load(...)` call options (see below);
-  constructs a fresh `ConfigLoader` per call.
+  one-shot load from a file path/pointer or an in-memory string/bytes; constructs a fresh
+  `ConfigLoader` per call. Routing rule: a keyword named in `ConfigLoader.__init__`
+  (`base_dir`, `encoding`, `recursive`, `key_factory`, `interpolate`, `merge`,
+  `merge_options`, `allow_commands`, `sandbox`, ...) configures that loader, so it also
+  governs nested `!include` targets and command-output parses; **every other** keyword
+  goes to `.load()` and reaches the backend as a reader argument
+  (`json_decoder_options`, `ini_default_section`, `environment=`, `loader=`,
+  `transform=`, `flatten=`, `default=`). `merge=None` falls back to the default. A
+  keyword no backend reads is ignored, so a misspelled option fails silently rather than
+  raising.
 - **`dump(obj, fp, **kwargs) -> None`** / **`dumps(obj, **kwargs) -> str`** — serialize
   *obj* to YAML (delegates to `backends.yaml.YamlConfig.dumps`) and write it to *fp* (a
   path or a writable file-like) or return it as a string.
