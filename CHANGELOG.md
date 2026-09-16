@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- A malformed `!include`/`!load` mapping with no `pathname`, or an empty `!include []`,
+  raises `yaml.constructor.ConstructorError` naming the file and line. They raised a bare
+  `KeyError: 'pathname'` and an unpacking `ValueError`, neither of which said where.
 - The unknown-format and unknown-loader errors now list the loader names `loader=`
   accepts, and the format error reads `No backend reads <path>` instead of
   `Not reader for <path>`. Code matching the old text should catch
@@ -240,6 +243,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Load errors now name the file that failed. This covers YAML (which reported
+  `in "<unicode string>"`, so a failing member of a glob was unidentifiable), JSON, TOML,
+  INI (the full path, not just the basename), a file the encoding cannot decode (with a
+  hint naming a codec to try), `.j2` templates (which reported `File "<unknown>"`), files
+  reached through `!include` (naming the including file and line, at every depth), and a
+  failure while merging a source. The exception type and identity are unchanged, so
+  `except` clauses and `ignore_error` predicates behave exactly as before; the same
+  details are readable as `error.config_source`, `error.config_frames` and
+  `error.config_key`.
 - Tuples are written as plain YAML lists. They were `!!python/tuple`, which this
   library's own loader refuses — and interpolating a bare `{{ expr }}` can produce one,
   so a config could dump to something it could not read back.

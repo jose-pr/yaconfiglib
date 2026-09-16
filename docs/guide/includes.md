@@ -127,3 +127,18 @@ independently-loaded top-level documents (see [Merging](merging.md)).
 `!include` instead **nests** a document at a specific key within its
 parent — use it when a value, not the whole document, should come from
 another file.
+
+## When an include fails
+
+An error inside an included file names that file **and** the file that included
+it, with the line the `!include` is written on — at every depth, and whatever
+the failure is (a parse error, a missing file, a bad command). The exception
+type never changes: a broken JSON include still raises
+`json.JSONDecodeError`, so `except` clauses and `ignore_error` predicates keep
+working, and the details are also readable as `error.config_source` and
+`error.config_frames`.
+
+The mapping form needs a non-empty `pathname`, and the sequence form needs a
+first item; either malformed form raises `yaml.constructor.ConstructorError`
+naming the file and line, where a missing `pathname` used to surface as
+`KeyError: 'pathname'`.

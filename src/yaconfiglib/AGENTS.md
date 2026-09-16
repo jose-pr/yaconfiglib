@@ -443,6 +443,22 @@ predicates and `except` clauses on those types work. Each class below is a `Conf
   raised, so nothing is imported to find out). Evaluated per call, never frozen at import.
   Bare `ValueError`/`TypeError`/`KeyError` are deliberately excluded, so a library bug
   still crashes.
+- **Context, recorded in place.** Every error re-raised through `ConfigLoader` carries
+  three attributes, and the rendered text is written into whichever field that error's own
+  `__str__` reads — so **the type and identity are unchanged** (a predicate still receives
+  the very object raised, of the parser's own type):
+  - `config_source: str` — the innermost source. Set once; never overwritten.
+  - `config_frames: Tuple[ErrorFrame, ...]` — innermost first.
+    **`ErrorFrame(kind, source, line=None)`** is a NamedTuple whose `kind` is
+    `"include"`, `"render"`, `"command"` or `"merge"`.
+  - `config_key: Tuple[Union[str, int], ...]` — a key or field path.
+  The suffix reads
+  `[in <source>; included from <src>, line <n>; rendered from <src>; output of command
+  <src!r>; while merging <src>; at <a.b[0].c>]`, and is **re-rendered from the record**
+  each time, never appended twice. `in <source>` is omitted when the error's own message
+  already names it (a PyYAML mark, an INI source, an `OSError` whose `filename` matches);
+  a `render` frame naming the source itself renders as bare `rendered`. An unknown error
+  shape gets a PEP 678 note instead (set directly below 3.11, which `add_note` predates).
 - Raises left as plain builtins on purpose: a wrong **argument** (`load(None)`,
   `loads(42)`, an unsupported source type, an invalid `ini_interpolation`) and a missing
   dependency (`ImportError` naming `yaconfiglib[jinja2]`) are neither configuration
@@ -493,6 +509,13 @@ predicates and `except` clauses on those types work. Each class below is a `Conf
   themselves) and carries the call's include encoding. `origin` is the document that
   relative `!include`/`!load` paths resolve against (default: *path* itself; a rendered
   `.j2` passes its template's path).
+  The parser instance is **named after the file** (`loader_instance.name = str(path)`),
+  so every mark reads `in "app.yaml"` instead of `in "<unicode string>"`; a `ReaderError`
+  raised inside the constructor (a non-printable byte, before any instance exists) has its
+  `name` set and is re-raised. An `!include` form is read by
+  `backends/base.py::_include_call`, shared with `ConfigBackend._yaml_tag_constructor`: a
+  mapping with no non-empty `pathname`, or an empty sequence, raises PyYAML's
+  `ConstructorError` (whose mark names file and line) rather than a bare `KeyError`.
   **Gotcha**: nested `!include`/`!load` route through the driving `ConfigLoader` stashed
   on the loader instance as `_yaconfiglib_config_loader` — not the loader captured when
   the tag was first registered — so each loader's own `allow_commands`/`merge` apply to
@@ -618,8 +641,13 @@ marker, and would add a BOM there.
   a non-`SandboxedEnvironment` `environment=` under a hardened policy raises
   `ValueError`, and a rendered command source raises `CommandsDisabledError` when
   commands are disabled. The name must keep the format extension it renders to
-  (`config.yaml.j2`); otherwise `NotImplementedError` names the template, raised before
-  it is read or rendered.
+  (`config.yaml.j2`); otherwise `UnsupportedFormatError` (a `NotImplementedError`) names
+  the template, raised before it is read or rendered.
+  Errors name the template: the compile call passes `name=path.name` and
+  `filename=str(path)`, so a template error carries `.filename` and its traceback frame
+  names the file (it said `File "<unknown>"`), and a parse error in the **rendered**
+  document — whose line numbers refer to the rendered text — gains a `render` frame
+  naming the template.
 
 ## Jinja2 interpolation (`utils/jinja2.py`)
 
