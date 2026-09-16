@@ -43,15 +43,61 @@ def _coerce_value(value: str) -> object:
         return value
 
 
-def _set_nested(result: dict[str, object], parts: list[str], value: object) -> None:
+#: Windows environment names are case-insensitive and os.environ upper-cases
+#: them, so a lowercase prefix would match nothing there. A module flag rather
+#: than an inline os.name test, so tests can exercise both modes anywhere.
+_ENV_KEYS_CASE_INSENSITIVE = os.name == "nt"
+
+
+def _has_prefix(key: str, prefix: str) -> bool:
+    if _ENV_KEYS_CASE_INSENSITIVE:
+        return key.upper().startswith(prefix.upper())
+    return key.startswith(prefix)
+
+
+def _conflict(name: str, other: str, path: "tuple[str, ...]") -> ValueError:
+    return ValueError(
+        f"environment variables {other!r} and {name!r} both define "
+        f"{'.'.join(path)!r}: one is a value and the other nests keys under it. "
+        "Rename or remove one of them."
+    )
+
+
+def _set_nested(
+    result: "dict[str, object]",
+    parts: "list[str]",
+    value: object,
+    origins: "dict[tuple[str, ...], str]",
+    name: str,
+) -> None:
+    """Write *value* at *parts*, refusing to overwrite another variable's work.
+
+    *origins* maps each produced key path to the variable that produced it, so
+    the collision can name both. Whether a variable is a leaf is decided by its
+    key path, not by its value: with ``coerce=True`` a JSON object is still a
+    leaf.
+    """
     current = result
+    walked: "tuple[str, ...]" = ()
     for part in parts[:-1]:
+        walked += (part,)
         existing = current.get(part)
         if not isinstance(existing, dict):
+            if part in current:
+                # A leaf from another variable sits where this one needs a parent.
+                raise _conflict(name, origins.get(walked, "<unknown>"), walked)
             existing = {}
             current[part] = existing
+            # Record the parent too, so the variable that created it can be
+            # named when a later leaf collides with it.
+            origins[walked] = name
         current = existing
+    walked += (parts[-1],)
+    if isinstance(current.get(parts[-1]), dict):
+        # This variable is a leaf, but another one nested keys under the path.
+        raise _conflict(name, origins.get(walked, "<unknown>"), walked)
     current[parts[-1]] = value
+    origins[walked] = name
 
 
 class EnvVarBackend(ConfigBackend):
@@ -120,17 +166,33 @@ class EnvVarBackend(ConfigBackend):
         coerce = self.coerce if coerce is None else coerce
 
         result: dict[str, object] = {}
+        origins: "dict[tuple[str, ...], str]" = {}
         for key, value in os.environ.items():
-            if prefix and not key.startswith(prefix):
+            if prefix and not _has_prefix(key, prefix):
                 continue
             clean_key = key[len(prefix) :]
             if lowercase:
                 clean_key = clean_key.lower()
+            if not clean_key:
+                # A variable equal to the prefix would otherwise produce a "" key.
+                continue
             parsed_value = _coerce_value(value) if coerce else value
             if nested_delimiter and nested_delimiter in clean_key:
                 parts = [part for part in clean_key.split(nested_delimiter) if part]
                 if parts:
-                    _set_nested(result, parts, parsed_value)
+                    _set_nested(result, parts, parsed_value, origins, key)
                 continue
+            if not nested_delimiter:
+                # Without nesting every variable is a leaf, so no scalar/nested
+                # collision is possible and no bookkeeping is needed. This is
+                # the default path; tracking origins here measurably slowed it.
+                result[clean_key] = parsed_value
+                continue
+            # Inlined rather than routed through _set_nested for one part.
+            if isinstance(result.get(clean_key), dict):
+                raise _conflict(
+                    key, origins.get((clean_key,), "<unknown>"), (clean_key,)
+                )
             result[clean_key] = parsed_value
+            origins[(clean_key,)] = key
         return result

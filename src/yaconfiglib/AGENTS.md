@@ -397,7 +397,16 @@ marker, and would add a BOM there.
   signature). `nested_delimiter="__"` splits keys after prefix-stripping into nested
   dicts (`APP_DB__PORT` with `prefix="APP_"` → `{"db": {"port": ...}}`). `coerce=True`
   converts each string value to `None`/`bool`/`int`/`float`/parsed-JSON where it matches
-  a `[`/`{`-leading value, else leaves it a string.
+  a `[`/`{`-leading value, else leaves it a string. With `nested_delimiter`, a variable
+  that is both a value and a parent of nested keys (`APP_DB` plus `APP_DB__PORT`) raises
+  `ValueError` naming both variables — it used to depend on `os.environ` order, giving a
+  different document for the same environment. Leaf-ness is decided by **key path**, not
+  value type, so a `coerce=True` JSON object is still a leaf. A variable equal to the
+  prefix is skipped instead of producing a `""` key. Prefix matching is
+  case-insensitive on Windows, switched by the module flag `_ENV_KEYS_CASE_INSENSITIVE`
+  (`os.name == "nt"`) so tests can exercise both modes anywhere. Collision bookkeeping is
+  skipped entirely when `nested_delimiter` is unset — every variable is then a leaf, and
+  that is the hot path.
 - **`CommandBackend`** (`NAME="command"`) — runs `cmd://`/`exec://`/`sh://` (and `+fmt`
   variants, e.g. `cmd+json://...`) sources as a subprocess and parses stdout, routing by
   the `+fmt` suffix or a `#!fmt` shebang line in the output. The command runs with stdin

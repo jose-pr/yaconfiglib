@@ -140,6 +140,14 @@ config = ConfigLoader().load(
 - `coerce` — convert string values to `None`/`bool`/`int`/`float`/parsed
   JSON where they look like one, instead of leaving everything as `str`.
 
+With `nested_delimiter`, a variable that is both a value and a parent of
+nested keys — `APP_DB` alongside `APP_DB__PORT` — raises `ValueError` naming
+both variables, rather than one of them winning by environment order. Rename
+or remove one. A variable equal to the prefix produces no key at all.
+
+On Windows the prefix matches case-insensitively, because environment names
+there are case-insensitive and `os.environ` upper-cases them.
+
 ## Commands and scripts
 
 `cmd://`, `exec://`, and `sh://` URIs (plus `.sh`/`.bat`/`.ps1`/`.cmd`

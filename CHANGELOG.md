@@ -52,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `EnvVarBackend` with `nested_delimiter` raises `ValueError` naming both variables when
+  one variable is a plain value and another nests keys under it (`APP_DB` alongside
+  `APP_DB__PORT`). Which one won previously depended on the order of `os.environ`, so the
+  same environment could produce different configuration. Rename or remove one of them.
 - On Python 3.9/3.10 the `toml` extra now installs `tomli`, the backport of the standard
   library `tomllib`, instead of the unmaintained `toml` package — which is no longer used
   even when it is installed. TOML 1.0 files therefore parse on 3.9/3.10 exactly as they
@@ -154,6 +158,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- A lowercase `prefix` now matches on Windows, where environment names are
+  case-insensitive and `os.environ` upper-cases them; `prefix="app_"` used to find
+  nothing there.
+- A variable equal to the prefix (`APP_` with `prefix="APP_"`) no longer produces an
+  empty-string key.
 - When a format's optional dependency is missing, the "Not reader for ..." and "Unknown
   configuration format/loader" errors name the extra to install and the underlying import
   error, instead of only reporting an unknown format.

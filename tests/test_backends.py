@@ -1271,3 +1271,43 @@ class TestMissingOptionalBackend:
             cls = ConfigBackend.get_class_by_name(name)
             assert cls is not None, name
             assert cls.PATHNAME_REGEX.pattern == pattern, name
+
+
+class TestEnvVarCollisions:
+    def test_scalar_then_nested_raises(self, monkeypatch):
+        monkeypatch.setenv("ZZENV7_DB", "sqlite")
+        monkeypatch.setenv("ZZENV7_DB__PORT", "5432")
+        with pytest.raises(ValueError) as excinfo:
+            EnvVarBackend().load(prefix="ZZENV7_", nested_delimiter="__")
+        assert "ZZENV7_DB" in str(excinfo.value)
+        assert "ZZENV7_DB__PORT" in str(excinfo.value)
+
+    def test_nested_then_scalar_raises(self, monkeypatch):
+        monkeypatch.setenv("ZZENV7_DB__PORT", "5432")
+        monkeypatch.setenv("ZZENV7_DB", "sqlite")
+        with pytest.raises(ValueError) as excinfo:
+            EnvVarBackend().load(prefix="ZZENV7_", nested_delimiter="__")
+        assert "ZZENV7_DB" in str(excinfo.value)
+        assert "ZZENV7_DB__PORT" in str(excinfo.value)
+
+    def test_empty_key_after_prefix_is_skipped(self, monkeypatch):
+        monkeypatch.setenv("ZZENV7_", "d")
+        monkeypatch.setenv("ZZENV7_KEEP", "k")
+        result = EnvVarBackend().load(prefix="ZZENV7_")
+        assert result == {"keep": "k"}
+
+    def test_prefix_case_insensitive_when_flag_set(self, monkeypatch):
+        from yaconfiglib.backends import env as env_module
+
+        monkeypatch.setattr(env_module, "_ENV_KEYS_CASE_INSENSITIVE", True)
+        monkeypatch.setenv("ZZENV7_LOWER", "x")
+        assert EnvVarBackend().load(prefix="zzenv7_") == {"lower": "x"}
+
+    def test_prefix_case_sensitive_when_flag_clear(self, monkeypatch):
+        # Pre-fix this fails only because the flag does not exist yet, so
+        # monkeypatch.setattr raises.
+        from yaconfiglib.backends import env as env_module
+
+        monkeypatch.setattr(env_module, "_ENV_KEYS_CASE_INSENSITIVE", False)
+        monkeypatch.setenv("ZZENV7_LOWER", "x")
+        assert EnvVarBackend().load(prefix="zzenv7_") == {}
