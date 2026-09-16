@@ -8,6 +8,7 @@ within configuration data structures (strings, mappings, sequences).
 from __future__ import annotations
 
 import logging
+import threading as _threading
 import typing as _ty
 import weakref as _weakref
 from collections import OrderedDict as _OrderedDict
@@ -72,17 +73,25 @@ _EVAL_CACHE: "_OrderedDict[tuple, tuple]" = _OrderedDict()
 _REFERENCES_CACHE: "_OrderedDict[tuple, tuple]" = _OrderedDict()
 
 
+# The caches are module-level state shared by every thread. Read-modify-write
+# sequences (get + move_to_end, put + evict) are not atomic — least of all on a
+# free-threaded build — so both run under one lock. It is never held while a
+# template compiles.
+_CACHE_LOCK = _threading.Lock()
+
+
 def _cache_get(cache: _OrderedDict, code: str, env: Environment):
     key = (code, id(env))
-    hit = cache.get(key)
-    if hit is None:
+    with _CACHE_LOCK:
+        hit = cache.get(key)
+        if hit is None:
+            return None
+        env_ref, value = hit
+        if env_ref() is env:
+            cache.move_to_end(key)
+            return value
+        del cache[key]  # id() was recycled onto a different env — recompile
         return None
-    env_ref, value = hit
-    if env_ref() is env:
-        cache.move_to_end(key)
-        return value
-    del cache[key]  # id() was recycled onto a different env — recompile
-    return None
 
 
 def _cache_put(cache: _OrderedDict, code: str, env: Environment, value) -> None:
@@ -90,10 +99,11 @@ def _cache_put(cache: _OrderedDict, code: str, env: Environment, value) -> None:
         env_ref = _weakref.ref(env)
     except TypeError:
         env_ref = lambda: env  # non-weakrefable env: keep it alive via closure
-    cache[(code, id(env))] = (env_ref, value)
-    cache.move_to_end((code, id(env)))
-    while len(cache) > _CACHE_MAX:
-        cache.popitem(last=False)
+    with _CACHE_LOCK:
+        cache[(code, id(env))] = (env_ref, value)
+        cache.move_to_end((code, id(env)))
+        while len(cache) > _CACHE_MAX:
+            cache.popitem(last=False)
 
 
 def compile(
@@ -101,14 +111,21 @@ def compile(
     environment: Environment | None = None,
     globals: _ty.MutableMapping | None = None,
 ) -> _ty.Callable[..., str]:
-    """Return a render callable for *code* (a Jinja2 template string)."""
+    """Return a render callable for *code* (a Jinja2 template string).
+
+    *globals* applies to this call only: the cached template is compiled without
+    it, and the values are merged under the render's own keyword arguments, which
+    still win. Caching the baked-in globals returned the first caller's values to
+    every later one.
+    """
     env = environment or DEFAULT_ENV
-    cached = _cache_get(_COMPILE_CACHE, code, env)
-    if cached is not None:
-        return cached
-    render = load_template(code, environment=env, globals=globals).render
-    _cache_put(_COMPILE_CACHE, code, env, render)
-    return render
+    render = _cache_get(_COMPILE_CACHE, code, env)
+    if render is None:
+        render = load_template(code, environment=env).render
+        _cache_put(_COMPILE_CACHE, code, env, render)
+    if not globals:
+        return render
+    return lambda **kwargs: render(**{**globals, **kwargs})
 
 
 def references(code: str, environment: Environment | None = None) -> frozenset:
@@ -143,11 +160,14 @@ def eval(
 
     The expression result is captured via a ``{% do %}`` statement and
     returned from the callable, preserving non-string Python types.
+    *globals* applies to this call only (see :func:`compile`).
     """
     env = environment or DEFAULT_ENV
     cached = _cache_get(_EVAL_CACHE, code, env)
     if cached is not None:
-        return cached
+        if not globals:
+            return cached
+        return lambda **kwargs: cached(**{**globals, **kwargs})
 
     # The result is captured by CALLING a plain function bound as a render
     # variable — never by reaching for an attribute. jinja2's
@@ -157,10 +177,11 @@ def eval(
     # mechanism tripped the sandbox, not the user's expression). Names are not
     # sandboxed, and a bound builtin method is safely callable, so `_set` works
     # in both environments. Do not reintroduce attribute access here.
+    # Compiled without `globals`: they are merged per call below, so a cached
+    # evaluator never serves the first caller's values to a later one.
     template = load_template(
         "{% do _set('result', " + code + ") %}",
         environment=env,
-        globals=globals,
     )
 
     def _eval(**kwargs) -> object:
@@ -175,7 +196,9 @@ def eval(
         return res
 
     _cache_put(_EVAL_CACHE, code, env, _eval)
-    return _eval
+    if not globals:
+        return _eval
+    return lambda **kwargs: _eval(**{**globals, **kwargs})
 
 
 def interpolate(

@@ -814,3 +814,28 @@ class TestCommandOutputEncoding:
         cmd = f"cmd://{sys.executable} -X utf8 -c \"print('caf\xe9')\""
         result = CommandBackend().load(cmd)
         assert result == "café"
+
+
+class TestJinja2TemplateNaming:
+    """A .j2 template must keep the format extension it renders to."""
+
+    def test_j2_without_inner_extension_names_the_template(self, tmp_path):
+        template = tmp_path / "config.j2"
+        template.write_text("a: 1\n", encoding="utf-8")
+
+        with pytest.raises(NotImplementedError, match=r"config\.j2") as exc_info:
+            ConfigLoader(base_dir=tmp_path).load("config.j2")
+        assert "config.yaml.j2" in str(exc_info.value)
+
+    def test_j2_without_inner_extension_names_the_template_without_pathlib_next(
+        self, tmp_path, monkeypatch
+    ):
+        from yaconfiglib.backends import jinja2 as jinja2_backend
+
+        monkeypatch.setattr(jinja2_backend, "MemPath", None)
+        template = tmp_path / "config.j2"
+        template.write_text("a: 1\n", encoding="utf-8")
+
+        with pytest.raises(NotImplementedError, match=r"config\.j2") as exc_info:
+            ConfigLoader(base_dir=tmp_path).load("config.j2")
+        assert "config.yaml.j2" in str(exc_info.value)

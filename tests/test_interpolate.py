@@ -201,3 +201,69 @@ class TestBareExpressionWhitespace:
 
         # A YAML `|`/`>` block adds a trailing newline; the value stays an int.
         assert interpolate("{{ 1 + 1 }}\n") == 2
+
+
+class TestTemplateCacheGlobals:
+    def test_compile_globals_are_per_call(self):
+        from yaconfiglib.utils.jinja2 import compile
+
+        first = compile("{{ s }}", globals={"s": "FIRST"})
+        second = compile("{{ s }}", globals={"s": "SECOND"})
+        assert first() == "FIRST"
+        assert second() == "SECOND"
+
+    def test_eval_globals_are_per_call(self):
+        from yaconfiglib.utils.jinja2 import eval as jinja_eval
+
+        first = jinja_eval("s", globals={"s": "FIRST"})
+        second = jinja_eval("s", globals={"s": "SECOND"})
+        assert first() == "FIRST"
+        assert second() == "SECOND"
+
+    def test_render_kwargs_override_compile_globals(self):
+        from yaconfiglib.utils.jinja2 import compile
+
+        render = compile("{{ s }}", globals={"s": "from-globals"})
+        assert render(s="from-kwargs") == "from-kwargs"
+
+    def test_cache_get_survives_concurrent_eviction(self, monkeypatch):
+        """A lookup must not lose its entry to another thread's eviction."""
+        import threading
+        from collections import OrderedDict
+
+        from jinja2 import Environment
+
+        from yaconfiglib.utils import jinja2 as J
+
+        class _SignallingCache(OrderedDict):
+            armed = False
+
+            def move_to_end(self, *args, **kwargs):
+                if self.armed:
+                    self.armed = False
+                    other_started.set()
+                    evicted.wait(0.5)
+                return super().move_to_end(*args, **kwargs)
+
+        other_started = threading.Event()
+        evicted = threading.Event()
+        env = Environment()
+        cache = _SignallingCache()
+        monkeypatch.setattr(J, "_CACHE_MAX", 1)
+        J._cache_put(cache, "a", env, "render-a")
+
+        def evict():
+            other_started.wait(0.5)
+            J._cache_put(cache, "b", env, "render-b")
+            evicted.set()
+
+        worker = threading.Thread(target=evict)
+        worker.start()
+        cache.armed = True
+        try:
+            # Without the lock this raises KeyError: the other thread evicted "a"
+            # between this call's get and its move_to_end.
+            J._cache_get(cache, "a", env)
+        finally:
+            evicted.set()
+            worker.join(timeout=5)

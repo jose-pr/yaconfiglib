@@ -103,6 +103,18 @@ class Jinja2ConfigLoader(ConfigBackend):
                 f"refusing to render {path.as_posix()!r} with a non-sandboxed "
                 "environment: sandbox=True or allow_commands=False is in effect"
             )
+        # Resolve the backend for the name minus the .j2/.jinja2 suffix before
+        # reading or rendering anything: a template called "config.j2" names no
+        # format, and the old failure pointed at a stripped path the user never
+        # wrote (or, without pathlib_next, at an unrelated temp file).
+        stripped = path.with_name(path.stem)
+        try:
+            rendered_cls = ConfigBackend.get_class_by_path(stripped)
+        except NotImplementedError:
+            raise NotImplementedError(
+                f"No backend for {path.name!r}: a template must keep the format "
+                "extension it renders to, as in config.yaml.j2"
+            ) from None
         template = jinja2.load_template(
             path.read_text(encoding=encoding),
             environment=environment,
@@ -115,7 +127,7 @@ class Jinja2ConfigLoader(ConfigBackend):
         rendered = template.render(**context)
         # Name the rendered document after the template minus its .j2/.jinja2
         # suffix, so backend auto-detection resolves settings.yaml.j2 -> YAML.
-        rendered_name = path.with_name(path.stem).as_posix()
+        rendered_name = stripped.as_posix()
         if MemPath is None:
             # Without pathlib_next this used to call MemPath(...) anyway —
             # TypeError: 'NoneType' object is not callable for any .j2 source —
@@ -129,7 +141,7 @@ class Jinja2ConfigLoader(ConfigBackend):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(rendered, encoding=encoding)
         parent_loader = loader
-        rendered_loader = ConfigBackend.get_class_by_path(target)()
+        rendered_loader = rendered_cls()
         if isinstance(rendered_loader, CommandBackend) and not policy[0]:
             raise CommandsDisabledError(
                 f"refusing to run rendered command source {str(target)!r} "

@@ -268,7 +268,9 @@ distinguish merge branches.
   `sandbox=True` or `allow_commands=False` is in effect, `StrictUndefined` when `strict`;
   a non-`SandboxedEnvironment` `environment=` under a hardened policy raises
   `ValueError`, and a rendered command source raises `CommandsDisabledError` when
-  commands are disabled.
+  commands are disabled. The name must keep the format extension it renders to
+  (`config.yaml.j2`); otherwise `NotImplementedError` names the template, raised before
+  it is read or rendered.
 
 ## Jinja2 interpolation (`utils/jinja2.py`)
 
@@ -292,7 +294,10 @@ distinguish merge branches.
   (1024 entries, keyed on `(code, id(env))`, weakref-guarded against an `id()` reuse
   collision when an `Environment` is GC'd) compiled-template / expression-evaluator
   factories. `eval` wraps `code` in a `{% do %}` statement to capture and return its
-  value without stringifying.
+  value without stringifying. `globals=` applies to the returned callable only and is
+  **not** part of the cache key: the template is cached without it and the values are
+  merged under the render's keyword arguments, which still win. Both caches are guarded
+  by a lock, so they are safe to use from several threads.
 - **`load_template(source, name=None, filename=None, environment=None, globals=None) ->
   Template`** — one-shot compile, uncached.
 - **`DEFAULT_ENV`** — module-level `Environment(extensions=["jinja2.ext.do"])` used when
