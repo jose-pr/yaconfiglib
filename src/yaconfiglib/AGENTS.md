@@ -162,6 +162,16 @@ dicts merge key-by-key, lists extend with unique items — pass `mergelists=True
 merge dict elements positionally when keys overlap). Call as `method(a, b, *,
 memo=None, **options)`.
 
+Strategies are copy-on-write: they **never modify their inputs**, so a document whose
+keys share one mapping (a YAML anchor or a `<<:` merge key) can be overridden without
+rewriting its siblings — use the return value. The result may share unchanged
+sub-objects with the inputs; `copy.deepcopy` it before mutating if the sources must stay
+intact. A mapping's own type is preserved (`OrderedDict`, `defaultdict` with its factory,
+`DotAccessibleDict`); a Mapping whose constructor rejects the merged keys comes back as a
+plain `dict`. `memo` is internal — a per-call map of the container pairs already merged,
+so a node aliased in both inputs stays aliased in the result and a cyclic (self-
+referencing) document merges instead of raising `RecursionError`. Callers leave it `None`.
+
 `ConfigLoaderMergeMethod` (`loader.py`, extends `MergeMethod`) adds loader-specific
 strategies: `Last` (each source replaces the running result), `List` (collect one entry
 per source, in order), `Hash` (collect into a dict keyed by `configloaderkey`, i.e. each

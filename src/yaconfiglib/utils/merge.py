@@ -6,10 +6,17 @@ This module provides the :class:`MergeMethod` enum with three built-in strategie
 * **Simple** — shallow merge: scalars/lists replace, dicts update (top-level keys only).
 * **Substitute** — like simple, but dicts are merged recursively while lists always replace.
 * **Deep** — fully recursive: dicts merged key-by-key, lists extended with unique items.
+
+Every strategy is copy-on-write: it **never modifies its inputs**, so a document
+loaded once can be overridden many times — which matters for YAML anchors and
+``<<:`` merge keys, where several keys share one object. The result may still
+*share* unchanged sub-objects with the inputs; deep-copy it first if you intend
+to mutate it and keep the sources intact.
 """
 
 from __future__ import annotations
 
+import copy
 import logging
 import typing
 
@@ -42,6 +49,45 @@ def is_array(obj, mutable: bool = False) -> bool:
     return isinstance(obj, typing.Sequence)
 
 
+def _mapping_with(a: typing.Mapping, items: dict) -> typing.Mapping:
+    """Return a mapping of *a*'s type holding *items*, without touching *a*.
+
+    A ``dict`` subclass is shallow-copied so its type and state (a
+    ``defaultdict``'s factory, for instance) survive. Any other Mapping is
+    rebuilt through its own constructor, falling back to a plain dict when that
+    signature does not accept the keys — which is also what makes a read-only
+    mapping with overlapping keys work. A non-dict Mapping is never
+    ``copy.copy``-ed: a wrapper's shallow copy can share its backing store.
+    """
+    if isinstance(a, dict):
+        result = copy.copy(a)
+        result.clear()
+        result.update(items)
+        return result
+    try:
+        return type(a)(**items)
+    except TypeError:
+        return dict(items)
+
+
+def _sequence_with(a: typing.Sequence, items: list) -> typing.Sequence:
+    """Return a sequence of *a*'s type holding *items*, without touching *a*."""
+    if isinstance(a, list):
+        if type(a) is list:
+            return items
+        result = copy.copy(a)
+        result[:] = items
+        return result
+    try:
+        return type(a)(items)
+    except TypeError:
+        return items
+
+
+def _memo_key(a: object, b: object) -> tuple:
+    return (id(a), id(b))
+
+
 @typing.runtime_checkable
 class Merge(typing.Protocol):
     """Protocol for any callable that merges two objects."""
@@ -57,7 +103,17 @@ class Merge(typing.Protocol):
 
 
 class MergeMethod(IntEnum):
-    """Built-in merge strategies."""
+    """Built-in merge strategies.
+
+    A strategy is called as ``MergeMethod.Deep(a, b, **options)`` and returns the
+    merged value. It **never modifies its inputs**: use the return value. The
+    result may share unchanged sub-objects with *a* and *b*.
+
+    ``memo`` is internal — a per-call map of the container pairs already merged,
+    which keeps a node aliased in both inputs aliased in the result and lets a
+    self-referencing document merge instead of recursing forever. Callers leave
+    it ``None``.
+    """
 
     Simple = 1
     Deep = 2
@@ -72,7 +128,7 @@ class MergeMethod(IntEnum):
         **options,
     ):
         method: Merge = getattr(self, f"_{self.name.lower()}")
-        return method(a, b, memo=memo, **options)
+        return method(a, b, memo={} if memo is None else memo, **options)
 
     # ------------------------------------------------------------------
     # Simple merge
@@ -104,15 +160,14 @@ class MergeMethod(IntEnum):
                         result[i] = self._simple(result[i], v, memo=memo, **options)
                     else:
                         result.append(v)
-                return type(a)(result) if not isinstance(a, list) else result
+                return _sequence_with(a, result)
             return b
 
         if isinstance(b, typing.Mapping):
             if isinstance(a, typing.Mapping):
-                if isinstance(a, typing.MutableMapping):
-                    a.update(b)
-                    return a
-                return type(a)(**a, **b)
+                merged = dict(a)
+                merged.update(b)
+                return _mapping_with(a, merged)
             return b
 
         raise TypeError(
@@ -143,20 +198,33 @@ class MergeMethod(IntEnum):
                 return b
 
         if isinstance(a, typing.Mapping) and isinstance(b, typing.Mapping):
+            key = _memo_key(a, b)
+            if key in memo:
+                return memo[key][2]
+            if isinstance(a, dict):
+                # Register the result container before recursing, so a document
+                # that refers to itself resolves to the in-progress result
+                # instead of recursing until RecursionError.
+                result = copy.copy(a)
+                result.clear()
+                memo[key] = (a, b, result)
+                target = dict(a)
+                for k, v in b.items():
+                    if k in target:
+                        target[k] = self._substitute(target[k], v, memo=memo, **options)
+                    else:
+                        target[k] = v
+                result.update(target)
+                return result
             target = dict(a)
             for k, v in b.items():
                 if k in target:
                     target[k] = self._substitute(target[k], v, memo=memo, **options)
                 else:
                     target[k] = v
-            # Preserve the original mapping type where possible.
-            if isinstance(a, typing.MutableMapping):
-                a.update(target)
-                return a
-            try:
-                return type(a)(**target)
-            except TypeError:
-                return target
+            result = _mapping_with(a, target)
+            memo[key] = (a, b, result)
+            return result
 
         if isinstance(a, typing.Mapping) and is_array(b):
             # Merge each dict element of b into a sequentially.
@@ -229,6 +297,24 @@ class MergeMethod(IntEnum):
         mergelists: bool,
         **options,
     ) -> typing.Mapping:
+        key = _memo_key(a, b)
+        if key in memo:
+            return memo[key][2]
+        if isinstance(a, dict):
+            # Registered before recursing: see _substitute.
+            result = copy.copy(a)
+            result.clear()
+            memo[key] = (a, b, result)
+            target = dict(a)
+            for k, v in b.items():
+                if k in target:
+                    target[k] = self._deep(
+                        target[k], v, memo=memo, mergelists=mergelists, **options
+                    )
+                else:
+                    target[k] = v
+            result.update(target)
+            return result
         target = dict(a)
         for k, v in b.items():
             if k in target:
@@ -237,13 +323,9 @@ class MergeMethod(IntEnum):
                 )
             else:
                 target[k] = v
-        if isinstance(a, typing.MutableMapping):
-            a.update(target)
-            return a
-        try:
-            return type(a)(**target)
-        except TypeError:
-            return target
+        result = _mapping_with(a, target)
+        memo[key] = (a, b, result)
+        return result
 
     def _deep_lists(
         self,
@@ -254,6 +336,9 @@ class MergeMethod(IntEnum):
         mergelists: bool,
         **options,
     ) -> typing.Sequence:
+        key = _memo_key(a, b)
+        if key in memo:
+            return memo[key][2]
         result = list(a)
 
         if mergelists:
@@ -297,13 +382,9 @@ class MergeMethod(IntEnum):
                 if isinstance(item, typing.Mapping):
                     result.append(item)
 
-        if isinstance(a, typing.MutableSequence):
-            a[:] = result
-            return a
-        try:
-            return type(a)(result)
-        except TypeError:
-            return result
+        merged = _sequence_with(a, result)
+        memo[key] = (a, b, merged)
+        return merged
 
 
 from .typing_merge import (

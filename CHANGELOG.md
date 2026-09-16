@@ -104,6 +104,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Overriding a key under a YAML anchor or a `<<:` merge key no longer rewrites the
+  sibling keys that share it. `Deep` and `Substitute` merged into their left-hand
+  argument, so an override for one environment silently changed every environment that
+  shared the mapping. The strategies are now copy-on-write and never modify their
+  arguments — use the return value, as `ConfigLoader` always has.
+- A self-referencing mapping now merges instead of raising `RecursionError`, and a node
+  aliased in both inputs stays one object in the result.
+- `Simple` no longer raises `TypeError` when merging into a read-only mapping whose keys
+  overlap the override.
 - `ConfigLoader(log_level=<any int>)` no longer raises `ValueError` for a value that is
   not one of the `LogLevel` members.
 - `flatten=True` skips empty documents instead of failing inside a comprehension — a

@@ -44,6 +44,29 @@ containing `{"server": {"port": 443}}`, a `Deep` merge produces
   source's merge key (see `key_factory` below). Useful for "load a
   directory of files, keyed by filename" patterns.
 
+The strategies **never modify their inputs** — each returns a new result and
+leaves both sides as they were. That is what makes YAML anchors and `<<:`
+merge keys safe to override: several keys can share one mapping, and
+overriding it for one environment leaves the others alone.
+
+```yaml
+defaults: &defaults
+  db: {host: shared, pool: 5}
+
+development:
+  <<: *defaults        # shares one `db` mapping with production
+
+production:
+  <<: *defaults
+```
+
+An override layer setting `production.db.host` leaves `development.db.host`
+as `shared`. A self-referencing document merges too, instead of recursing
+forever.
+
+The result may still *share* unchanged sub-objects with the sources, so
+deep-copy it first if you plan to mutate it and need the sources intact.
+
 ## Controlling list merges
 
 ```python

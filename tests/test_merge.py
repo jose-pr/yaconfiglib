@@ -212,6 +212,101 @@ class TestDeepMerge:
 
 
 # ---------------------------------------------------------------------------
+# Copy-on-write contract
+# ---------------------------------------------------------------------------
+
+STRATEGIES = [MergeMethod.Simple, MergeMethod.Substitute, MergeMethod.Deep]
+STRATEGY_IDS = ["Simple", "Substitute", "Deep"]
+
+
+class TestMergeCopyOnWrite:
+    @pytest.mark.parametrize("strategy", STRATEGIES, ids=STRATEGY_IDS)
+    def test_inputs_unchanged(self, strategy):
+        import copy
+
+        a = {"db": {"host": "shared", "pool": 5}, "hosts": ["a"], "n": 1}
+        b = {"db": {"host": "prod"}, "hosts": ["b"]}
+        a_before = copy.deepcopy(a)
+        b_before = copy.deepcopy(b)
+
+        result = strategy(a, b)
+
+        assert a == a_before
+        assert b == b_before
+        assert result is not a
+
+    @pytest.mark.parametrize("strategy", STRATEGIES, ids=STRATEGY_IDS)
+    def test_mapping_subclass_preserved(self, strategy):
+        import collections
+
+        from yaconfiglib.loader import DotAccessibleDict
+
+        ordered = collections.OrderedDict([("a", 1)])
+        assert type(strategy(ordered, {"b": 2})) is collections.OrderedDict
+
+        default = collections.defaultdict(list, {"a": 1})
+        merged_default = strategy(default, {"b": 2})
+        assert type(merged_default) is collections.defaultdict
+        assert merged_default.default_factory is list
+
+        dot = DotAccessibleDict({"a": 1})
+        assert type(strategy(dot, {"b": 2})) is DotAccessibleDict
+
+    def test_simple_readonly_mapping_with_overlapping_keys(self):
+        import typing
+
+        class ReadOnly(typing.Mapping):
+            def __init__(self, **values):
+                self._values = dict(values)
+
+            def __getitem__(self, key):
+                return self._values[key]
+
+            def __iter__(self):
+                return iter(self._values)
+
+            def __len__(self):
+                return len(self._values)
+
+        result = MergeMethod.Simple(ReadOnly(a=1, b=2), {"b": 99})
+
+        assert dict(result) == {"a": 1, "b": 99}
+
+    @pytest.mark.parametrize(
+        "strategy",
+        [MergeMethod.Substitute, MergeMethod.Deep],
+        ids=["Substitute", "Deep"],
+    )
+    def test_cyclic_mappings_merge(self, strategy):
+        a = {"name": "one"}
+        a["self"] = a
+        b = {"name": "two"}
+        b["self"] = b
+
+        result = strategy(a, b)
+
+        assert result["name"] == "two"
+        assert result["self"] is result
+
+    def test_node_aliased_in_both_inputs_stays_aliased(self):
+        shared_a = {"k": 1}
+        shared_b = {"k": 2}
+
+        result = MergeMethod.Deep(
+            {"x": shared_a, "y": shared_a}, {"x": shared_b, "y": shared_b}
+        )
+
+        assert result["x"] is result["y"]
+
+    def test_simple_does_not_mutate_aliased_list_elements(self):
+        element = {"x": 1}
+
+        MergeMethod.Simple([element, element], [{"x": 2}])
+
+        assert element == {"x": 1}
+
+
+# ---------------------------------------------------------------------------
 # typed_merge
 # ---------------------------------------------------------------------------
 

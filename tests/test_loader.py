@@ -1282,6 +1282,56 @@ class TestLoadAs:
         assert result.derived == 42
 
 
+class TestMergeAnchors:
+    """Overriding a key must not rewrite what an anchor shares with it."""
+
+    @pytest.mark.parametrize("strategy", ["deep", "substitute"])
+    def test_merge_key_override_does_not_leak(self, tmp_path, strategy):
+        # `<<:` copies only top-level keys, so both environments share one `db`
+        # mapping. An override layer must not rewrite it for everyone.
+        (tmp_path / "app.yaml").write_text(
+            "defaults: &defaults\n"
+            "  db:\n"
+            "    host: shared\n"
+            "    pool: 5\n"
+            "  hosts: [a]\n"
+            "development:\n"
+            "  <<: *defaults\n"
+            "production:\n"
+            "  <<: *defaults\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "override.yaml").write_text(
+            "production:\n  db:\n    host: prod-db\n  hosts: [b]\n", encoding="utf-8"
+        )
+
+        result = ConfigLoader(base_dir=tmp_path, merge=strategy).load(
+            "app.yaml", "override.yaml"
+        )
+
+        assert result["production"]["db"]["host"] == "prod-db"
+        assert result["development"]["db"]["host"] == "shared"
+        assert result["defaults"]["db"]["host"] == "shared"
+        assert result["development"]["hosts"] == ["a"]
+
+    @pytest.mark.parametrize("strategy", ["deep", "substitute"])
+    def test_later_layer_does_not_rewrite_earlier_layer_anchor(
+        self, tmp_path, strategy
+    ):
+        (tmp_path / "base.yaml").write_text("v: 0\n", encoding="utf-8")
+        (tmp_path / "mid.yaml").write_text(
+            "common: &c\n  x: 1\nb: *c\n", encoding="utf-8"
+        )
+        (tmp_path / "top.yaml").write_text("b:\n  x: 2\n", encoding="utf-8")
+
+        result = ConfigLoader(base_dir=tmp_path, merge=strategy).load(
+            "base.yaml", "mid.yaml", "top.yaml"
+        )
+
+        assert result["b"]["x"] == 2
+        assert result["common"]["x"] == 1
+
+
 class TestIgnoreErrorPredicate:
     def test_predicate_skips_only_selected_errors(self, tmp_path):
         (tmp_path / "good.yaml").write_text("x: 1\n")
