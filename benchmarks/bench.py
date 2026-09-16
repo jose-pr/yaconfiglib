@@ -22,6 +22,7 @@ sys.path.insert(0, str(StdlibPath(__file__).parent.parent / "src"))
 
 from jinja2 import Environment
 
+from yaconfiglib.backends.python_backend import PythonBackend
 from yaconfiglib.loader import ConfigLoader, ConfigLoaderMergeMethod, DotAccessibleDict
 from yaconfiglib.backends.env import EnvVarBackend
 from yaconfiglib.utils import jinja2
@@ -147,8 +148,10 @@ def benchmark_sources() -> BenchmarkRows:
         )
 
         duplicate_count = len(list(parse_sources(["a.yaml", "a.yaml"], base_dir=root)))
-        nested_count = len(list(parse_sources([["a.yaml", "b.yaml"], "c.yaml"], base_dir=root)))
-        command_path = next(parse_sources(["cmd+json://echo {\"x\":[1]}"], base_dir=root))
+        nested_count = len(
+            list(parse_sources([["a.yaml", "b.yaml"], "c.yaml"], base_dir=root))
+        )
+        command_path = next(parse_sources(['cmd+json://echo {"x":[1]}'], base_dir=root))
         rows.append(("duplicate path behavior", f"{duplicate_count} yielded path(s)"))
         rows.append(("nested iterable behavior", f"{nested_count} yielded path(s)"))
         rows.append(("command glob metacharacter behavior", str(command_path)))
@@ -212,9 +215,18 @@ def benchmark_merge() -> BenchmarkRows:
             loader.load(*docs)
 
     return [
-        ("deep merge, append list dicts (1k)", _measure(lambda: deep_merge_many(False), calls=1000, repeat=5)),
-        ("deep merge, positional list dicts (1k)", _measure(lambda: deep_merge_many(True), calls=1000, repeat=5)),
-        ("loader deep merge_options mergelists (200)", _measure(load_merge_options_many, calls=200, repeat=5)),
+        (
+            "deep merge, append list dicts (1k)",
+            _measure(lambda: deep_merge_many(False), calls=1000, repeat=5),
+        ),
+        (
+            "deep merge, positional list dicts (1k)",
+            _measure(lambda: deep_merge_many(True), calls=1000, repeat=5),
+        ),
+        (
+            "loader deep merge_options mergelists (200)",
+            _measure(load_merge_options_many, calls=200, repeat=5),
+        ),
         ("positional merge correctness", result),
     ]
 
@@ -250,7 +262,10 @@ def benchmark_jinja() -> BenchmarkRows:
             jinja2.interpolate(data, globals=context, environment=env)
 
     return [
-        ("interpolate nested structure (100)", _measure(interpolate_many, calls=100, repeat=5)),
+        (
+            "interpolate nested structure (100)",
+            _measure(interpolate_many, calls=100, repeat=5),
+        ),
         (
             "load_all inline docs with interpolate (5 x 50 docs)",
             _measure(
@@ -282,7 +297,35 @@ def benchmark_dot_access() -> BenchmarkRows:
         for _ in range(50_000):
             data.get("database.credentials.missing", "fallback")
 
+    # Conversion cost moved from reads to load, so measure both ends. Only
+    # v0.11.2 API here, so this row can also be measured against an export of
+    # that release.
+    sections = {
+        f"section{i}": {
+            "nested": {"a": 1, "b": 2},
+            "items": [{"n": j} for j in range(5)],
+        }
+        for i in range(2_000)
+    }
+
+    def load_sections() -> None:
+        ConfigLoader().load(loader=PythonBackend(sections))
+
+    loaded = ConfigLoader().load(loader=PythonBackend(sections))
+
+    def read_every_section() -> None:
+        for i in range(2_000):
+            getattr(loaded, f"section{i}").nested
+
     return [
+        (
+            "load nested mappings (2k sections)",
+            _measure(load_sections, calls=2000, repeat=3),
+        ),
+        (
+            "load then read every section by attribute (2k sections)",
+            _measure(read_every_section, calls=2000, repeat=5),
+        ),
         ("dotted hit (50k)", _measure(dotted_hit, calls=50000, repeat=5)),
         ("exact dotted-key hit (50k)", _measure(exact_hit, calls=50000, repeat=5)),
         ("dotted miss (50k)", _measure(miss, calls=50000, repeat=5)),

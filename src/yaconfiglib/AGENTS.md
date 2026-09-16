@@ -154,8 +154,21 @@ All constructor args become instance defaults, overridable per-call. Notable one
 Wraps every dict result. `__getattr__`/`__setattr__` give `config.a.b.c` access;
 `.get(key, default=None, dig=True)` additionally supports a dotted-string key
 (`get("database.credentials.user")`) that traverses nested dicts, short-circuiting to
-`default` on a `None` or missing intermediate. Nested dict values are lazily wrapped in
-`DotAccessibleDict` on first access/get, not eagerly at construction.
+`default` on a `None` or missing intermediate.
+
+Nested mappings are converted **once, at construction** (and once per `load()`, via the
+private `_to_dot_access`), never lazily on read. That is what makes item access,
+attribute access and object identity agree regardless of read order: `cfg["db"] is
+cfg.db`, and a YAML anchor used twice is still one object afterwards. The converter
+copies rather than mutates (a backend may own its result), keys an `id()`-memo so shared
+structure stays shared and a self-referencing document terminates, and converts every
+`dict` subclass plus exact `list`/`tuple` members — a non-dict `Mapping` is left alone,
+since materializing something possibly lazy is not this library's call.
+
+**Reads never write.** `get()` follows `dict.get`: a miss returns the default itself and
+stores nothing, so `cfg.get("x", {})` no longer inserts `{}` and a `defaultdict` stored
+later does not grow keys through a read. Values assigned **after** construction are
+stored exactly as given, so a plain dict written with `cfg["x"] = {...}` stays plain.
 
 ### `DEFAULT_LOADER`
 

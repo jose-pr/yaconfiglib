@@ -836,9 +836,9 @@ class ConfigLoader(ConfigBackend):
                     if not self.ignore_error(error, result=result, loader=self):
                         raise
 
-            # Wrap dict results in a helper class that supports dot-notation
-            if isinstance(result, dict):
-                result = DotAccessibleDict(result)
+            # Make every nested mapping dot-accessible, once, here. This also
+            # covers a list or Hash/List result, whose members are mappings.
+            result = _to_dot_access(result, {})
 
             return result
 
@@ -946,8 +946,7 @@ class ConfigLoader(ConfigBackend):
                             ),
                             strict=current_policy()[2],
                         )
-                if isinstance(value, dict):
-                    value = DotAccessibleDict(value)
+                value = _to_dot_access(value, {})
                 yield value
 
             except (
@@ -958,16 +957,84 @@ class ConfigLoader(ConfigBackend):
                     raise
 
 
+#: Distinguishes "absent" from a stored ``None`` while digging a dotted path.
+_MISSING = object()
+
+
+def _to_dot_access(value: object, memo: dict) -> object:
+    """Return *value* with every nested mapping dot-accessible.
+
+    Copies rather than mutating: a backend may hand back an object the caller
+    still owns (`PythonBackend` does), and merges are copy-on-write for the
+    same reason.
+
+    *memo* maps ``id(source container)`` to its converted object, so structure
+    shared in the source stays shared in the result — a YAML anchor used twice
+    is still one object afterwards — and a self-referencing document
+    terminates. A container is registered before its children are converted.
+    """
+    existing = memo.get(id(value), _MISSING)
+    if existing is not _MISSING:
+        return existing
+
+    if isinstance(value, dict):
+        # dict.__new__ keeps a DotAccessibleDict subclass's own type and calls
+        # no __init__ (which would convert a second time).
+        converted = (
+            dict.__new__(type(value))
+            if isinstance(value, DotAccessibleDict)
+            else DotAccessibleDict()
+        )
+        memo[id(value)] = converted
+        for key, item in value.items():
+            dict.__setitem__(converted, key, _to_dot_access(item, memo))
+        return converted
+
+    # Only exact list/tuple: a list subclass may carry state a plain list
+    # cannot, and a namedtuple would lose its type through tuple(...).
+    if type(value) is list:
+        converted = []
+        memo[id(value)] = converted
+        converted.extend(_to_dot_access(item, memo) for item in value)
+        return converted
+    if type(value) is tuple:
+        # Built first, so it can only be registered afterwards; a tuple cannot
+        # take part in a cycle it owns.
+        converted = tuple(_to_dot_access(item, memo) for item in value)
+        memo[id(value)] = converted
+        return converted
+
+    # Everything else is returned as it is and not descended into: a non-dict
+    # Mapping may be lazy or proxy live state, and materializing it is not this
+    # library's decision.
+    return value
+
+
 class DotAccessibleDict(dict):
-    """Dictionary subclass supporting dot-notation queries and attribute access."""
+    """Dictionary subclass supporting dot-notation queries and attribute access.
+
+    Nested mappings are converted **once, at construction**, so item access,
+    attribute access and object identity all agree however the value is
+    reached, whatever the read order. Reads never write: `get()` follows
+    `dict.get`'s contract and a miss returns the default without storing it.
+
+    Values assigned after construction are stored exactly as given — a plain
+    dict written with ``cfg["x"] = {...}`` stays a plain dict.
+    """
+
+    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Seed the memo with this object, and with the source mapping when
+        # there is one, so a self-referencing source resolves to this instance.
+        memo = {id(self): self}
+        if len(args) == 1 and isinstance(args[0], dict):
+            memo[id(args[0])] = self
+        for key, value in list(self.items()):
+            dict.__setitem__(self, key, _to_dot_access(value, memo))
 
     def __getattr__(self, name: str) -> object:
         try:
-            val = self[name]
-            if isinstance(val, dict) and not isinstance(val, DotAccessibleDict):
-                val = DotAccessibleDict(val)
-                self[name] = val
-            return val
+            return self[name]
         except KeyError:
             raise AttributeError(
                 f"'DotAccessibleDict' object has no attribute '{name}'"
@@ -977,38 +1044,25 @@ class DotAccessibleDict(dict):
         self[name] = value
 
     def get(self, key: str, default: object = None, dig: bool = True) -> object:
-        """Support dot-notation traversal, e.g., get("database.credentials.user", dig=True)."""
+        """Support dot-notation traversal, e.g., get("database.credentials.user", dig=True).
+
+        Never inserts: a miss returns *default* itself, as `dict.get` does.
+        """
         if key in self:
-            val = super().get(key, default)
-            if isinstance(val, dict) and not isinstance(val, DotAccessibleDict):
-                val = DotAccessibleDict(val)
-                self[key] = val
-            return val
+            return super().get(key, default)
 
         if dig and "." in key:
-            parts = key.split(".")
             current = self
-            for part in parts:
+            for part in key.split("."):
                 if not isinstance(current, dict):
                     return default
-                parent = current
-                try:
-                    current = current[part]
-                except KeyError:
+                # dict.get, so a defaultdict stored later does not grow a key
+                # through a read.
+                current = dict.get(current, part, _MISSING)
+                if current is _MISSING or current is None:
                     return default
-                if current is None:
-                    return default
-                if isinstance(current, dict) and not isinstance(
-                    current, DotAccessibleDict
-                ):
-                    current = DotAccessibleDict(current)
-                    parent[part] = current
             return current
-        val = super().get(key, default)
-        if isinstance(val, dict) and not isinstance(val, DotAccessibleDict):
-            val = DotAccessibleDict(val)
-            self[key] = val
-        return val
+        return super().get(key, default)
 
 
 #: Every keyword :class:`ConfigLoader` itself accepts. The module-level helpers

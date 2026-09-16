@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- Values assigned to a loaded configuration after it is built are stored exactly as
+  given: `config["x"] = {...}` keeps a plain dict, rather than that dict becoming
+  dot-accessible on the next read. Wrap it yourself (`DotAccessibleDict({...})`) if dot
+  access is wanted.
 - `.bat`/`.cmd` sources run on Windows only and refuse a path containing `%`; `.ps1`
   requires `pwsh` or `powershell` and obeys the machine's execution policy; `.sh` on
   Windows requires `sh` on `PATH`. Each raises a clear `ValueError`/`FileNotFoundError`
@@ -195,6 +199,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Reading a configuration no longer modifies it. `config.get("missing", {})` used to
+  store that default under the missing key, and every attribute or `get()` read of a
+  nested mapping replaced the stored value with a new wrapper — so `config["db"] is
+  config.db` could be false, a held reference went stale, and two YAML anchor aliases
+  stopped being the same object. Nested mappings are now converted once, when the result
+  is built, and a miss returns the default without inserting it.
+- Mappings inside lists and tuples are dot-accessible, as are `List`-merge results and
+  each document from `load_all()`. Previously only a top-level dict was wrapped, so
+  `config.services[0].name` raised `AttributeError`.
+- Loading no longer aliases the objects a backend returned: writing to a loaded result
+  cannot reach back into a `PythonBackend` source or an included document.
 - Command output that does not decode with the requested codec (default `utf-8`) raises
   a clear error naming `encoding=`, instead of silently replacing bytes with `U+FFFD`. A
   non-ASCII secret from a tool writing another code page used to arrive corrupted, and the
