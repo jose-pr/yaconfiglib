@@ -52,6 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- The source distribution no longer includes `benchmarks/`, and files matching
+  `*.local.*` are excluded from both the source distribution and the wheel.
 - `EnvVarBackend` with `nested_delimiter` raises `ValueError` naming both variables when
   one variable is a plain value and another nests keys under it (`APP_DB` alongside
   `APP_DB__PORT`). Which one won previously depended on the order of `os.environ`, so the

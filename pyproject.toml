@@ -48,11 +48,15 @@ Issues = "https://github.com/jose-pr/yaconfiglib/issues"
 [tool.hatch.build.targets.wheel.force-include]
 "README.md" = "yaconfiglib/README.md"
 
+# Each target needs its OWN exclude list: hatchling reads
+# tool.hatch.build.targets.<target>.exclude instead of tool.hatch.build.exclude
+# whenever the target defines one, so a global "*.local.*" would not reach these.
 [tool.hatch.build.targets.sdist]
-exclude = ["/.*"]
+exclude = ["/.*", "/benchmarks", "*.local.*"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/yaconfiglib"]
+exclude = ["*.local.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
