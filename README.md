@@ -141,15 +141,24 @@ TOML parser skip, and `-rs` lists them — but then the suite covers much less.
 
 This project follows [Semantic Versioning](https://semver.org/) and keeps a
 [`CHANGELOG.md`](CHANGELOG.md). Pushing a tag matching `v*` triggers the release
-workflow: test gate → build → publish → docs deploy.
+workflow: test gate → build → GitHub release → PyPI publish. A strict docs
+build runs alongside as a gate — it can fail the run, but it never blocks the
+publish, and it does not deploy. The Docs workflow owns the site and is
+dispatched once the release exists.
 
 ### Documentation site
 
-MkDocs builds the API reference from `docs/`, published on every release. To preview locally:
+MkDocs builds the API reference from `docs/`. The site is deployed by the
+Docs workflow: on pushes to `main` that touch `docs/`, `mkdocs.yml`, `src/` or
+the changelog, for each published release, and on manual dispatch. Between
+releases it therefore describes `main`, which may be ahead of PyPI.
+
+To preview locally, from a latest-Python venv (`bin/` instead of `Scripts/` on
+Unix):
 
 ```bash
-.venv/Scripts/pip install -e ".[docs]"
-.venv/Scripts/mkdocs serve
+.venv/3.14-nt-arm64/Scripts/pip install -e ".[docs,yaml,toml,jinja2]"
+.venv/3.14-nt-arm64/Scripts/mkdocs serve
 ```
 
 ---

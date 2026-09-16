@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.9", "3.13"]
+        python-version: ["3.9", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,7 +27,7 @@ jobs:
       - name: Install package with all extras
         run: python -m pip install -e ".[dev,yaml,toml,jinja2]"
       - name: Run tests
-        run: python -m pytest -q
+        run: python -m pytest -q -rs
 
   build:
     name: Build distribution
@@ -48,8 +48,10 @@ jobs:
           name: dist
           path: dist/
 
-  docs-build:
-    name: Build documentation site
+  # A gate, not a deploy: a broken docs build reddens the release run and
+  # blocks docs-dispatch, but never blocks build/publish. docs.yml owns Pages.
+  docs-gate:
+    name: Build documentation (gate)
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -57,30 +59,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - uses: actions/configure-pages@v5
       - name: Install package with docs tooling
         run: python -m pip install -e ".[dev,docs,yaml,toml,jinja2]"
       - name: Build docs
         run: mkdocs build --strict
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site/
-
-  docs-deploy:
-    name: Deploy documentation to GitHub Pages
-    needs: docs-build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
 
   github-release:
     name: Create GitHub Release
@@ -130,6 +112,9 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           body_path: release_notes.md
+          # Pin the release to the tagged commit; without it GitHub attaches
+          # the release to the default branch's tip.
+          target_commitish: ${{ github.sha }}
 
   publish-pypi:
     name: Publish to PyPI
@@ -148,3 +133,23 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A partially completed publish can be re-run instead of failing on
+          # the files PyPI already has.
+          skip-existing: true
+
+  # A release created with the workflow token starts no `release: published`
+  # run, so the docs deploy has to be asked for explicitly. workflow_dispatch
+  # is GitHub's documented exception to that rule.
+  docs-dispatch:
+    name: Dispatch the docs deployment
+    needs: [github-release, docs-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trigger docs.yml for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run docs.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
