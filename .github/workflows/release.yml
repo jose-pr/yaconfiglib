@@ -29,9 +29,35 @@ jobs:
       - name: Run tests
         run: python -m pytest -q -rs
 
+  # The declared floors, not the newest releases: an unexercised lower bound is
+  # a guess. The pins are derived from the installed metadata at job time, so
+  # pyproject.toml stays the only place they are written down.
+  test-floors:
+    name: Test lowest declared dependencies (py3.9)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: Install pip and packaging
+        run: python -m pip install --upgrade pip packaging
+      - name: Install the package without its dependencies
+        run: python -m pip install --no-deps -e .
+      - name: Derive the floor constraints
+        run: |
+          python .github/scripts/floor_constraints.py yaml toml jinja2 > "$RUNNER_TEMP/floors.txt"
+          cat "$RUNNER_TEMP/floors.txt"
+      - name: Install at the floors
+        run: python -m pip install -c "$RUNNER_TEMP/floors.txt" -e ".[yaml,toml,jinja2]" pytest
+      - name: Show what resolved
+        run: python -m pip list
+      - name: Run tests
+        run: python -m pytest -q -rs
+
   build:
     name: Build distribution
-    needs: test
+    needs: [test, test-floors]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

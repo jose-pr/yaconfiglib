@@ -91,6 +91,14 @@ Three workflows:
   dashboard access: push `ci-<something-unique>`, watch the run, then delete the
   tag locally and on the remote. A `ci-*` tag uploads every commit it reaches,
   and the run log is public.
+- **`test-floors`** — a job in both `test.yml` and `release.yml` (and a
+  prerequisite of `build`, so it gates a release). It installs the **lowest**
+  version each dependency declares, rather than the newest, because an
+  unexercised lower bound is a guess. `.github/scripts/floor_constraints.py`
+  derives the pins from the installed metadata at job time, so `pyproject.toml`
+  stays the only place a bound is written; the script exits non-zero if any
+  dependency declares no lower bound at all. Ubuntu, Python 3.9 — a floor has to
+  hold at the `requires-python` floor.
 - **`release.yml`** — triggered by a `v*` tag: test gate → build → GitHub
   release → PyPI publish (OIDC trusted publishing, `skip-existing` so a partial
   publish can be re-run). A strict docs build runs as a *gate*: it can redden the
@@ -114,6 +122,15 @@ well as the `v*` tag policy, or a push-triggered deploy is rejected.
    artifact members before trusting them.
 4. The owner pushes the `v*` tag. Verify afterwards by the workflow's jobs and by
    what actually appears on PyPI.
+
+## Dependency bounds
+
+A runtime dependency is bounded to the series that works: floor at the series'
+`.0` and ceiling at the next incompatible series (`>=6.0,<7`, or `>=0.9.0,<0.10`
+for a 0.x package). Raise a floor above `.0` **only** when the code needs an API
+a later release added, and say which API and which release. `dev` and `docs` stay
+unbounded — they cannot affect what a user installs — and the floor script
+ignores them.
 
 ## Versioning
 
