@@ -126,7 +126,9 @@ def _cleanup_temp_sources() -> None:
 _atexit.register(_cleanup_temp_sources)
 
 
-def _materialize_temp(content: str | bytes, encoding: str, suffix: str) -> Path:
+def _materialize_temp(
+    content: "_ty.Union[str, bytes]", encoding: "_ty.Optional[str]", suffix: str
+) -> Path:
     """Write *content* to a tracked temp file and return its Path.
 
     The suffix is reduced to a basename (separators stripped) so a virtual
@@ -134,7 +136,14 @@ def _materialize_temp(content: str | bytes, encoding: str, suffix: str) -> Path:
     file outside the temp directory.
     """
     mode = "w" if isinstance(content, str) else "wb"
-    kwargs = {"encoding": encoding} if isinstance(content, str) else {}
+    # newline="": a str payload keeps its own line endings. Without it a "\n"
+    # became "\r\n" on Windows, and a YAML block scalar gained a blank line
+    # per break.
+    kwargs = (
+        {"encoding": encoding or "utf-8", "newline": ""}
+        if isinstance(content, str)
+        else {}
+    )
     safe_suffix = _os.path.basename(str(suffix).replace("\\", "/")) if suffix else ""
     with _tempfile.NamedTemporaryFile(
         mode=mode, delete=False, suffix="-" + (safe_suffix or "source.yaml"), **kwargs
@@ -161,6 +170,58 @@ def _materialize_script(content: bytes, suffix: str) -> "tuple[str, str]":
     if _os.name != "nt":
         _os.chmod(target, 0o700)
     return directory, target
+
+
+def _encode_text(
+    content: str, encoding: "_ty.Optional[str]", fallback: bool
+) -> "_ty.Tuple[bytes, _ty.Optional[str]]":
+    """Encode in-memory text; return the bytes and the codec to read them with.
+
+    A `None` read codec means "whatever the call already uses". The fallback to
+    UTF-8 applies only where the requested codec cannot represent the text,
+    which is exactly where this used to raise.
+    """
+    codec = encoding or "utf-8"
+    try:
+        return content.encode(codec), None
+    except UnicodeEncodeError:
+        if not fallback:
+            raise
+        logger.debug(
+            "in-memory text cannot be encoded as %s; storing it as utf-8", codec
+        )
+        return content.encode("utf-8"), "utf-8"
+
+
+def _marker_view(
+    source: bytes, encoding: "_ty.Optional[str]"
+) -> "_ty.Union[str, bytes]":
+    """A view of *source* in which a ``#!`` marker can be recognized.
+
+    Bytes are returned untouched when the codec spells the marker in ASCII, so
+    a byte payload stays byte-exact for a backend that reads it raw. Only the
+    codecs that cannot — UTF-16/32, and anything with a BOM — are decoded, and
+    those are the ones that fail outright today.
+    """
+    codec = encoding or "utf-8"
+    if "#!\n".encode(codec) == b"#!\n":
+        return source
+    # Every codec that lands here (utf-8-sig, UTF-16/32) already drops the BOM
+    # on decode; the strip is for a codec that does not.
+    return source.decode(codec).removeprefix("\ufeff")
+
+
+def _materialize(filename: str, data: bytes) -> Path:
+    """Store *data* under *filename* as an in-memory (or temp-file) source."""
+    # Read the module global at call time: tests monkeypatch it to exercise the
+    # no-pathlib_next fallback.
+    mem_path = MemPath
+    if mem_path is not None:
+        path = mem_path(filename)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+    return _materialize_temp(data, None, filename)
 
 
 def _is_materialized_source(path: object) -> bool:
@@ -351,14 +412,23 @@ def _classify_source(source, base_dir, encoding, path_factory, recursive):
     * ``"literal"`` — one concrete path;
     * ``"pattern"`` — a glob, expanded on yield.
     """
-    path_marker = "#!"
-    if isinstance(source, bytes):
-        path_marker = path_marker.encode(encoding or "utf-8")
-
     if isinstance(source, _io.IOBase):
         return "inline", (source, None)
-    if isinstance(source, (str, bytes)) and source.startswith(path_marker):
-        return "inline", (source, path_marker)
+    if isinstance(source, str):
+        if source.startswith("#!"):
+            return "inline", (source, "#!")
+    elif isinstance(source, bytes):
+        # A codec that spells "#!" in ASCII leaves the payload untouched;
+        # UTF-16/32 and BOM codecs are decoded so their marker is findable.
+        view = _marker_view(source, encoding)
+        marker = "#!" if isinstance(view, str) else b"#!"
+        if view.startswith(marker):
+            return "inline", (view, marker)
+        raise TypeError(
+            "a bytes source must be an in-memory document starting with "
+            f"{marker!r} in the loader's encoding ({encoding or 'utf-8'}); "
+            "pass a path as str or Path instead"
+        )
 
     # A command is recognized ONLY from string text, and before any path
     # factory can rewrite it. A Path object is always a file, however its text
@@ -435,47 +505,41 @@ def _expand_pattern(path, glob_base, source, recursive):
     return path.parent.glob(path.name)
 
 
-def _materialize_inline(source, path_marker, encoding):
-    """Turn a stream or a ``#!`` document into a loadable path."""
+def _materialize_inline(
+    source, path_marker, encoding, *, text_fallback: bool = False
+) -> "_ty.Tuple[Path, _ty.Optional[str]]":
+    """Turn a stream or a ``#!`` document into a path, plus its read codec.
+
+    The read codec is ``None`` when the bytes are in the call's own codec,
+    which is the usual case; it is ``"utf-8"`` only when the requested codec
+    could not represent the text and *text_fallback* allowed storing it as
+    UTF-8 instead (where this used to raise `UnicodeEncodeError`).
+    """
     if path_marker is None:
         content = source.read()
-        if MemPath is not None:
-            # Unique name + default .yaml suffix so backend auto-detection
-            # works for an anonymous stream (YAML is yaconfiglib's default).
-            path = MemPath(f"stream-{next(_SOURCE_COUNTER)}.yaml")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if isinstance(content, str):
-                path.write_text(content, encoding=encoding)
-            else:
-                path.write_bytes(content)
-            return path
-        # Fallback to temp file if MemPath is not available
-        return _materialize_temp(content, encoding, ".yaml")
+        # Unique name + default .yaml suffix so backend auto-detection works
+        # for an anonymous stream (YAML is yaconfiglib's default).
+        filename = f"stream-{next(_SOURCE_COUNTER)}.yaml"
+    else:
+        newline = "\n" if isinstance(source, str) else b"\n"
+        name, content = source.split(newline, maxsplit=1)
+        logger.debug("loading config doc from memory ...")
+        name = name.removeprefix(path_marker)
+        if isinstance(name, bytes):
+            name = name.decode(encoding or "utf-8")
+        # Stripped, so "#!x.json\r" and a bare "#!\r" behave like their LF forms.
+        filename = name.strip()
+        if not filename:
+            # Unnamed in-memory docs each get a unique virtual name so two of
+            # them never share (and overwrite) one MemPath. The ``.yaml`` suffix
+            # keeps backend auto-detection working for a bare ``loads("...")``.
+            filename = f"mem-{next(_SOURCE_COUNTER)}.yaml"
 
-    newline = "\n"
-    if isinstance(source, bytes):
-        newline = newline.encode(encoding or "utf-8")
-    filename, content = source.split(newline, maxsplit=1)
-    logger.debug("loading config doc from memory ...")
-    filename = filename.removeprefix(path_marker)
-    if isinstance(filename, bytes):
-        filename = filename.decode(encoding or "utf-8")
-    if not filename:
-        # Unnamed in-memory docs each get a unique virtual name so two of them
-        # never share (and overwrite) one MemPath. The ``.yaml`` suffix keeps
-        # backend auto-detection working for a bare ``loads("...")`` (YAML is
-        # yaconfiglib's default).
-        filename = f"mem-{next(_SOURCE_COUNTER)}.yaml"
-    if MemPath is not None:
-        path = MemPath(filename)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(content, bytes):
-            path.write_bytes(content)
-        else:
-            path.write_text(content, encoding=encoding)
-        return path
-    # Fallback to temp file if MemPath is not available
-    return _materialize_temp(content, encoding, filename)
+    if isinstance(content, str):
+        data, read_encoding = _encode_text(content, encoding, text_fallback)
+    else:
+        data, read_encoding = content, None
+    return _materialize(filename, data), read_encoding
 
 
 def parse_sources(
@@ -487,6 +551,39 @@ def parse_sources(
     recursive: bool = None,
 ) -> _ty.Iterator[Path]:
     """Resolve *sources* into a flat stream of loadable :class:`Path`-like objects.
+
+    See :func:`_iter_sources` for the full contract; this is that generator with
+    the read-codec channel dropped, which is all a direct caller can use. In
+    particular it is **strict** about in-memory text: text the requested
+    *encoding* cannot represent raises `UnicodeEncodeError` rather than being
+    silently stored as UTF-8, because a caller here has no way to learn that the
+    codec changed.
+    """
+    for item, _read_encoding in _iter_sources(
+        sources,
+        base_dir=base_dir,
+        encoding=encoding,
+        memo=memo,
+        path_factory=path_factory,
+        recursive=recursive,
+    ):
+        yield item
+
+
+def _iter_sources(
+    sources: _ty.Iterable[SourceLike | _ty.Iterable[SourceLike]],
+    base_dir: Path = None,
+    encoding: str = None,
+    memo: _ty.Iterable[str | Path] = None,
+    path_factory: type[Path] = None,
+    recursive: bool = None,
+    *,
+    text_fallback: bool = False,
+) -> "_ty.Iterator[_ty.Tuple[_ty.Any, _ty.Optional[str]]]":
+    """Resolve *sources* into loadable paths, each with the codec to read it with.
+
+    This is the full contract; :func:`parse_sources` is this generator with the
+    codec channel dropped.
 
     Each item in *sources* may be:
 
@@ -501,8 +598,11 @@ def parse_sources(
       file, whatever its text looks like.
     * An in-memory document: a string/bytes value whose first line starts
       with ``#!``. The rest of that line is a virtual filename
-      (``"#!app.yaml\nkey: value"``); ``"#!\n..."`` gets a unique
-      ``mem-N.yaml`` name. Backend selection uses that name.
+      (``"#!app.yaml\nkey: value"``), whitespace-stripped, so a CRLF marker
+      line names the same file as an LF one; ``"#!\n..."`` gets a unique
+      ``mem-N.yaml`` name. Backend selection uses that name. The document's
+      own line endings are kept exactly as given, so a ``\r\n`` block scalar
+      loads as it would from a file.
     * An open stream — read once and materialized under a unique
       ``stream-N.yaml`` name.
     * A nested iterable of any of the above, flattened.
@@ -523,20 +623,37 @@ def parse_sources(
     Args:
         sources: Items to resolve, in order.
         base_dir: Directory relative sources resolve against.
-        encoding: Text encoding for in-memory documents and streams.
+        encoding: The codec bytes documents are read with, and the one
+            in-memory text is stored in; UTF-8 by default, on every platform.
+            Text this codec cannot represent raises `UnicodeEncodeError`
+            unless *text_fallback* is set. A **bytes** document in a codec
+            that does not spell ``#!`` in ASCII (UTF-16/32, ``utf-8-sig``) is
+            decoded so its marker can be found; any other bytes document is
+            stored byte-for-byte.
         memo: Keys already seen; updated in place. Accepts a set or any
             iterable.
         path_factory: Callable building a path from a string source.
         recursive: Whether glob expansion should recurse into
             subdirectories (``**``).
+        text_fallback: Store in-memory text as UTF-8 when *encoding* cannot
+            represent it, reporting that codec back, instead of raising
+            `UnicodeEncodeError`.
 
     Yields:
-        One path per resolved source, in order
-        (glob patterns may yield zero or many).
+        ``(item, read_encoding)`` per resolved source, in order (glob patterns
+        may yield zero or many). ``read_encoding`` is ``None`` for everything
+        the call's own codec already reads — files, glob matches, command
+        sources, and in-memory text that encoded cleanly; only a *text_fallback*
+        document names a codec of its own.
 
     Raises:
         ValueError: If a source is of an unsupported type. Raised while
             classifying, so it fires before any source loads.
+        TypeError: If a `bytes` source is not an in-memory document — it must
+            start with ``#!`` in *encoding*. A path belongs in a `str` or a
+            path object.
+        UnicodeEncodeError: If in-memory text cannot be represented in
+            *encoding* and *text_fallback* is not set.
     """
     path_factory = path_factory or Path
     if memo is None:
@@ -557,13 +674,15 @@ def parse_sources(
 
     for kind, payload in items:
         if kind == "inline":
-            yield _materialize_inline(payload[0], payload[1], encoding)
+            yield _materialize_inline(
+                payload[0], payload[1], encoding, text_fallback=text_fallback
+            )
             continue
 
         if kind == "command":
             # Passed through unresolved: CommandBackend runs the URI itself, and
             # a command is never deduplicated.
-            yield payload[0]
+            yield payload[0], None
             continue
 
         if kind == "literal":
@@ -573,7 +692,7 @@ def parse_sources(
                 logger.warning("ignoring duplicated file %s", path)
                 continue
             memo.add(key)
-            yield path
+            yield path, None
             continue
 
         path, glob_base, source = payload
@@ -587,4 +706,4 @@ def parse_sources(
                 logger.debug("skipping duplicate glob match %s", match)
                 continue
             memo.add(key)
-            yield match
+            yield match, None

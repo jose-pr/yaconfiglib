@@ -33,7 +33,7 @@ from .backends import ConfigBackend
 from .backends.command import CommandBackend
 from .utils.enum import IntEnum
 from .utils.merge import Merge, MergeMethod, is_array
-from .utils.source import CommandSource, SourceLike, parse_sources
+from .utils.source import CommandSource, SourceLike, _iter_sources
 from .utils.trust import (
     CommandsDisabledError,
     current_policy,
@@ -662,7 +662,10 @@ class ConfigLoader(ConfigBackend):
                 expansion during this call.
             encoding: Overrides the instance's *encoding* for this call,
                 including every ``!include``/``!load`` target that does not
-                set its own.
+                set its own. It applies to files, bytes documents and binary
+                streams. A `str` document or a text stream is already text: it
+                is stored in this codec, or in UTF-8 when this codec cannot
+                represent it, and read back accordingly.
             loader: Backend name, backend instance, or callable selecting
                 the backend for every source loaded in this call,
                 overriding per-source auto-detection.
@@ -735,17 +738,18 @@ class ConfigLoader(ConfigBackend):
             if not pathname:
                 pathname = ("#!\n",)
 
-            for path in parse_sources(
+            for path, read_encoding in _iter_sources(
                 pathname,
                 base_dir=self.base_dir,
                 encoding=encoding,
                 path_factory=self.path_factory,
                 recursive=recursive,
+                text_fallback=True,
             ):
                 try:
                     name, result = self._load(
                         path,
-                        encoding=encoding,
+                        encoding=read_encoding or encoding,
                         loader=loader,
                         transform=transform,
                         key_factory=key_factory,
@@ -883,7 +887,10 @@ class ConfigLoader(ConfigBackend):
             *pathname: Sources to resolve, same semantics as :meth:`load`.
             encoding: Overrides the instance's *encoding* for this call,
                 including every ``!include``/``!load`` target that does not
-                set its own.
+                set its own. It applies to files, bytes documents and binary
+                streams. A `str` document or a text stream is already text: it
+                is stored in this codec, or in UTF-8 when this codec cannot
+                represent it, and read back accordingly.
             interpolate: Overrides the instance's *interpolate* for this
                 call; applied independently to each yielded document.
             sandbox: Overrides the instance's *sandbox* for this call,
@@ -913,12 +920,13 @@ class ConfigLoader(ConfigBackend):
             _require_jinja2("key_factory='%...'")
         if interpolate:
             _require_jinja2("interpolate=True")
-        for path in parse_sources(
+        for path, read_encoding in _iter_sources(
             pathname,
             base_dir=self.base_dir,
             encoding=encoding,
             path_factory=self.path_factory,
             recursive=self.recursive,
+            text_fallback=True,
         ):
             value = None
             try:
@@ -933,7 +941,7 @@ class ConfigLoader(ConfigBackend):
                 ):
                     key, value = self._load(
                         path,
-                        encoding=encoding,
+                        encoding=read_encoding or encoding,
                         allow_commands=effective_allow,
                         **reader_args,
                     )
