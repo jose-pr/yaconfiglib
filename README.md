@@ -41,6 +41,7 @@ Optional dependencies:
 | `yaconfiglib[yaml]` | `pyyaml` | Parsing YAML configuration files and `!include` tags |
 | `yaconfiglib[toml]` | `tomli` (Python < 3.11 only) | Parsing TOML configuration files; 3.11+ uses the standard library `tomllib` |
 | `yaconfiglib[jinja2]` | `jinja2` | Jinja2 templating, environment variables injection, and transformations |
+| `yaconfiglib[transform]` | `jinja2` | Alias of `[jinja2]`, named after the `transform:` option of `!include`/`!load` and `ConfigLoader.load()` |
 
 ---
 
