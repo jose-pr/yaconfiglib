@@ -42,6 +42,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- With `interpolate=True`, a bare `{{ expr }}` keeps the expression's type only when
+  nothing but a trailing newline surrounds it; with leading or trailing spaces the value
+  renders as a string. A YAML `|`/`>` block scalar still yields the expression's type.
+- With `strict=True`, a reference cycle between two top-level keys raises
+  `ValueError: interpolation reference cycle: a -> b -> a` instead of rendering each
+  value once against the other's current text.
+- An included file's templates now render in the merged document, so a reference to one
+  of that file's own keys must go through the key it was included under
+  (`{{ svc.name }}` rather than `{{ name }}`).
 - A relative `!include`/`!load` path is now resolved relative to the including file —
   that file's own directory, at every depth, `.yaml.j2` templates included. Previously it
   resolved against the loader's `base_dir` (by default the working directory), so a
@@ -72,6 +81,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saw.
 
 ### Fixed
+- Values pulled in with `!include`/`!load` are now rendered together with the document
+  that includes them when `interpolate=True`: an included file's templates can refer to
+  the including document's keys, and an escaped literal such as `{{ '{{ x }}' }}` in an
+  included file is no longer rendered a second time. References between templated values
+  resolve fully in any order (`logs: "{{ base }}/logs"`, `err: "{{ logs }}/err"`);
+  previously a literal `{{ base }}` could survive into the result.
 - An `encoding=` passed to `ConfigLoader.load()`, `ConfigLoader.load_all()` or
   `yaconfiglib.load()` now applies, at every depth, to the files, templates and
   commands pulled in with `!include`/`!load` that do not set their own `encoding`.

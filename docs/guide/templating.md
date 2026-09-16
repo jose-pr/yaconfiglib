@@ -8,7 +8,9 @@ templates before parsing them. Both require `yaconfiglib[jinja2]`.
 
 Pass `interpolate=True` to render every string value in the loaded result
 as a Jinja2 template, with the rest of the loaded document available as
-template globals:
+template globals. Rendering happens **once, after every source has been
+merged**, so values pulled in with `!include` see the including document's
+keys too — and nothing is rendered twice:
 
 ```yaml
 # config.yaml
@@ -24,9 +26,9 @@ config = yaconfiglib.load("config.yaml", interpolate=True)
 print(config.url)  # "http://localhost:8080"
 ```
 
-A bare `{{ expr }}` (no surrounding text) is evaluated as a Python
-expression rather than rendered to a string, so the result keeps its
-original type:
+A bare `{{ expr }}` (nothing else but an optional trailing newline) is
+evaluated as a Python expression rather than rendered to a string, so the
+result keeps its original type:
 
 ```yaml
 port: "{{ 8000 + 80 }}"   # -> 8080 (int), not "8080" (str)
@@ -46,15 +48,27 @@ database_url: "{{ env.DATABASE_URL }}"
 `env` is `os.environ` — any environment variable is reachable as
 `env.VAR_NAME`.
 
-## Referencing earlier values with `{% do %}`
+## Referencing other values
 
-Jinja2's `do` extension (enabled by default) lets you build up values
-across a template:
+A value may refer to any other top-level key, in any order. Keys are
+rendered after the keys they refer to, so chains resolve completely:
 
 ```yaml
 base_path: "/srv/app"
 log_path: "{{ base_path }}/logs"
+error_log: "{{ log_path }}/error.log"   # -> "/srv/app/logs/error.log"
 ```
+
+Inside a mapping, a reference to that same mapping (`db.url` using
+`{{ db.host }}`) sees the values written before it, in document order.
+
+A cycle between two keys (`a` referring to `b` and `b` to `a`) cannot
+resolve. With `strict=True` it raises `ValueError`; otherwise each value is
+rendered once against what the other holds at that moment.
+
+An included file's templates are rendered in the **merged** document, so a
+reference to the included file's own key goes through the key it was
+included under — `{{ svc.name }}`, not `{{ name }}`.
 
 ## Strict mode
 
