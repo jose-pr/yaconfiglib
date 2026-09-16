@@ -4,7 +4,9 @@ Tests for Jinja2 interpolation utilities (utils/jinja2.py).
 
 import pytest
 
-from yaconfiglib.utils import jinja2 as j2
+pytest.importorskip("jinja2")
+
+from yaconfiglib.utils import jinja2 as j2  # noqa: E402 - needs the skip above
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +139,10 @@ class TestLoaderInterpolationFeatures:
         from yaconfiglib import ConfigLoader
         from yaconfiglib.backends.python_backend import PythonBackend
 
+        import jinja2.exceptions
+
         loader = ConfigLoader(interpolate=True, strict=True)
-        with pytest.raises(Exception):
+        with pytest.raises(jinja2.exceptions.UndefinedError):
             loader.load(loader=PythonBackend({"value": "{{ missing_var }}"}))
 
 

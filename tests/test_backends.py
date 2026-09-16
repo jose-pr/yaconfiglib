@@ -5,11 +5,12 @@ import sys
 import pytest
 import subprocess
 
+import _extras
+
 from yaconfiglib import ConfigLoader
 from yaconfiglib.backends.base import ConfigBackend
 from yaconfiglib.backends.dotenv import DotenvBackend
 from yaconfiglib.backends.env import EnvVarBackend
-from yaconfiglib.backends.jinja2 import Jinja2ConfigLoader
 from yaconfiglib.backends.python_backend import PythonBackend
 from yaconfiglib.backends.command import CommandBackend
 
@@ -89,9 +90,13 @@ class TestRegistryBackends:
         result = loader.load(loader=PythonBackend(data))
         assert result == data
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_jinja_backend_registered_by_name(self):
+        from yaconfiglib.backends.jinja2 import Jinja2ConfigLoader
+
         assert ConfigBackend.get_class_by_name("jinja2") is Jinja2ConfigLoader
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_jinja_backend_accepts_custom_environment(self, tmp_path):
         from jinja2 import Environment
 
@@ -104,6 +109,7 @@ class TestRegistryBackends:
         result = loader.load("config.yaml.j2", environment=environment)
         assert result == {"value": "from-env"}
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_jinja_backend_falls_back_to_temp_file_without_pathlib_next(
         self, tmp_path, monkeypatch
     ):
@@ -128,12 +134,14 @@ class TestRegistryBackends:
 
 
 class TestCommandBackend:
+    @pytest.mark.usefixtures("needs_yaml")
     def test_cmd_basic_execution_sniffing(self):
         loader = ConfigLoader()
         cmd = "cmd://python -c \"print({'a': 1, 'b': 2})\""
         result = loader.load(cmd)
         assert result == {"a": 1, "b": 2}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_cmd_explicit_format(self):
         loader = ConfigLoader()
         cmd = "cmd+yaml://python -c \"print('x: 10')\""
@@ -174,6 +182,7 @@ class TestCommandBackend:
         else:
             assert result == {"unix": True}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_yaml_dynamic_include_command(self, tmp_path):
         yaml_content = (
             "config:\n"
@@ -212,6 +221,7 @@ class TestCommandBackend:
         assert "Unknown configuration format/loader" in str(exc_info.value)
 
 
+@pytest.mark.usefixtures("needs_yaml")
 class TestYamlIncludeRegistration:
     def test_manual_include_registration_warns(self, caplog):
         """A pre-existing !include constructor is overridden with a warning.
@@ -272,6 +282,7 @@ class TestIncludePathResolution:
     @pytest.mark.parametrize(
         "path_factory_name", ["default_path_factory", "stdlib_path_factory"]
     )
+    @pytest.mark.usefixtures("needs_yaml")
     def test_sibling_include_from_another_cwd(
         self, tmp_path, monkeypatch, path_factory_name
     ):
@@ -287,6 +298,7 @@ class TestIncludePathResolution:
 
         assert result == {"db": {"host": "from-conf"}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_sibling_include_with_absolute_top_level_path(self, tmp_path, monkeypatch):
         conf, elsewhere = self._tree(tmp_path)
         monkeypatch.chdir(elsewhere)
@@ -295,6 +307,7 @@ class TestIncludePathResolution:
 
         assert result == {"db": {"host": "from-conf"}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_nested_include_resolves_against_each_including_file(
         self, tmp_path, monkeypatch
     ):
@@ -312,6 +325,7 @@ class TestIncludePathResolution:
 
         assert result == {"x": {"y": {"z": 1}}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_same_relative_name_at_each_depth_is_not_a_cycle(self, tmp_path):
         conf = tmp_path / "conf"
         (conf / "x" / "x").mkdir(parents=True)
@@ -324,6 +338,7 @@ class TestIncludePathResolution:
         assert result == {"x": {"y": {"z": 1}}}
 
     @pytest.mark.parametrize("form", ["sequence", "mapping"])
+    @pytest.mark.usefixtures("needs_yaml")
     def test_every_sequence_and_mapping_source_is_rebased(
         self, tmp_path, monkeypatch, form
     ):
@@ -344,6 +359,7 @@ class TestIncludePathResolution:
         expected = {"a": 1, "b": 2} if form == "sequence" else {"a": 1}
         assert result == {"o": expected}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_glob_include_expands_next_to_including_file(self, tmp_path, monkeypatch):
         conf = tmp_path / "conf"
         (conf / "parts").mkdir(parents=True)
@@ -358,6 +374,7 @@ class TestIncludePathResolution:
 
         assert result == {"all": {"a": 1, "b": 2}}
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_jinja2_template_include_resolves_next_to_template(
         self, tmp_path, monkeypatch
     ):
@@ -379,6 +396,7 @@ class TestIncludePathResolution:
             == 1
         )
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_relative_base_dir_is_not_joined_twice(self, tmp_path, monkeypatch):
         conf, _elsewhere = self._tree(tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -387,6 +405,7 @@ class TestIncludePathResolution:
 
         assert result == {"db": {"host": "from-conf"}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_absolute_include_path_is_unchanged(self, tmp_path, monkeypatch):
         conf, elsewhere = self._tree(tmp_path)
         other = tmp_path / "other.toml"
@@ -401,6 +420,7 @@ class TestIncludePathResolution:
         assert result == {"db": {"host": "from-other"}}
 
     @pytest.mark.parametrize("materialized_as", ["mempath", "tempfile"])
+    @pytest.mark.usefixtures("needs_yaml")
     def test_in_memory_document_include_uses_base_dir(
         self, tmp_path, monkeypatch, materialized_as
     ):
@@ -415,6 +435,7 @@ class TestIncludePathResolution:
 
         assert result == {"d": {"host": "from-conf"}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_command_output_include_uses_base_dir(self, tmp_path, monkeypatch):
         conf, elsewhere = self._tree(tmp_path)
         monkeypatch.chdir(elsewhere)
@@ -425,6 +446,7 @@ class TestIncludePathResolution:
 
         assert result == {"d": {"host": "from-conf"}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_file_relative_script_include_still_blocked(self, tmp_path, monkeypatch):
         from yaconfiglib import CommandsDisabledError
 
@@ -437,6 +459,7 @@ class TestIncludePathResolution:
             ConfigLoader(allow_commands=False).load(str(conf / "app.yaml"))
 
 
+@pytest.mark.usefixtures("needs_yaml")
 class TestIncludeInheritsCallEncoding:
     """A per-call encoding= applies to every include target, at every depth."""
 
@@ -569,6 +592,7 @@ class TestIncludeInheritsCallEncoding:
         assert result == expected
 
 
+@pytest.mark.usefixtures("needs_yaml")
 class TestPrivateSafeLoader:
     """!include/!load must never be armed on the shared yaml.SafeLoader."""
 
@@ -636,6 +660,7 @@ class TestPrivateSafeLoader:
             YamlConfig().load(str(parent))
 
 
+@pytest.mark.usefixtures("needs_jinja2")
 class TestJinja2SourceTrust:
     """.j2 sources follow the load's sandbox/allow_commands/strict settings."""
 
@@ -816,6 +841,7 @@ class TestCommandOutputEncoding:
         assert result == "café"
 
 
+@pytest.mark.usefixtures("needs_jinja2")
 class TestJinja2TemplateNaming:
     """A .j2 template must keep the format extension it renders to."""
 
@@ -845,13 +871,33 @@ class TestDotenvDispatch:
     @pytest.mark.parametrize(
         "name, expected",
         [
-            ("app.env.yaml", "YamlConfig"),
-            (".env.yaml", "YamlConfig"),
+            pytest.param(
+                "app.env.yaml",
+                "YamlConfig",
+                marks=_extras.needs_yaml,
+            ),
+            pytest.param(
+                ".env.yaml",
+                "YamlConfig",
+                marks=_extras.needs_yaml,
+            ),
             ("x.env.json", "JsonConfig"),
-            ("x.env.toml", "TomlConfig"),
+            pytest.param(
+                "x.env.toml",
+                "TomlConfig",
+                marks=_extras.needs_toml,
+            ),
             ("x.env.ini", "IniConfig"),
-            (".env.j2", "Jinja2ConfigLoader"),
-            ("config.env.yaml.j2", "Jinja2ConfigLoader"),
+            pytest.param(
+                ".env.j2",
+                "Jinja2ConfigLoader",
+                marks=_extras.needs_jinja2,
+            ),
+            pytest.param(
+                "config.env.yaml.j2",
+                "Jinja2ConfigLoader",
+                marks=_extras.needs_jinja2,
+            ),
             (".env", "DotenvBackend"),
             (".env.local", "DotenvBackend"),
             (".env.development.local", "DotenvBackend"),
@@ -879,22 +925,26 @@ class TestDotenvDispatch:
             is ZzzEnvFmt
         )
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_env_yaml_file_loads_as_yaml(self, tmp_path):
         (tmp_path / "app.env.yaml").write_text("db:\n  host: h\n  port: 5432\n")
         result = ConfigLoader(base_dir=tmp_path).load("app.env.yaml")
         assert result == {"db": {"host": "h", "port": 5432}}
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_env_j2_renders(self, tmp_path):
         (tmp_path / ".env.j2").write_text("KEY={{ 1 + 1 }}\n")
         result = ConfigLoader(base_dir=tmp_path).load(".env.j2")
         assert result == {"key": "2"}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_include_of_env_yaml_file(self, tmp_path):
         (tmp_path / "app.env.yaml").write_text("host: h\n")
         (tmp_path / "main.yaml").write_text("inc: !include app.env.yaml\n")
         result = ConfigLoader(base_dir=tmp_path).load("main.yaml")
         assert result == {"inc": {"host": "h"}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_unregistered_format_suffix_is_not_claimed(self, monkeypatch):
         import pathlib
 
@@ -911,8 +961,20 @@ class TestBackendIOContract:
         [
             ("json", "c.json", '{"a": 1}', {"a": 1}),
             ("ini", "c.ini", "[s]\na = 1\n", {"s": {"a": "1"}}),
-            ("toml", "c.toml", "a = 1\n", {"a": 1}),
-            ("jinja2", "c.yaml.j2", "a: {{ 1 }}\n", {"a": 1}),
+            pytest.param(
+                "toml",
+                "c.toml",
+                "a = 1\n",
+                {"a": 1},
+                marks=_extras.needs_toml,
+            ),
+            pytest.param(
+                "jinja2",
+                "c.yaml.j2",
+                "a: {{ 1 }}\n",
+                {"a": 1},
+                marks=[_extras.needs_jinja2, _extras.needs_yaml],
+            ),
         ],
     )
     def test_str_path_accepted(self, tmp_path, backend_name, name, body, expected):
@@ -928,6 +990,7 @@ class TestBackendIOContract:
             ("!ini", "ini", "c.ini", "[s]\na = 1\n", {"s": {"a": "1"}}),
         ],
     )
+    @pytest.mark.usefixtures("needs_yaml")
     def test_backend_as_yaml_tag_constructor(
         self, tmp_path, tag, backend_name, name, body, expected
     ):
@@ -1263,6 +1326,7 @@ class TestMissingOptionalBackend:
         )
         assert "yaconfiglib[yaml]" in done.stdout, done.stdout + done.stderr
 
+    @pytest.mark.usefixtures("needs_jinja2", "needs_toml", "needs_yaml")
     def test_optional_backend_table_matches_classes(self):
         from yaconfiglib.backends import _OPTIONAL_BACKENDS
         from yaconfiglib.backends.ini import IniConfig  # noqa: F401 - registry
@@ -1313,6 +1377,7 @@ class TestEnvVarCollisions:
         assert EnvVarBackend().load(prefix="zzenv7_") == {}
 
 
+@pytest.mark.usefixtures("needs_yaml")
 class TestPythonBackendDocs:
     def test_documented_layering_example(self, tmp_path):
         from yaconfiglib import ConfigLoaderMergeMethod

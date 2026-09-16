@@ -11,8 +11,6 @@ from yaconfiglib import ConfigLoader
 from yaconfiglib.loader import ConfigLoaderMergeMethod
 from yaconfiglib.utils.source import parse_sources
 
-EXAMPLES = pathlib.Path(__file__).parent.parent / "examples"
-
 
 # ---------------------------------------------------------------------------
 # Basic loading
@@ -20,6 +18,7 @@ EXAMPLES = pathlib.Path(__file__).parent.parent / "examples"
 
 
 class TestBasicLoading:
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_yaml(self, tmp_path):
         f = tmp_path / "cfg.yaml"
         f.write_text("key: value\nnumber: 42\n")
@@ -60,6 +59,7 @@ class TestBasicLoading:
 
 
 class TestMergeMethods:
+    @pytest.mark.usefixtures("needs_yaml")
     def test_simple_merge(self, tmp_path):
         (tmp_path / "a.yaml").write_text("x: 1\ny: 2\n")
         (tmp_path / "b.yaml").write_text("y: 99\nz: 3\n")
@@ -67,6 +67,7 @@ class TestMergeMethods:
         result = loader.load("a.yaml", "b.yaml")
         assert result == {"x": 1, "y": 99, "z": 3}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_deep_merge(self, tmp_path):
         (tmp_path / "a.yaml").write_text("db:\n  host: localhost\n  port: 5432\n")
         (tmp_path / "b.yaml").write_text("db:\n  port: 5433\n  name: mydb\n")
@@ -74,6 +75,7 @@ class TestMergeMethods:
         result = loader.load("a.yaml", "b.yaml")
         assert result == {"db": {"host": "localhost", "port": 5433, "name": "mydb"}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_deep_merge_options_reach_loader_merge(self, tmp_path):
         (tmp_path / "a.yaml").write_text("items:\n  - name: api\n    enabled: false\n")
         (tmp_path / "b.yaml").write_text("items:\n  - name: api\n    enabled: true\n")
@@ -85,6 +87,7 @@ class TestMergeMethods:
         result = loader.load("a.yaml", "b.yaml")
         assert result == {"items": [{"name": "api", "enabled": True}]}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_substitute_merge(self, tmp_path):
         (tmp_path / "a.yaml").write_text("list: [1, 2, 3]\n")
         (tmp_path / "b.yaml").write_text("list: [4, 5]\n")
@@ -95,6 +98,7 @@ class TestMergeMethods:
         # Substitute: lists always replace
         assert result["list"] == [4, 5]
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_last_merge(self, tmp_path):
         (tmp_path / "a.yaml").write_text("val: first\n")
         (tmp_path / "b.yaml").write_text("val: second\n")
@@ -102,6 +106,7 @@ class TestMergeMethods:
         result = loader.load("a.yaml", "b.yaml")
         assert result == {"val": "second"}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_list_merge(self, tmp_path):
         (tmp_path / "a.yaml").write_text("val: first\n")
         (tmp_path / "b.yaml").write_text("val: second\n")
@@ -110,6 +115,7 @@ class TestMergeMethods:
         assert isinstance(result, list)
         assert len(result) == 2
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_simple_top_level_list_documents_replace(self, tmp_path):
         (tmp_path / "a.yaml").write_text("- a\n- b\n- c\n", encoding="utf-8")
         (tmp_path / "b.yaml").write_text("- x\n", encoding="utf-8")
@@ -132,38 +138,47 @@ class TestMergeMethods:
 
 
 class TestExamples:
-    def test_load_includeme_yaml(self):
-        loader = ConfigLoader(base_dir=EXAMPLES)
+    @pytest.mark.usefixtures("needs_yaml")
+    def test_load_includeme_yaml(self, examples_dir):
+        loader = ConfigLoader(base_dir=examples_dir)
         result = loader.load("includeme.yaml")
         assert result == {"include": {"me": True}}
 
-    def test_load_hiera_yaml_raw(self):
+    @pytest.mark.usefixtures("needs_yaml")
+    def test_load_hiera_yaml_raw(self, examples_dir):
         """hiera.yaml contains Jinja expressions — load raw (no interpolation)."""
-        loader = ConfigLoader(base_dir=EXAMPLES)
+        loader = ConfigLoader(base_dir=examples_dir)
         result = loader.load("hiera.yaml")
-        # Raw load: values are template strings, not yet rendered
-        assert isinstance(result, dict)
+        # Raw load: the values are template strings, not yet rendered.
+        assert result == {
+            "{{ pathname.stem }}": "{{ 10 }}",
+            "root2": "{{ dict(d=1) }}",
+        }
 
-    def test_load_settings_json(self):
-        loader = ConfigLoader(base_dir=EXAMPLES)
+    def test_load_settings_json(self, examples_dir):
+        loader = ConfigLoader(base_dir=examples_dir)
         result = loader.load("settings.json")
         assert isinstance(result, dict)
         assert "python.testing.pytestEnabled" in result
 
-    def test_load_test_ini(self):
-        loader = ConfigLoader(base_dir=EXAMPLES)
+    def test_load_test_ini(self, examples_dir):
+        loader = ConfigLoader(base_dir=examples_dir)
         result = loader.load("test.ini")
-        assert isinstance(result, dict)
+        assert result["Section"] == {"propa": "b", "propb": "10"}
 
-    def test_advanced_example_loads_from_any_cwd(self, tmp_path, monkeypatch):
+    @pytest.mark.usefixtures("needs_yaml")
+    def test_advanced_example_loads_from_any_cwd(
+        self, tmp_path, monkeypatch, examples_dir
+    ):
         """The example's includes are relative to advanced.yaml, not to the CWD."""
         monkeypatch.chdir(tmp_path)
 
-        result = ConfigLoader().load(str(EXAMPLES / "advanced.yaml"))
+        result = ConfigLoader().load(str(examples_dir / "advanced.yaml"))
 
         assert result["database_config"]["python.testing.pytestEnabled"] is True
         assert result["dynamic_includes"] == {"includeme.yaml": {"me": True}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_glob_loading(self, tmp_path):
         for name in ("a.yaml", "b.yaml", "c.yaml"):
             (tmp_path / name).write_text(f"file: {name}\n")
@@ -178,12 +193,14 @@ class TestExamples:
         paths = list(parse_sources(["*.yaml"], base_dir=tmp_path))
         assert sorted(path.name for path in paths) == ["a.yaml", "b.yaml"]
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_duplicate_path_source_loads_once(self, tmp_path):
         (tmp_path / "a.yaml").write_text("file: a.yaml\n")
         loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.List)
         result = loader.load("a.yaml", "a.yaml")
         assert result == [{"file": "a.yaml"}]
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_nested_source_iterables_are_flattened(self, tmp_path):
         for name in ("a.yaml", "b.yaml", "c.yaml"):
             (tmp_path / name).write_text(f"file: {name}\n")
@@ -205,6 +222,7 @@ class TestExamples:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("needs_yaml")
 class TestLoadAll:
     def test_load_all_yields_each(self, tmp_path):
         (tmp_path / "a.yaml").write_text("a: 1\n")
@@ -312,6 +330,7 @@ class TestTopLevelAPI:
 
         assert result["app"]["y"] == "2"
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_load_forwards_j2_environment(self, tmp_path):
         from jinja2 import Environment
 
@@ -326,6 +345,7 @@ class TestTopLevelAPI:
 
         assert result == {"value": "from-env"}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_module_load_allow_commands_false_blocks_include(self, tmp_path):
         import yaconfiglib
         from yaconfiglib import CommandsDisabledError
@@ -338,6 +358,7 @@ class TestTopLevelAPI:
         with pytest.raises(CommandsDisabledError):
             yaconfiglib.load(str(doc), allow_commands=False)
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_loads_constructor_only_strict_option(self):
         from jinja2.exceptions import UndefinedError
 
@@ -346,6 +367,7 @@ class TestTopLevelAPI:
         with pytest.raises(UndefinedError):
             yaconfiglib.loads("a: '{{ missing }}'", interpolate=True, strict=True)
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_module_load_merge_applies_to_include_glob(self, tmp_path):
         import yaconfiglib
 
@@ -360,11 +382,13 @@ class TestTopLevelAPI:
 
         assert result["conf"]["db"] == {"host": "a", "port": 2}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_loads_merge_none_uses_default(self):
         import yaconfiglib
 
         assert yaconfiglib.loads("a: 1", merge=None) == {"a": 1}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_dumps_loaded_config_round_trips(self):
         import yaconfiglib
 
@@ -377,6 +401,7 @@ class TestTopLevelAPI:
         assert "python/" not in out
         assert yaconfiglib.loads(out) == yaconfiglib.loads(original)
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_dump_file_round_trip_of_loaded_config(self, tmp_path):
         import yaconfiglib
 
@@ -388,11 +413,13 @@ class TestTopLevelAPI:
 
         assert yaconfiglib.load(str(target)) == {"a": 1, "b": {"c": 2}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_dumps_keeps_exact_type_representers(self):
         import yaconfiglib
 
         assert "!!python/tuple" in yaconfiglib.dumps({"t": (1, 2)})
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_dumps_does_not_modify_global_yaml_dumper(self):
         import yaml
 
@@ -417,6 +444,7 @@ class TestTopLevelAPI:
         result = loads('{"hello": "world"}', loader="json")
         assert result == {"hello": "world"}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_dumps_obj(self):
         from yaconfiglib import dumps
 
@@ -424,6 +452,7 @@ class TestTopLevelAPI:
         result = dumps(data)
         assert "foo: bar" in result
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_dump_file_path(self, tmp_path):
         from yaconfiglib import dump, load
 
@@ -435,6 +464,7 @@ class TestTopLevelAPI:
         loaded = load(str(f))
         assert loaded == {"key": "val"}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_dump_file_pointer(self, tmp_path):
         import io
         from yaconfiglib import dump
@@ -453,6 +483,7 @@ class TestTopLevelAPI:
 
 
 class TestLoaderStateHygiene:
+    @pytest.mark.usefixtures("needs_yaml")
     def test_merge_options_override_does_not_leak(self, tmp_path):
         (tmp_path / "a.yaml").write_text("items:\n  - 1\n")
         loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Deep)
@@ -492,6 +523,7 @@ class TestLoaderStateHygiene:
         assert not hasattr(utils, "getLogger")
         assert not hasattr(log, "getLogger")
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_flatten_skips_empty_hash_member(self, tmp_path):
         (tmp_path / "one.yaml").write_text("a: 1\n", encoding="utf-8")
         (tmp_path / "empty.yaml").write_text("", encoding="utf-8")
@@ -502,6 +534,7 @@ class TestLoaderStateHygiene:
 
         assert result == {"a": 1}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_flatten_skips_empty_list_member(self, tmp_path):
         (tmp_path / "one.yaml").write_text("- 1\n", encoding="utf-8")
         (tmp_path / "empty.yaml").write_text("", encoding="utf-8")
@@ -512,6 +545,7 @@ class TestLoaderStateHygiene:
 
         assert result == [1]
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_flatten_non_mapping_member_raises_type_error(self, tmp_path):
         (tmp_path / "one.yaml").write_text("a: 1\n", encoding="utf-8")
         (tmp_path / "scalar.yaml").write_text("42\n", encoding="utf-8")
@@ -532,6 +566,7 @@ class TestSecurityControls:
         with pytest.raises(CommandsDisabledError):
             loader.load("cmd://python -c \"print({'a': 1})\"")
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_commands_blocked_via_include(self, tmp_path):
         import pytest
 
@@ -545,6 +580,7 @@ class TestSecurityControls:
         with pytest.raises(CommandsDisabledError):
             loader.load("main.yaml")
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_commands_allowed_by_default(self):
         from yaconfiglib import ConfigLoader
 
@@ -560,6 +596,7 @@ class TestSecurityControls:
         with pytest.raises(CommandsDisabledError):
             loader.load('cmd://python -c "print(1)"', allow_commands=False)
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_sandbox_blocks_ssti(self):
         import pytest
         from jinja2.exceptions import SecurityError
@@ -572,6 +609,7 @@ class TestSecurityControls:
         with pytest.raises(SecurityError):
             ConfigLoader(interpolate=True, sandbox=True).load(payload)
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_sandbox_allows_ordinary_interpolation(self):
         from yaconfiglib import ConfigLoader
 
@@ -579,6 +617,7 @@ class TestSecurityControls:
         result = ConfigLoader(interpolate=True, sandbox=True).load(payload)
         assert result["greeting"] == "hello world"
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_sandbox_allows_pure_expression_interpolation(self):
         # Regression: a BARE `{{ expr }}` value routes through the
         # type-preserving eval() path, whose result capture used to be
@@ -593,6 +632,7 @@ class TestSecurityControls:
         result = ConfigLoader(interpolate=True, sandbox=True).load(payload)
         assert result["greeting"] == "world"
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_sandbox_pure_expression_preserves_type(self):
         # The eval() path exists to keep non-string types; verify it still does
         # so inside the sandbox rather than degrading to a rendered string.
@@ -631,6 +671,7 @@ class TestIncludeTrustPolicy:
         path.write_text(text, encoding="utf-8")
         return path
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_mapping_cannot_reenable_commands_under_checklist(self, tmp_path):
         import yaconfiglib
         from yaconfiglib import CommandsDisabledError
@@ -650,6 +691,7 @@ class TestIncludeTrustPolicy:
             )
         assert not marker.exists()
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_mapping_cannot_disable_sandbox(self, tmp_path):
         from jinja2.exceptions import SecurityError
 
@@ -662,6 +704,7 @@ class TestIncludeTrustPolicy:
         with pytest.raises(SecurityError):
             ConfigLoader(interpolate=True, sandbox=True).load(str(doc))
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_mapping_transform_is_sandboxed(self, tmp_path):
         from jinja2.exceptions import SecurityError
 
@@ -674,6 +717,7 @@ class TestIncludeTrustPolicy:
         with pytest.raises(SecurityError):
             ConfigLoader(sandbox=True).load(str(doc))
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_mapping_key_factory_expression_is_sandboxed(self, tmp_path):
         from jinja2.exceptions import SecurityError
 
@@ -686,6 +730,7 @@ class TestIncludeTrustPolicy:
         with pytest.raises(SecurityError):
             ConfigLoader(sandbox=True).load(str(doc))
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_mapping_transform_sandboxed_when_commands_disabled(self, tmp_path):
         from jinja2.exceptions import SecurityError
 
@@ -698,6 +743,7 @@ class TestIncludeTrustPolicy:
         with pytest.raises(SecurityError):
             ConfigLoader(allow_commands=False).load(str(doc))
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_mapping_plain_key_factory_is_dropped(self, tmp_path, caplog):
         import logging
 
@@ -720,6 +766,7 @@ class TestIncludeTrustPolicy:
         assert result == {"x": {"a": 1}}
         assert any("key_factory" in rec.getMessage() for rec in caplog.records)
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_per_call_allow_commands_reaches_scalar_include(self, tmp_path):
         from yaconfiglib import CommandsDisabledError
 
@@ -729,6 +776,7 @@ class TestIncludeTrustPolicy:
             ConfigLoader().load(str(doc), allow_commands=False)
         assert not marker.exists()
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_per_call_sandbox_reaches_scalar_include(self, tmp_path):
         from jinja2.exceptions import SecurityError
 
@@ -737,6 +785,7 @@ class TestIncludeTrustPolicy:
         with pytest.raises(SecurityError):
             ConfigLoader(interpolate=True).load(str(doc), sandbox=True)
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_hand_registered_tag_constructor_filters_mapping(self, tmp_path):
         import yaml
 
@@ -764,6 +813,7 @@ class TestIncludeTrustPolicy:
                 assert current_policy() == (False, True, False)
         assert current_policy() == (True, False, False)
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_documented_transform_and_key_factory_work_sandboxed(self, tmp_path):
         child = self._write(tmp_path / "child.yaml", "include:\n  me: true\n")
         doc = self._write(
@@ -775,6 +825,7 @@ class TestIncludeTrustPolicy:
         result = ConfigLoader(sandbox=True).load(str(doc))
         assert result == {"x": {"child.yaml": {"me": True}}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_mapping_loader_command_still_blocked(self, tmp_path):
         from yaconfiglib import CommandsDisabledError
 
@@ -786,17 +837,20 @@ class TestIncludeTrustPolicy:
             ConfigLoader(allow_commands=False).load(str(doc))
         assert not marker.exists()
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_advanced_example_includes_still_load(self, monkeypatch):
         repo_root = pathlib.Path(__file__).resolve().parent.parent
         monkeypatch.chdir(repo_root)
         result = ConfigLoader().load("examples/advanced.yaml")
         assert result["dynamic_includes"] == {"includeme.yaml": {"me": True}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_sequence_include_form(self, tmp_path):
         child = self._write(tmp_path / "child.yaml", "b: 2\n")
         doc = self._write(tmp_path / "u.yaml", f'x: !include ["{child.as_posix()}"]\n')
         assert ConfigLoader().load(str(doc)) == {"x": {"b": 2}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_caller_transform_still_applies(self, tmp_path):
         doc = self._write(tmp_path / "u.yaml", "a: 5\n")
         assert ConfigLoader().load(str(doc), transform="value.a") == 5
@@ -812,6 +866,7 @@ class TestIncludeTrustPolicy:
 class TestUntrustedRobustness:
     """A config author must not be able to hang, exhaust or mutate the host."""
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_aliased_yaml_interpolates_in_linear_time(self):
         import time
 
@@ -880,6 +935,7 @@ class TestUntrustedRobustness:
             )
         assert time.perf_counter() - started < 10
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_inject_env_is_read_only(self, monkeypatch):
         import os
 
@@ -891,12 +947,14 @@ class TestUntrustedRobustness:
             ConfigLoader(interpolate=True, inject_env=True, sandbox=True).load(source)
         assert "YACFG_PWN" not in os.environ
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_include_cycle_is_a_clear_error(self, tmp_path):
         (tmp_path / "a.yaml").write_text("x: !include b.yaml\n", encoding="utf-8")
         (tmp_path / "b.yaml").write_text("y: !include a.yaml\n", encoding="utf-8")
         with pytest.raises(ValueError, match="include cycle"):
             ConfigLoader(base_dir=tmp_path).load("a.yaml")
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_load_all_per_call_sandbox(self, tmp_path):
         from jinja2.exceptions import SecurityError
 
@@ -905,6 +963,7 @@ class TestUntrustedRobustness:
         with pytest.raises(SecurityError):
             list(ConfigLoader(interpolate=True).load_all(str(doc), sandbox=True))
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_all_per_call_allow_commands_reaches_includes(self, tmp_path):
         from yaconfiglib import CommandsDisabledError
 
@@ -922,6 +981,7 @@ class TestUntrustedRobustness:
             list(ConfigLoader().load_all(str(doc), allow_commands=False))
         assert not marker.exists()
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_all_policy_does_not_leak_into_the_loop(self, tmp_path):
         from yaconfiglib.utils.trust import current_policy
 
@@ -937,6 +997,7 @@ class TestUntrustedRobustness:
         assert seen == [(True, False, False), (True, False, False)]
 
 
+@pytest.mark.usefixtures("needs_yaml")
 class TestInterpolationScope:
     """interpolate=True renders once, after merging, in the merged document's scope."""
 
@@ -1089,6 +1150,7 @@ class TestLoadAs:
         monkeypatch.setitem(sys.modules, "pydantic", module)
         return BaseModel
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_top_level_load_as_dataclass(self, tmp_path):
         import dataclasses
 
@@ -1105,6 +1167,7 @@ class TestLoadAs:
 
         assert result == DB(host="h", port=6)
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_top_level_load_as_multiple_sources_deep_merge(self, tmp_path):
         import dataclasses
 
@@ -1124,6 +1187,7 @@ class TestLoadAs:
 
         assert result == DB(host="a", port=2)
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_top_level_load_as_constructor_option_strict(self, tmp_path):
         import dataclasses
 
@@ -1142,6 +1206,7 @@ class TestLoadAs:
                 DB, str(tmp_path / "db.yaml"), interpolate=True, strict=True
             )
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_as_pydantic_v2_via_fake_module(self, tmp_path, monkeypatch):
         base_model = self._fake_pydantic(monkeypatch, "v2")
 
@@ -1155,6 +1220,7 @@ class TestLoadAs:
         assert result.built_with == "model_validate"
         assert result.values == {"a": 1}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_as_pydantic_v1_via_fake_module(self, tmp_path, monkeypatch):
         base_model = self._fake_pydantic(monkeypatch, "v1")
 
@@ -1167,6 +1233,7 @@ class TestLoadAs:
 
         assert result.built_with == "parse_obj"
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_as_plain_class_fallback(self, tmp_path):
         class Plain:
             def __init__(self, a):
@@ -1178,6 +1245,7 @@ class TestLoadAs:
 
         assert result.a == 7
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_as_non_dict_raises_type_error(self, tmp_path):
         class Plain:
             pass
@@ -1187,6 +1255,7 @@ class TestLoadAs:
         with pytest.raises(TypeError, match="must be a dictionary"):
             ConfigLoader(base_dir=tmp_path).load_as(Plain, "list.yaml")
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_as_dataclass_ignores_self_key(self, tmp_path):
         import dataclasses
 
@@ -1202,6 +1271,7 @@ class TestLoadAs:
 
         assert result == DB(host="h")
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_as_nested_dataclass_field_is_hydrated(self, tmp_path):
         import dataclasses
 
@@ -1224,6 +1294,7 @@ class TestLoadAs:
 
         assert result.db == DB(host="h")
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_as_optional_nested_dataclass_none_is_kept(self, tmp_path):
         import dataclasses
         import typing as t
@@ -1242,6 +1313,7 @@ class TestLoadAs:
 
         assert result.db is None
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_as_does_not_import_pydantic(self, tmp_path, monkeypatch):
         import dataclasses
         import sys
@@ -1271,6 +1343,7 @@ class TestLoadAs:
 
         assert "pydantic" not in looked_up
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_load_as_keeps_initvar_parameter(self, tmp_path):
         import dataclasses
 
@@ -1290,6 +1363,7 @@ class TestLoadAs:
         assert result.derived == 42
 
 
+@pytest.mark.usefixtures("needs_yaml")
 class TestMergeAnchors:
     """Overriding a key must not rewrite what an anchor shares with it."""
 
@@ -1344,6 +1418,7 @@ class TestMergeLeafTypes:
     """Ordinary YAML/TOML dates and datetimes merge like any other value."""
 
     @pytest.mark.parametrize("strategy", ["deep", "substitute"])
+    @pytest.mark.usefixtures("needs_yaml")
     def test_yaml_dates_merge(self, tmp_path, strategy):
         import datetime
 
@@ -1394,6 +1469,7 @@ class TestMergeLeafTypes:
 class TestMergeExtensionHooks:
     """The merge extension points stay usable for custom and extended strategies."""
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_custom_merge_init_errors_propagate(self):
         class BrokenInit:
             def init(self, initial, configloaderkey, **options):
@@ -1405,6 +1481,7 @@ class TestMergeExtensionHooks:
         with pytest.raises(AttributeError):
             ConfigLoader(merge=BrokenInit()).load("#!a.yaml\na: 1\n")
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_merge_without_init_uses_first_document(self):
         from yaconfiglib.utils.merge import MergeMethod
 
@@ -1416,6 +1493,7 @@ class TestMergeExtensionHooks:
         assert result == {"a": 1, "b": 2}
 
     @pytest.mark.parametrize("member", ["List", "Hash"])
+    @pytest.mark.usefixtures("needs_yaml")
     def test_extended_enum_keeps_builtin_init(self, member):
         from yaconfiglib.loader import ConfigLoaderMergeMethod
         from yaconfiglib.utils.enum import IntEnum
@@ -1441,6 +1519,7 @@ class TestMergeExtensionHooks:
         for member in ConfigLoaderMergeMethod:
             assert pickle.loads(pickle.dumps(member)) is member
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_default_returned_only_when_nothing_loads(self, tmp_path):
         (tmp_path / "one.yaml").write_text("a: 1\n", encoding="utf-8")
         loader = ConfigLoader(base_dir=tmp_path)
@@ -1461,6 +1540,7 @@ class TestMergeExtensionHooks:
         assert t.get_type_hints(IntEnum.extend)
 
 
+@pytest.mark.usefixtures("needs_yaml")
 class TestIgnoreErrorPredicate:
     def test_predicate_skips_only_selected_errors(self, tmp_path):
         (tmp_path / "good.yaml").write_text("x: 1\n")
@@ -1477,7 +1557,9 @@ class TestIgnoreErrorPredicate:
         assert result == {"x": 1}
 
         # A malformed file raises (predicate returns False for a YAML error).
-        with pytest.raises(Exception):
+        import yaml
+
+        with pytest.raises(yaml.YAMLError):
             loader.load("bad.yaml")
 
 
@@ -1486,18 +1568,21 @@ class TestHashMerge:
         (tmp_path / "a.yaml").write_text("v: 1\n")
         (tmp_path / "b.yaml").write_text("v: 2\n")
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_hash_default_key_is_stem(self, tmp_path):
         self._files(tmp_path)
         loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Hash)
         result = loader.load("a.yaml", "b.yaml")
         assert result == {"a": {"v": 1}, "b": {"v": 2}}
 
+    @pytest.mark.usefixtures("needs_yaml")
     def test_hash_attribute_key_factory(self, tmp_path):
         self._files(tmp_path)
         loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Hash)
         result = loader.load("a.yaml", "b.yaml", key_factory="name")
         assert set(result.keys()) == {"a.yaml", "b.yaml"}
 
+    @pytest.mark.usefixtures("needs_jinja2")
     def test_hash_jinja_key_factory(self, tmp_path):
         self._files(tmp_path)
         loader = ConfigLoader(base_dir=tmp_path, merge=ConfigLoaderMergeMethod.Hash)
@@ -1505,6 +1590,7 @@ class TestHashMerge:
         assert set(result.keys()) == {"a!", "b!"}
 
 
+@pytest.mark.usefixtures("needs_yaml")
 class TestPerCallOverrideIsolation:
     def test_overrides_do_not_leak_into_instance(self, tmp_path):
         (tmp_path / "a.yaml").write_text("x: 1\n")
@@ -1542,6 +1628,7 @@ class TestPerCallOverrideIsolation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("needs_yaml")
 class TestRecursiveGlob:
     @staticmethod
     def _tree(tmp_path):

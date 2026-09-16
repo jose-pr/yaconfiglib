@@ -2,6 +2,8 @@
 
 import io
 
+import pytest
+
 from yaconfiglib.utils.source import parse_sources
 
 
@@ -43,6 +45,7 @@ class TestMemoNormalization:
         assert len(paths) == 1  # second occurrence deduped
 
 
+@pytest.mark.usefixtures("needs_yaml")
 class TestStreamsThroughLoad:
     def test_stringio_and_bytesio_load(self):
         import io
