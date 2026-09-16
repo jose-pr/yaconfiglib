@@ -52,6 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- On Python 3.9/3.10 the `toml` extra now installs `tomli`, the backport of the standard
+  library `tomllib`, instead of the unmaintained `toml` package — which is no longer used
+  even when it is installed. TOML 1.0 files therefore parse on 3.9/3.10 exactly as they
+  do on 3.11+: mixed-type arrays load instead of raising, a lowercase `z` datetime keeps
+  its UTC offset instead of coming back naive, and offset datetimes can be pickled.
+  Reinstall with `pip install "yaconfiglib[toml]"` on 3.9/3.10; on 3.11+ the extra
+  installs nothing. Note that `tomli` 2.4+ accepts some TOML 1.1 syntax that 3.11-3.14's
+  `tomllib` rejects, so a TOML 1.1-only file is not portable across interpreters.
 - `.env` double-quoted values decode `\n`, `\r`, `\t`, `\"` and `\\`, so a value that
   needs a literal backslash (a Windows path) belongs in single quotes, which stay raw.
 - An unterminated quoted `.env` value raises `ValueError` instead of silently swallowing
@@ -146,6 +154,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- When a format's optional dependency is missing, the "Not reader for ..." and "Unknown
+  configuration format/loader" errors name the extra to install and the underlying import
+  error, instead of only reporting an unknown format.
 - `.cfg` files are detected as INI, which the API reference already stated. A `.cfg`
   file previously raised `NotImplementedError`, so a glob loaded with
   `ignore_error=True` skipped it silently and now merges it in.

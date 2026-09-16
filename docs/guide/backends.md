@@ -9,6 +9,9 @@ custom backends work identically to the built-in ones.
 Files saved with a UTF-8 byte-order mark load normally — the mark is
 ignored rather than becoming part of the first key.
 
+When a format's optional dependency is not installed, the error names the
+extra to install rather than only reporting an unknown format.
+
 ## YAML
 
 ```python
@@ -26,8 +29,11 @@ Registers `!include` and `!load` tag constructors automatically — see
 config = yaconfiglib.load("config.toml")
 ```
 
-Uses the standard library `tomllib` on Python 3.11+, falling back to the
-third-party `toml` package (`yaconfiglib[toml]`) on 3.9/3.10.
+Uses the standard library `tomllib` on Python 3.11+, and its `tomli`
+backport (`yaconfiglib[toml]`) on 3.9/3.10, so a TOML 1.0 document means the
+same thing on every supported interpreter. (`tomli` 2.4+ also accepts some
+TOML 1.1 syntax that 3.11-3.14's `tomllib` rejects, so a TOML 1.1-only file is
+not portable.)
 
 ## JSON
 

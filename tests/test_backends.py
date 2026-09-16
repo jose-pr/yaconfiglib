@@ -1185,3 +1185,89 @@ class TestIniBackend:
         (tmp_path / "app.cfg").write_text("[s]\nk = v\n")
         assert ConfigLoader(base_dir=tmp_path).load("app.cfg") == {"s": {"k": "v"}}
         assert ConfigBackend.get_class_by_path(pathlib.Path("x.env.cfg")) is IniConfig
+
+
+class TestTomlParser:
+    def test_heterogeneous_array(self, tmp_path):
+        (tmp_path / "c.toml").write_text('a = [1, "two", 3.0]\n')
+        assert ConfigLoader(base_dir=tmp_path).load("c.toml") == {"a": [1, "two", 3.0]}
+
+    def test_lowercase_z_datetime_is_utc_aware(self, tmp_path):
+        import datetime
+
+        (tmp_path / "c.toml").write_text("d = 1979-05-27t07:32:00z\n")
+        value = ConfigLoader(base_dir=tmp_path).load("c.toml")["d"]
+        assert value == datetime.datetime(
+            1979, 5, 27, 7, 32, tzinfo=datetime.timezone.utc
+        )
+        assert value.tzinfo is not None
+
+    def test_multiline_basic_string_ending_quotes(self, tmp_path):
+        (tmp_path / "c.toml").write_text('s = """a""""\n')
+        assert ConfigLoader(base_dir=tmp_path).load("c.toml") == {"s": 'a"'}
+
+    def test_offset_datetime_pickles(self, tmp_path):
+        import pickle
+
+        (tmp_path / "c.toml").write_text("d = 1979-05-27T00:32:00-08:00\n")
+        value = ConfigLoader(base_dir=tmp_path).load("c.toml")["d"]
+        assert pickle.loads(pickle.dumps(value)) == value
+
+
+class TestMissingOptionalBackend:
+    @staticmethod
+    def _without(tmp_path, blocked, body):
+        blocks = "\n".join(f"sys.modules[{name!r}] = None" for name in blocked)
+        code = f"import sys\n{blocks}\nimport yaconfiglib\n{body}"
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+
+    def test_toml_path_names_extra(self, tmp_path):
+        (tmp_path / "cfg.toml").write_text("a = 1\n")
+        done = self._without(
+            tmp_path,
+            ("tomllib", "tomli"),
+            "try:\n"
+            "    yaconfiglib.load('cfg.toml')\n"
+            "except Exception as exc:\n"
+            "    print(type(exc).__name__, exc)\n",
+        )
+        assert "yaconfiglib[toml]" in done.stdout, done.stdout + done.stderr
+        assert "Not reader for" in done.stdout
+
+    def test_toml_loader_name_names_extra(self, tmp_path):
+        done = self._without(
+            tmp_path,
+            ("tomllib", "tomli"),
+            "try:\n"
+            "    yaconfiglib.loads('a = 1', loader='toml')\n"
+            "except Exception as exc:\n"
+            "    print(type(exc).__name__, exc)\n",
+        )
+        assert "yaconfiglib[toml]" in done.stdout, done.stdout + done.stderr
+        assert "Unknown configuration format/loader" in done.stdout
+
+    def test_yaml_path_names_extra(self, tmp_path):
+        (tmp_path / "cfg.yaml").write_text("a: 1\n")
+        done = self._without(
+            tmp_path,
+            ("yaml",),
+            "try:\n"
+            "    yaconfiglib.load('cfg.yaml')\n"
+            "except Exception as exc:\n"
+            "    print(type(exc).__name__, exc)\n",
+        )
+        assert "yaconfiglib[yaml]" in done.stdout, done.stdout + done.stderr
+
+    def test_optional_backend_table_matches_classes(self):
+        from yaconfiglib.backends import _OPTIONAL_BACKENDS
+        from yaconfiglib.backends.ini import IniConfig  # noqa: F401 - registry
+
+        for name, (pattern, _hint) in _OPTIONAL_BACKENDS.items():
+            cls = ConfigBackend.get_class_by_name(name)
+            assert cls is not None, name
+            assert cls.PATHNAME_REGEX.pattern == pattern, name

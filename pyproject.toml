@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-toml = ["toml"]
+toml = ["tomli>=2.0,<3; python_version < '3.11'"]
 yaml = ["pyyaml"]
 transform = ["yaconfiglib[jinja2]"]
 jinja2 = ["jinja2"]

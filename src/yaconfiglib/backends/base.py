@@ -43,6 +43,23 @@ _INCLUDE_KWARGS = frozenset(
 )
 
 
+#: Optional backends whose import failed, as
+#: ``{name: (compiled PATHNAME_REGEX, hint, reason)}``. Populated by
+#: ``backends/__init__.py``, which is where the imports are attempted.
+_MISSING_BACKENDS: "dict[str, tuple[_re.Pattern, str, str]]" = {}
+
+
+def _record_missing_backend(name: str, pattern: str, hint: str, reason: str) -> None:
+    """Remember that an optional backend could not be imported.
+
+    A missing backend stays unregistered — that keeps dispatch, and dotenv's
+    give-way rule, exactly as they are — so the only thing left to improve is
+    the error, which would otherwise say a format is unknown without saying
+    why.
+    """
+    _MISSING_BACKENDS[name] = (_re.compile(pattern, _re.IGNORECASE), hint, reason)
+
+
 def _filter_include_kwargs(kwargs: dict) -> dict:
     """Keep only the include-mapping keys a document is allowed to set.
 
@@ -257,13 +274,38 @@ class ConfigBackend(_ty.Protocol):
         )
 
     @classmethod
+    def _missing_backend_hint(
+        cls,
+        name: "_ty.Optional[str]" = None,
+        path: "_ty.Optional[_Path]" = None,
+    ) -> str:
+        """Explain an unavailable optional backend, or return ``""``.
+
+        Private: the hint is appended to existing error messages, whose types
+        and prefixes do not change.
+        """
+        for backend, (pattern, hint, reason) in _MISSING_BACKENDS.items():
+            if name is not None and name != backend:
+                continue
+            if path is not None and pattern.match(path.name) is None:
+                continue
+            if name is None and path is None:
+                continue
+            return f"; {hint} ({reason})"
+        return ""
+
+    @classmethod
     def get_class_by_path(cls, path: _Path):
         """Find the first registered backend class whose :meth:`can_load_path` matches *path*.
 
         Raises:
-            NotImplementedError: If no registered backend claims *path*.
+            NotImplementedError: If no registered backend claims *path*. The
+                message names the extra to install when the format's optional
+                dependency is what is missing.
         """
         for scls in cls.__subclasses__(recursive=True):
             if scls.can_load_path(path):
                 return scls
-        raise NotImplementedError(f"Not reader for {path}")
+        raise NotImplementedError(
+            f"Not reader for {path}{cls._missing_backend_hint(path=path)}"
+        )

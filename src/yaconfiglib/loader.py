@@ -502,7 +502,10 @@ class ConfigLoader(ConfigBackend):
         if isinstance(loader, str):
             backend_cls = ConfigBackend.get_class_by_name(loader)
             if not backend_cls:
-                raise ValueError(f"Unknown configuration format/loader: {loader}")
+                raise ValueError(
+                    f"Unknown configuration format/loader: {loader}"
+                    f"{ConfigBackend._missing_backend_hint(name=loader)}"
+                )
             loader_factory = lambda path: backend_cls()
         elif callable(getattr(loader, "load", None)):
             loader_factory = lambda path: loader

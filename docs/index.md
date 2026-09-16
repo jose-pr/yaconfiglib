@@ -7,7 +7,7 @@ hands you back a single object you can traverse with dot-notation or hydrate
 straight into a Pydantic model or dataclass.
 
 It has zero required runtime dependencies beyond the standard library; every
-format-specific integration (PyYAML, `toml`/`tomllib`, Jinja2, Pydantic) is
+format-specific integration (PyYAML, `tomllib`/`tomli`, Jinja2, Pydantic) is
 strictly optional and only imported when you actually use it.
 
 ## Why yaconfiglib
@@ -43,7 +43,7 @@ pip install "yaconfiglib[yaml,toml,jinja2]"
 | Extra | Adds | Needed for |
 | --- | --- | --- |
 | `yaconfiglib[yaml]` | `pyyaml` | YAML parsing and `!include`/`!load` tags |
-| `yaconfiglib[toml]` | `toml` (fallback for Python < 3.11) | TOML parsing |
+| `yaconfiglib[toml]` | `tomli` (Python < 3.11 only) | TOML parsing; 3.11+ uses stdlib `tomllib` |
 | `yaconfiglib[jinja2]` | `jinja2` | Interpolation, `.j2` templated sources, `env.VAR` injection |
 
 ## Quick start

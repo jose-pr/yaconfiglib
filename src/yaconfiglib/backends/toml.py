@@ -2,9 +2,13 @@ import re
 import typing as _ty
 
 try:
-    import tomllib as toml
+    import tomllib
 except ImportError:
-    import toml  # type: ignore
+    # tomli is the backport of tomllib, same loads()/TOMLDecodeError API. The
+    # third-party `toml` package is deliberately NOT a further fallback: it
+    # implements TOML 0.5, so a transitively installed copy would silently
+    # parse a TOML 1.0 document differently from 3.11+.
+    import tomli as tomllib  # type: ignore[no-redef]
 
 try:
     from pathlib_next import Path
@@ -19,8 +23,11 @@ __all__ = ["TomlConfig"]
 class TomlConfig(ConfigBackend):
     """Backend for ``*.toml`` files.
 
-    Uses the standard library :mod:`tomllib` on Python 3.11+, falling back
-    to the third-party ``toml`` package on older interpreters.
+    Uses the standard library :mod:`tomllib` on Python 3.11+, and its
+    ``tomli`` backport (``yaconfiglib[toml]``) on 3.9/3.10, so a TOML 1.0
+    document means the same thing on every supported interpreter. Note that
+    ``tomli`` 2.4+ also accepts some TOML 1.1 syntax that 3.11-3.14's
+    ``tomllib`` rejects, so a TOML 1.1-only file is not portable.
     """
 
     PATHNAME_REGEX = re.compile(r".*\.toml$", re.IGNORECASE)
@@ -41,4 +48,4 @@ class TomlConfig(ConfigBackend):
             path_factory: Path constructor used when *path* is a string.
         """
         path = self._coerce_path(path, path_factory)
-        return toml.loads(self._read_text(path, encoding))
+        return tomllib.loads(self._read_text(path, encoding))

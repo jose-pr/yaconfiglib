@@ -39,7 +39,7 @@ Optional dependencies:
 | Extra | Adds | Needed for |
 | --- | --- | --- |
 | `yaconfiglib[yaml]` | `pyyaml` | Parsing YAML configuration files and `!include` tags |
-| `yaconfiglib[toml]` | `toml` | Parsing TOML configuration files |
+| `yaconfiglib[toml]` | `tomli` (Python < 3.11 only) | Parsing TOML configuration files; 3.11+ uses the standard library `tomllib` |
 | `yaconfiglib[jinja2]` | `jinja2` | Jinja2 templating, environment variables injection, and transformations |
 
 ---
@@ -105,7 +105,7 @@ config = ConfigLoader().load(
 | `yaconfiglib.loader` | Core `ConfigLoader` orchestrator, `load()`, `loads()`, `load_as()`, `dump()`, `dumps()`, and `DotAccessibleDict` |
 | `yaconfiglib.backends` | `ConfigBackend` protocol & registry |
 | `yaconfiglib.backends.yaml` | `YamlConfig` parsing and include tag construction |
-| `yaconfiglib.backends.toml` | `TomlConfig` parsing (using stdlib `tomllib` or `toml` package fallback) |
+| `yaconfiglib.backends.toml` | `TomlConfig` parsing (stdlib `tomllib`, or its `tomli` backport below 3.11) |
 | `yaconfiglib.backends.json` | `JsonConfig` parsing |
 | `yaconfiglib.backends.ini` | `IniConfig` parsing |
 | `yaconfiglib.backends.dotenv` | `DotenvBackend` for parsing `.env` files |

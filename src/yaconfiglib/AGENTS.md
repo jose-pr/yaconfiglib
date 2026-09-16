@@ -309,7 +309,14 @@ distinguish merge branches.
     trailing `Loader`/`Config` stripped), `DEFAULT_ENCODING` (`"utf-8"`),
     `DEFAULT_PATH_FACTORY`.
   - `get_class_by_name(name)`, `get_class_by_path(path)` (raises `NotImplementedError`
-    if no backend claims the path), `can_load_path(path)`.
+    if no backend claims the path), `can_load_path(path)`. When an **optional** backend's
+    import failed, `backends/__init__.py` records its name, `PATHNAME_REGEX` pattern and
+    the import error in `base._MISSING_BACKENDS`, and both that message and `_load`'s
+    "Unknown configuration format/loader" append the extra to install (via the private
+    `ConfigBackend._missing_backend_hint`). A missing backend stays **unregistered** —
+    that keeps dispatch and dotenv's give-way rule unchanged — so the error text is the
+    only thing that improves. The recorded patterns are duplicated from the classes
+    (a missing module cannot be asked for its regex); a test pins them equal.
   - A backend instance is directly usable as a PyYAML tag constructor
     (`__call__` recognizes the `(loader, node)` call shape and routes to
     `_yaml_tag_constructor`, supporting scalar/sequence/mapping tag forms).
@@ -343,9 +350,14 @@ should call them rather than `path.read_text()`. `DEFAULT_ENCODING` stays `utf-8
 must not become `utf-8-sig`: it is also used to *write* an in-memory source's `#!`
 marker, and would add a BOM there.
 
-- **`TomlConfig`** (`.toml`) — uses stdlib `tomllib` if available, else the `toml`
-  package (`yaconfiglib[toml]`).
-  `.load(path, encoding=None, path_factory=None, **options)`.
+- **`TomlConfig`** (`.toml`) — stdlib `tomllib` if available, else its `tomli`
+  backport (`yaconfiglib[toml]`, installed only below 3.11).
+  `.load(path, encoding=None, path_factory=None, **options)`. The third-party `toml`
+  package is deliberately **not** a further fallback: it implements TOML 0.5, so a
+  transitively installed copy would silently parse a TOML 1.0 document differently from
+  3.11+ (heterogeneous arrays rejected, a lowercase `z` datetime left naive, offset
+  datetimes unpicklable). `tomli` 2.4+ accepts some TOML 1.1 syntax that 3.11-3.14's
+  `tomllib` rejects, so "identical on every Python" holds for TOML 1.0 only.
 - **`JsonConfig`** (`.json`) —
   `.load(path, encoding=None, json_decoder_options=None, path_factory=None, **options)`.
 - **`IniConfig`** (`.ini`/`.cfg`) — `IniConfig(interpolation="basic")`;
