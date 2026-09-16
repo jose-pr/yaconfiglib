@@ -110,7 +110,9 @@ underlying extension — see [Templating](templating.md).
 
 ## Writing a custom backend
 
-Subclass `ConfigBackend` and override `load()` (and optionally `dumps()`):
+Subclass `ConfigBackend` and override `load()` (and optionally `dumps()`,
+which you call on the backend instance — `yaconfiglib.dump()`/`dumps()`
+always write YAML):
 
 ```python
 from yaconfiglib.backends.base import ConfigBackend

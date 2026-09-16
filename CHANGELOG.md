@@ -94,6 +94,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saw.
 
 ### Fixed
+- `yaconfiglib.dumps()`/`dump()` write a loaded configuration as a plain YAML mapping
+  that `yaconfiglib.load()` and other YAML tools read back. Previously the result
+  carried a `!!python/object/new:...DotAccessibleDict` tag that the library's own safe
+  loader refused. Passing your own `Dumper=`/`dumper_cls=` keeps PyYAML's default
+  handling.
 - `load_as` no longer fails on a document key named `self`, keeps `InitVar` values, and
   no longer imports pydantic when it is not already imported (it probes `sys.modules`
   instead, which is exact: a class can only subclass `BaseModel` if pydantic is loaded).

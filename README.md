@@ -102,7 +102,7 @@ config = ConfigLoader().load(
 
 | Module | Purpose |
 | --- | --- |
-| `yaconfiglib.loader` | Core `ConfigLoader` orchestrator, `load()`, `loads()`, `load_as()`, `dumps()`, and `DotAccessibleDict` |
+| `yaconfiglib.loader` | Core `ConfigLoader` orchestrator, `load()`, `loads()`, `load_as()`, `dump()`, `dumps()`, and `DotAccessibleDict` |
 | `yaconfiglib.backends` | `ConfigBackend` protocol & registry |
 | `yaconfiglib.backends.yaml` | `YamlConfig` parsing and include tag construction |
 | `yaconfiglib.backends.toml` | `TomlConfig` parsing (using stdlib `tomllib` or `toml` package fallback) |
