@@ -121,9 +121,21 @@ config = ConfigLoader().load(
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest -q
+# One venv per interpreter, named <version>-<os>-<arch>:
+py -3.9 -m venv .venv/3.9-nt-amd64
+
+# Install the tooling AND every extra that has tests, or those tests skip:
+.venv/3.9-nt-amd64/Scripts/pip install -e ".[dev,yaml,toml,jinja2]"
+
+# Put the venv's Scripts (bin on POSIX) directory first on PATH, or activate
+# it: the command-backend tests start `python` as a subprocess.
+export PATH="$PWD/.venv/3.9-nt-amd64/Scripts:$PATH"
+
+python -m pytest -q -rs
 ```
+
+Installing only `.[dev]` is supported — the tests that need PyYAML, Jinja2 or a
+TOML parser skip, and `-rs` lists them — but then the suite covers much less.
 
 ### Releasing
 
