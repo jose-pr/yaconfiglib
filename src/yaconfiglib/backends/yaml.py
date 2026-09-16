@@ -213,6 +213,9 @@ class YamlConfig(ConfigBackend):
                 raise TypeError(f"Un-supported YAML node {node!r}")
 
             kwargs["master"] = ldr
+            # An included document is part of a bigger one: the driving load
+            # interpolates the merged result once, in its own scope.
+            kwargs["interpolate"] = False
             # Absent or null `encoding:` on the include means "whatever this load
             # call is using"; an explicit one wins for that target.
             if kwargs.get("encoding") is None and getattr(

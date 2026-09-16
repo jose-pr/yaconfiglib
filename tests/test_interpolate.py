@@ -186,3 +186,18 @@ class TestInterpolatePerf:
         env2 = Environment()
         r = J.compile("{{ x }}", environment=env2)
         assert r(x=5) == "5"
+
+
+class TestBareExpressionWhitespace:
+    def test_whitespace_around_expression_renders_string(self):
+        from yaconfiglib.utils.jinja2 import interpolate
+
+        # Spaces inside a quoted scalar are deliberate text, so the value is a
+        # rendered string rather than the expression's own type.
+        assert interpolate("  {{ 5 }}") == "  5"
+
+    def test_trailing_newline_expression_keeps_type(self):
+        from yaconfiglib.utils.jinja2 import interpolate
+
+        # A YAML `|`/`>` block adds a trailing newline; the value stays an int.
+        assert interpolate("{{ 1 + 1 }}\n") == 2

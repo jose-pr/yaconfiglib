@@ -69,6 +69,7 @@ _CACHE_MAX = 1024
 # whole cache at capacity (the old dict did, causing recompile stampedes).
 _COMPILE_CACHE: "_OrderedDict[tuple, tuple]" = _OrderedDict()
 _EVAL_CACHE: "_OrderedDict[tuple, tuple]" = _OrderedDict()
+_REFERENCES_CACHE: "_OrderedDict[tuple, tuple]" = _OrderedDict()
 
 
 def _cache_get(cache: _OrderedDict, code: str, env: Environment):
@@ -108,6 +109,29 @@ def compile(
     render = load_template(code, environment=env, globals=globals).render
     _cache_put(_COMPILE_CACHE, code, env, render)
     return render
+
+
+def references(code: str, environment: Environment | None = None) -> frozenset:
+    """Return the names *code* reads from its context, parsing it at most once.
+
+    Cached like :func:`compile`/:func:`eval`, because a caller that orders values
+    by their references asks for the same template text repeatedly. A template
+    that does not parse yields no names: rendering it reports the syntax error
+    with a better message.
+    """
+    env = environment or DEFAULT_ENV
+    cached = _cache_get(_REFERENCES_CACHE, code, env)
+    if cached is not None:
+        return cached
+    from jinja2 import TemplateSyntaxError
+    from jinja2 import meta as _meta
+
+    try:
+        names = frozenset(_meta.find_undeclared_variables(env.parse(code)))
+    except TemplateSyntaxError:
+        names = frozenset()
+    _cache_put(_REFERENCES_CACHE, code, env, names)
+    return names
 
 
 def eval(
@@ -157,11 +181,19 @@ def eval(
 def interpolate(
     data: object, globals: dict | None = None, environment: Environment | None = None
 ) -> object:
-    """Recursively interpolate Jinja2 templates within *data*.
+    """Recursively interpolate Jinja2 templates within *data*, in one pass.
+
+    Every string is rendered exactly once, against *globals* as it stands;
+    a rendered result is never rendered again, so an escaped literal such as
+    ``{{ '{{ x }}' }}`` survives. Resolving references between values is the
+    caller's job (:class:`~yaconfiglib.loader.ConfigLoader` does it per
+    top-level key). Mutable mappings and sequences are rewritten **in place**
+    and returned; immutable ones are copied.
 
     * **Strings**: rendered as Jinja2 templates.  A bare ``{{ expr }}``
-      (no surrounding text) is evaluated as a Python expression so that
-      the return type is preserved (e.g. an integer stays an integer).
+      (nothing else but an optional trailing newline) is evaluated as a Python
+      expression so that the return type is preserved (e.g. an integer stays an
+      integer).
     * **Mappings**: keys and values are interpolated recursively.
     * **Sequences**: each element is interpolated recursively.
 
@@ -189,7 +221,9 @@ def _interpolate(
         # are plain text — this avoids paying Jinja for every one of them.
         if not any(marker in data for marker in _JINJA_MARKERS):
             return data
-        stripped = data.strip()
+        # Only a trailing newline may surround a bare expression: a YAML `|`/`>`
+        # block adds one, while spaces inside a quoted scalar are deliberate text.
+        stripped = data.rstrip("\r\n")
         # Pure Jinja2 expression: {{ expr }} — evaluate to preserve type.
         if stripped.startswith("{{") and stripped.endswith("}}"):
             inner = stripped[2:-2].strip()

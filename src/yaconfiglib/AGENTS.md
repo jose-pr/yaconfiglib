@@ -55,6 +55,14 @@ All constructor args become instance defaults, overridable per-call. Notable one
   nested `!include`, raises `CommandsDisabledError` instead of executing. Set this when
   loading configuration you don't fully trust. A per-call value reaches nested includes
   too. Does **not** restrict a `CommandBackend` constructed and called outside a load.
+- `interpolate=True` — after every source is merged, each string in the result is
+  rendered **once**, with the whole merged document as scope — `!include`d values
+  included, so they see the including document's keys. Top-level keys render after the
+  keys they refer to, so chains (`logs: "{{ base }}/logs"`, `err: "{{ logs }}/err"`)
+  resolve fully whatever order they are written in; a rendered value is never rendered
+  again, so an escaped `{{ '{{ x }}' }}` stays literal. A reference to a key still being
+  resolved sees that key's current value; a cycle between keys raises `ValueError` when
+  `strict` is in effect.
 - `sandbox=True` — interpolation runs in Jinja2's `SandboxedEnvironment`, blocking
   attribute traversal into Python internals (SSTI protection) for untrusted config
   values. Applies to both template strings and bare `{{ expr }}` values, and bare
@@ -84,7 +92,9 @@ All constructor args become instance defaults, overridable per-call. Notable one
   is neither). `transform` is a Jinja2 expression evaluated per-document (as `value`)
   before merging; it is evaluated sandboxed when `sandbox=True` or
   `allow_commands=False` is in effect. `encoding` also applies to every
-  `!include`/`!load` target that names none of its own, at every depth. Dict results are
+  `!include`/`!load` target that names none of its own, at every depth. With
+  `interpolate`, the merged result is rendered once at the end of the call (never
+  per source, and never inside an include). Dict results are
   wrapped in `DotAccessibleDict`. `merge_options` is a
   **per-call override only** — it is never written back onto `self.merge_options`.
 - **`.load_as(model_cls, *pathname, **kwargs) -> T`** — `.load(...)` then hydrate
@@ -263,13 +273,20 @@ distinguish merge branches.
 ## Jinja2 interpolation (`utils/jinja2.py`)
 
 - **`interpolate(data, globals=None, environment=None) -> object`** — recursively
-  renders Jinja2 templates through a dict/mapping/sequence/string structure. A string
+  renders Jinja2 templates through a dict/mapping/sequence/string structure, **one pass**:
+  each string is rendered once against `globals` as given, and a rendered result is never
+  re-rendered (ordering references between values is the caller's job —
+  `ConfigLoader` does it per top-level key). Mutable mappings/sequences are rewritten
+  **in place** and returned; immutable ones are copied. A string
   with no `{{`/`{%`/`{#` marker short-circuits (returned as-is). A bare
-  `{{ expr }}` (nothing else in the string) is **evaluated as an expression** so the
+  `{{ expr }}` (nothing else but an optional trailing newline) is **evaluated as an expression** so the
   original Python type is preserved (e.g. stays an `int`, not stringified); anything
   else renders as a normal Jinja2 template (always a string). A container referenced
   more than once (YAML anchors/aliases) is walked once and every reference shares the
   result.
+- **`references(code, environment=None) -> frozenset[str]`** — the names *code* reads
+  from its context (cached like `compile`/`eval`); a template that does not parse yields
+  no names. Used to order values by what they refer to.
 - **`compile(code, environment=None, globals=None) -> Callable[..., str]`** /
   **`eval(code, environment=None, globals=None) -> Callable[..., object]`** — LRU-cached
   (1024 entries, keyed on `(code, id(env))`, weakref-guarded against an `id()` reuse

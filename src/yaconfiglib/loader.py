@@ -139,6 +139,101 @@ def _environ_snapshot() -> typing.Mapping[str, str]:
     return types.MappingProxyType(dict(os.environ))
 
 
+def _template_references(value: object, environment, cache: dict = None) -> "set[str]":
+    """Top-level names every template string inside *value* refers to.
+
+    *cache* memoizes containers by ``id()`` for one document pass, so a shared
+    container (a YAML anchor referenced many times) is scanned once.
+    """
+    cache = {} if cache is None else cache
+
+    def walk(current: object) -> "set[str]":
+        if isinstance(current, str):
+            if not any(marker in current for marker in jinja2._JINJA_MARKERS):
+                return set()
+            return set(jinja2.references(current, environment))
+        if not isinstance(current, typing.Mapping) and not is_array(current):
+            return set()
+        seen = cache.get(id(current))
+        if seen is not None:
+            return seen
+        cache[id(current)] = set()  # a self-referential container terminates here
+        names: "set[str]" = set()
+        if isinstance(current, typing.Mapping):
+            for key, item in current.items():
+                names |= walk(key)
+                names |= walk(item)
+        else:
+            for item in current:
+                names |= walk(item)
+        cache[id(current)] = names
+        return names
+
+    return walk(value)
+
+
+def _interpolate_document(
+    value: object,
+    *,
+    environment,
+    extra_globals: typing.Mapping,
+    strict: bool,
+) -> object:
+    """Render every template in *value* once, against the whole document.
+
+    Each top-level key is rendered after the keys it refers to, so a chain
+    (``logs: "{{ base }}/logs"``, ``err: "{{ logs }}/err"``) resolves fully in
+    one pass whatever order the keys are written in. A value is never rendered
+    twice, so an escaped literal stays literal.
+
+    *extra_globals* (the ``inject_env`` snapshot) wins over a document key of
+    the same name. A reference to a key that is still being resolved uses that
+    key's current value; a cycle between keys raises when *strict* is set.
+    """
+    if not isinstance(value, typing.Mapping):
+        return jinja2.interpolate(value, dict(extra_globals), environment=environment)
+
+    memo: dict = {}
+    references: dict = {}
+    scope = dict(value)
+    scope.update(extra_globals)
+    rendered: dict = {}
+    resolving: list = []
+
+    def resolve(key):
+        if key in rendered:
+            return
+        if key in resolving:
+            if strict:
+                chain = resolving[resolving.index(key) :] + [key]
+                raise ValueError(
+                    "interpolation reference cycle: "
+                    + " -> ".join(str(item) for item in chain)
+                )
+            return  # lenient: the reference sees the key's current value
+        resolving.append(key)
+        try:
+            for name in _template_references(value[key], environment, references):
+                if name in value and name not in extra_globals:
+                    resolve(name)
+        finally:
+            resolving.pop()
+        result = jinja2._interpolate(value[key], scope, environment, memo)
+        rendered[key] = result
+        if key not in extra_globals:
+            scope[key] = result
+
+    for key in list(value):
+        resolve(key)
+
+    # Keys that are themselves templates render last, so they see the document's
+    # rendered values; insertion order is preserved.
+    return {
+        jinja2._interpolate(key, scope, environment, memo): rendered[key]
+        for key in value
+    }
+
+
 def _expression_environment():
     """Environment for ``transform``/``%``-key_factory expressions in this load.
 
@@ -292,7 +387,6 @@ class ConfigLoader(ConfigBackend):
         loader: str = None,
         transform: str = None,
         key_factory: str | typing.Callable[[Path], str] = None,
-        interpolate: bool = None,
         allow_commands: bool = None,
         **reader_args,
     ) -> tuple[str, object]:
@@ -355,9 +449,12 @@ class ConfigLoader(ConfigBackend):
             path_factory=self.path_factory,
             loader=self,
             base_dir=self.base_dir,
-            interpolate=(
-                False if (loader is self and self.interpolate) else interpolate
-            ),
+            # A document loaded here is a part of a bigger one: it is interpolated
+            # by the caller, once, in the merged scope. Never in isolation — that
+            # rendered escaped literals twice and left cross-document references
+            # empty. CommandBackend forwards this into its inner loads(), so the
+            # output of a command source is not rendered on its own either.
+            interpolate=False,
         )
         _options.update(reader_args)
 
@@ -539,20 +636,16 @@ class ConfigLoader(ConfigBackend):
                 result = results
 
             if interpolate:
-                custom_env = jinja2.get_environment(self.strict, effective_sandbox)
-
-                # Auto-inject env context if requested
-                globals_dict = {}
-                if isinstance(result, typing.Mapping):
-                    globals_dict.update(result)
-                if self.inject_env:
-                    globals_dict["env"] = _environ_snapshot()
-
                 try:
-                    result = jinja2.interpolate(
+                    result = _interpolate_document(
                         result,
-                        globals=globals_dict,
-                        environment=custom_env,
+                        environment=jinja2.get_environment(
+                            self.strict, effective_sandbox
+                        ),
+                        extra_globals=(
+                            {"env": _environ_snapshot()} if self.inject_env else {}
+                        ),
+                        strict=current_policy()[2],
                     )
                 except (
                     Exception
@@ -680,17 +773,15 @@ class ConfigLoader(ConfigBackend):
                         **reader_args,
                     )
                     if interpolate:
-                        globals_dict = {}
-                        if isinstance(value, typing.Mapping):
-                            globals_dict.update(value)
-                        if self.inject_env:
-                            globals_dict["env"] = _environ_snapshot()
-                        value = jinja2.interpolate(
+                        value = _interpolate_document(
                             value,
-                            globals_dict,
                             environment=jinja2.get_environment(
                                 self.strict, effective_sandbox
                             ),
+                            extra_globals=(
+                                {"env": _environ_snapshot()} if self.inject_env else {}
+                            ),
+                            strict=current_policy()[2],
                         )
                 if isinstance(value, dict):
                     value = DotAccessibleDict(value)

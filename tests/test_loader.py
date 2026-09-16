@@ -765,6 +765,123 @@ class TestUntrustedRobustness:
         assert seen == [(True, False, False), (True, False, False)]
 
 
+class TestInterpolationScope:
+    """interpolate=True renders once, after merging, in the merged document's scope."""
+
+    @staticmethod
+    def _write(tmp_path, name, text):
+        path = tmp_path / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_include_sees_parent_scope_with_instance_interpolate(self, tmp_path):
+        self._write(tmp_path, "svc.yaml", 'url: "http://{{ host }}/api"\n')
+        self._write(tmp_path, "app.yaml", "host: example.com\nsvc: !include svc.yaml\n")
+
+        result = ConfigLoader(base_dir=tmp_path, interpolate=True).load("app.yaml")
+
+        assert result["svc"]["url"] == "http://example.com/api"
+
+    def test_include_parent_reference_under_strict_does_not_raise(self, tmp_path):
+        self._write(tmp_path, "svc.yaml", 'url: "http://{{ host }}/api"\n')
+        self._write(tmp_path, "app.yaml", "host: example.com\nsvc: !include svc.yaml\n")
+
+        result = ConfigLoader(base_dir=tmp_path, interpolate=True, strict=True).load(
+            "app.yaml"
+        )
+
+        assert result["svc"]["url"] == "http://example.com/api"
+
+    def test_escaped_literal_in_include_rendered_once(self, tmp_path):
+        self._write(tmp_path, "inc.yaml", "lit: \"{{ '{{ x }}' }}\"\n")
+        self._write(tmp_path, "app.yaml", "x: SURPRISE\ninc: !include inc.yaml\n")
+
+        result = ConfigLoader(base_dir=tmp_path, interpolate=True).load("app.yaml")
+
+        assert result["inc"]["lit"] == "{{ x }}"
+
+    def test_chained_references_resolve(self, tmp_path):
+        self._write(
+            tmp_path,
+            "app.yaml",
+            'base: /srv\nlogs: "{{ base }}/logs"\nerr: "{{ logs }}/err"\n',
+        )
+
+        result = ConfigLoader(base_dir=tmp_path, interpolate=True).load("app.yaml")
+
+        assert result["err"] == "/srv/logs/err"
+
+    def test_chained_references_are_order_independent(self, tmp_path):
+        self._write(
+            tmp_path,
+            "app.yaml",
+            'err: "{{ logs }}/err"\nlogs: "{{ base }}/logs"\nbase: /srv\n',
+        )
+
+        result = ConfigLoader(base_dir=tmp_path, interpolate=True).load("app.yaml")
+
+        assert result["err"] == "/srv/logs/err"
+
+    def test_nested_reference_before_its_mapping_resolves(self, tmp_path):
+        self._write(
+            tmp_path,
+            "app.yaml",
+            'full: "{{ db.url }}/p"\ndb:\n  host: h\n  url: "x://{{ db.host }}"\n',
+        )
+
+        result = ConfigLoader(base_dir=tmp_path, interpolate=True).load("app.yaml")
+
+        assert result["full"] == "x://h/p"
+
+    def test_cross_key_cycle_raises_under_strict(self, tmp_path):
+        self._write(tmp_path, "app.yaml", 'a: "{{ b }}"\nb: "{{ a }}"\n')
+
+        with pytest.raises(ValueError, match="interpolation reference cycle"):
+            ConfigLoader(base_dir=tmp_path, interpolate=True, strict=True).load(
+                "app.yaml"
+            )
+
+    def test_cross_key_cycle_without_strict_does_not_raise(self, tmp_path):
+        self._write(tmp_path, "app.yaml", 'a: "{{ b }}"\nb: "{{ a }}"\n')
+
+        ConfigLoader(base_dir=tmp_path, interpolate=True).load("app.yaml")
+
+    def test_load_all_resolves_chained_references(self, tmp_path):
+        self._write(
+            tmp_path,
+            "app.yaml",
+            'base: /srv\nlogs: "{{ base }}/logs"\nerr: "{{ logs }}/err"\n',
+        )
+
+        documents = list(
+            ConfigLoader(base_dir=tmp_path, interpolate=True).load_all("app.yaml")
+        )
+
+        assert documents[0]["err"] == "/srv/logs/err"
+
+    def test_escaped_literal_referenced_by_other_key_not_rerendered(self, tmp_path):
+        self._write(
+            tmp_path,
+            "app.yaml",
+            'x: SURPRISE\nlit: "{{ \'{{ x }}\' }}"\nref: "{{ lit }}"\n',
+        )
+
+        result = ConfigLoader(base_dir=tmp_path, interpolate=True).load("app.yaml")
+
+        assert result["lit"] == "{{ x }}"
+        assert result["ref"] == "{{ x }}"
+
+    def test_inject_env_global_wins_over_document_env_key(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("YACFG_SCOPE_VAR", "from-environment")
+        self._write(tmp_path, "app.yaml", 'env: doc\nv: "{{ env.YACFG_SCOPE_VAR }}"\n')
+
+        result = ConfigLoader(
+            base_dir=tmp_path, interpolate=True, inject_env=True
+        ).load("app.yaml")
+
+        assert result["v"] == "from-environment"
+
+
 class TestIgnoreErrorPredicate:
     def test_predicate_skips_only_selected_errors(self, tmp_path):
         (tmp_path / "good.yaml").write_text("x: 1\n")
