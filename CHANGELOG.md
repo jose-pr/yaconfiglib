@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `yaconfiglib.load_as(model_cls, *sources, **options)`: the top-level form the README
+  and the model guide already showed. It takes several sources, and routes keywords like
+  `yaconfiglib.load()`, so `strict`/`base_dir`/`merge` configure the loader.
 - `YamlConfig.load(origin=...)`: the document that relative `!include`/`!load` paths
   resolve against. Defaults to the file being parsed; a rendered `.j2` template passes
   its own path.
@@ -42,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `load_as` builds dataclass fields that are annotated as a dataclass or Pydantic model
+  (including `Optional[...]` of one) as instances instead of leaving them as dicts. Code
+  that indexed such a field (`cfg.db["host"]`) must use attributes (`cfg.db.host`).
+  Containers of models (`List[Model]`) are still left as loaded.
 - Options that `ConfigLoader` itself accepts (`merge`, `encoding`, `recursive`,
   `interpolate`, ...) passed to `yaconfiglib.load()`/`loads()` now configure the loader,
   so they also apply to files pulled in with `!include` — a per-call `merge="deep"` now
@@ -87,6 +94,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saw.
 
 ### Fixed
+- `load_as` no longer fails on a document key named `self`, keeps `InitVar` values, and
+  no longer imports pydantic when it is not already imported (it probes `sys.modules`
+  instead, which is exact: a class can only subclass `BaseModel` if pydantic is loaded).
 - `yaconfiglib.load()` and `loads()` pass backend options through instead of raising
   `TypeError`: `json_decoder_options`, `ini_default_section`, `environment=` and any
   other option a backend reads now reach it. They used to be rejected because the

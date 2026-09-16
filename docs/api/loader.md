@@ -14,6 +14,8 @@ The core orchestrator plus the standard-library-style module functions.
 
 ::: yaconfiglib.loader.loads
 
+::: yaconfiglib.loader.load_as
+
 ::: yaconfiglib.loader.dump
 
 ::: yaconfiglib.loader.dumps

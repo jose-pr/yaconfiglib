@@ -38,9 +38,28 @@ class DBConfig:
 db_settings = yaconfiglib.load_as(DBConfig, "config.yaml")
 ```
 
-Only keys matching the dataclass's declared fields are passed to the
+Only keys the dataclass's own signature accepts are passed to the
 constructor — extra keys in the loaded document are silently ignored
-rather than raising a `TypeError`.
+rather than raising a `TypeError`. `InitVar` parameters are passed;
+`field(init=False)` fields are not, and neither is a document key named
+`self`.
+
+A field annotated with another dataclass (or a Pydantic model), including
+`Optional[...]` of one, is built as an instance rather than left as a
+plain dict:
+
+```python
+@dataclass
+class DB:
+    host: str
+
+@dataclass
+class App:
+    name: str
+    db: DB          # -> App(name=..., db=DB(host=...))
+```
+
+Containers of models (`List[DB]`, `Dict[str, DB]`) stay as loaded.
 
 ## Plain classes
 
@@ -51,8 +70,11 @@ without special integration.
 
 ## Combining with other loader options
 
-`load_as` accepts every keyword `load()` does — merging, interpolation,
-and multiple sources all work the same way:
+`yaconfiglib.load_as` accepts every keyword `yaconfiglib.load` does, and
+takes several sources. As with `load()`, a keyword `ConfigLoader` accepts
+configures the loader (so it reaches nested includes too) and anything else
+goes to the backend. `ConfigLoader(...).load_as(...)` is the method form:
+there, constructor options belong on the constructor.
 
 ```python
 settings = yaconfiglib.load_as(
