@@ -2008,3 +2008,193 @@ class TestDumpOutputContract:
             yaconfiglib.dump({"g": (x for x in [])}, str(target))
         # Serialization happens before the file is opened.
         assert target.read_text(encoding="utf-8") == "old\n"
+
+
+@pytest.mark.usefixtures("needs_yaml")
+class TestIgnoreErrorContract:
+    """One predicate signature, one offer per failure, and visible skips.
+
+    The three call sites passed different keywords, so a predicate written with
+    explicit parameters crashed with `TypeError` in whichever phase it had not
+    been written for; and a blanket `ignore_error=True` logged only at DEBUG,
+    which made failures invisible in a default configuration.
+    """
+
+    def _recorder(self, seen, answer=False):
+        def predicate(error, **context):
+            seen.append((error, context))
+            return answer
+
+        return predicate
+
+    def test_load_phase_keywords(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "bad.json").write_text('{"a": }\n', encoding="utf-8")
+        seen = []
+        loader = ConfigLoader(base_dir=str(tmp_path), ignore_error=self._recorder(seen))
+        with pytest.raises(Exception):
+            loader.load("bad.json")
+        error, context = seen[-1]
+        assert set(context) == {"phase", "path", "loader"}
+        assert context["phase"] == "load"
+        assert str(context["path"]).endswith("bad.json")
+        assert context["loader"] is loader
+
+    def test_predicate_with_explicit_keywords_works_for_interpolation(
+        self, tmp_path, request
+    ):
+        import jinja2 as _jinja2
+
+        from yaconfiglib import ConfigLoader
+
+        request.getfixturevalue("needs_jinja2")
+
+        def predicate(error, *, phase, path, loader, **extra):
+            return False
+
+        (tmp_path / "a.yaml").write_text('a: "{{ nosuch }}"\n', encoding="utf-8")
+        loader = ConfigLoader(
+            base_dir=str(tmp_path), ignore_error=predicate, strict=True
+        )
+        # The interpolation offer used to pass result= and no path=, so a
+        # predicate naming path= raised TypeError instead of the real error.
+        with pytest.raises(_jinja2.UndefinedError):
+            loader.load("a.yaml", interpolate=True)
+
+    def test_include_failure_offered_once_per_level(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "parent_json.yaml").write_text(
+            "secrets: !include secrets.json\n", encoding="utf-8"
+        )
+        (tmp_path / "secrets.json").write_text('{"a": }\n', encoding="utf-8")
+        seen = []
+        loader = ConfigLoader(base_dir=str(tmp_path), ignore_error=self._recorder(seen))
+        with pytest.raises(Exception):
+            loader.load("parent_json.yaml")
+        pairs = [
+            (context["phase"], context["path"].name if context["path"] else None)
+            for _error, context in seen
+        ]
+        assert pairs == [("load", "secrets.json"), ("include", "parent_json.yaml")]
+        # Both offers carry the same exception object; only the phase differs.
+        assert seen[0][0] is seen[1][0]
+
+    def test_predicate_can_skip_the_including_file(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "parent_json.yaml").write_text(
+            "secrets: !include secrets.json\n", encoding="utf-8"
+        )
+        (tmp_path / "secrets.json").write_text('{"a": }\n', encoding="utf-8")
+
+        # **context, not explicit keywords: this is the pin that the documented
+        # use keeps working, so it must be writable against either signature.
+        def skip_parent(error, **context):
+            return getattr(context.get("path"), "name", None) == "parent_json.yaml"
+
+        loader = ConfigLoader(base_dir=str(tmp_path), ignore_error=skip_parent)
+        # The documented second use of the double offer: drop the whole
+        # including file when one of its includes fails.
+        assert loader.load("parent_json.yaml") is None
+
+    def test_merge_failure_offered_with_merge_phase(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "a.yaml").write_text("a: 1\n", encoding="utf-8")
+        (tmp_path / "b.yaml").write_text("b: 2\n", encoding="utf-8")
+
+        def broken(a, b, **options):
+            raise TypeError("no merging today")
+
+        seen = []
+        loader = ConfigLoader(
+            base_dir=str(tmp_path), ignore_error=self._recorder(seen, answer=True)
+        )
+        result = loader.load("a.yaml", "b.yaml", merge=broken)
+        # A plain function has no init(), so the first document is taken as-is
+        # and the strategy is called once, for the second source.
+        pairs = [(context["phase"], context["path"].name) for _e, context in seen]
+        assert pairs == [("merge", "b.yaml")]
+        assert result == {"a": 1}
+
+    def test_bool_skip_logs_warning_naming_source_phase_and_type(
+        self, tmp_path, caplog
+    ):
+        import logging
+
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "bad.json").write_text('{"a": }\n', encoding="utf-8")
+        caplog.set_level(logging.WARNING, logger="yaconfiglib.loader")
+        ConfigLoader(base_dir=str(tmp_path), ignore_error=True).load("bad.json")
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings, "a blanket skip must be visible at WARNING"
+        message = warnings[-1].getMessage()
+        assert "bad.json" in message
+        assert "load" in message
+        assert "JSONDecodeError" in message
+
+    def test_bool_skip_warning_omits_error_text(self, tmp_path, caplog):
+        import logging
+
+        from yaconfiglib import ConfigLoader
+
+        # The parse error quotes the offending line, which here holds a secret.
+        (tmp_path / "bad.yaml").write_text(
+            "token: SECRETVALUE\nbroken: [unclosed\n", encoding="utf-8"
+        )
+        caplog.set_level(logging.WARNING, logger="yaconfiglib.loader")
+        ConfigLoader(base_dir=str(tmp_path), ignore_error=True).load("bad.yaml")
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings
+        for record in warnings:
+            assert "SECRETVALUE" not in record.getMessage()
+
+    def test_predicate_skip_logs_debug_only(self, tmp_path, caplog):
+        import logging
+
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "bad.json").write_text('{"a": }\n', encoding="utf-8")
+        caplog.set_level(logging.DEBUG, logger="yaconfiglib.loader")
+        loader = ConfigLoader(
+            base_dir=str(tmp_path),
+            ignore_error=lambda error, **context: True,
+        )
+        loader.load("bad.json")
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+        # The predicate already saw the error, so DEBUG carries the traceback
+        # rather than a second WARNING line.
+        skips = [
+            r
+            for r in caplog.records
+            if r.exc_info and "bad.json" in r.getMessage() and "load" in r.getMessage()
+        ]
+        assert skips
+
+    def test_load_all_keywords_include_phase_and_value(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "bad.json").write_text('{"a": }\n', encoding="utf-8")
+        seen = []
+        loader = ConfigLoader(
+            base_dir=str(tmp_path), ignore_error=self._recorder(seen, answer=True)
+        )
+        assert list(loader.load_all("bad.json")) == []
+        _error, context = seen[-1]
+        assert context["phase"] == "load"
+        assert set(context) == {"phase", "path", "loader", "value"}
+
+    def test_declined_error_logs_no_warning(self, tmp_path, caplog):
+        import logging
+
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "bad.json").write_text('{"a": }\n', encoding="utf-8")
+        caplog.set_level(logging.DEBUG, logger="yaconfiglib.loader")
+        with pytest.raises(Exception):
+            ConfigLoader(base_dir=str(tmp_path), ignore_error=False).load("bad.json")
+        # Nothing was skipped, so there is nothing to warn about.
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

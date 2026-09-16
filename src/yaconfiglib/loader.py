@@ -207,6 +207,20 @@ def _add_encoding_hint(error: BaseException, encoding: typing.Optional[str]) -> 
         error.reason = f"{reason}{marker}"
 
 
+def _error_phase(error: BaseException) -> str:
+    """``"include"`` when *error* came from a nested include, else ``"load"``.
+
+    Read from the frames Phase 2 records, not guessed from the error type: the
+    same exception is offered once for the included file (as ``"load"``, before
+    any include frame exists) and again for each file that included it, and a
+    predicate has to be able to tell those offers apart.
+    """
+    for frame in getattr(error, "config_frames", ()) or ():
+        if frame.kind == "include":
+            return "include"
+    return "load"
+
+
 def _environ_snapshot() -> typing.Mapping[str, str]:
     """``inject_env``'s ``env``: a read-only copy, so templates cannot change the process environment."""
     return types.MappingProxyType(dict(os.environ))
@@ -394,7 +408,23 @@ def _hydrate(model_cls: type, data: typing.Mapping) -> object:
 
 
 class _IgnoreError(typing.Protocol):
-    def __call__(self, error: Exception, *args, **kwargs) -> bool: ...
+    """An ``ignore_error`` predicate: decide whether to skip one failure.
+
+    Every offer passes `phase`, `path` and `loader` by keyword, plus the extras
+    of that phase, so a predicate written with explicit parameters works in all
+    of them. `error` stays positional and annotated `Exception`, so a predicate
+    written against the older signature still satisfies this.
+    """
+
+    def __call__(
+        self,
+        error: Exception,
+        *,
+        phase: str,
+        path: typing.Any,
+        loader: "ConfigLoader",
+        **extra: typing.Any,
+    ) -> bool: ...
 
 
 def _pathname(path: object) -> object:
@@ -497,9 +527,32 @@ class ConfigLoader(ConfigBackend):
                 :class:`~yaconfiglib.utils.merge.Merge`-compatible callable.
             merge_options: Extra keyword options forwarded to the merge
                 callable on every call (e.g. ``{"mergelists": True}``).
-            ignore_error: Either a bool (ignore/re-raise all load errors
-                uniformly) or a predicate ``(error, **context) -> bool``
-                deciding per-error whether to skip and continue.
+            ignore_error: Either a bool (ignore/re-raise every failure
+                uniformly) or a predicate deciding per-failure whether to skip
+                and continue. Every offer passes the same keywords, so a
+                predicate can name them explicitly::
+
+                    def predicate(error, *, phase, path, loader, **extra) -> bool: ...
+
+                *phase* is ``"load"`` (reading or parsing *path* failed),
+                ``"include"`` (a source included by *path* failed), ``"merge"``
+                (merging *path* into the running result failed) or
+                ``"interpolate"`` (rendering the merged document failed).
+                *path* is the source, or ``None`` where no single source
+                applies. Extras: ``result=`` for ``"interpolate"`` in
+                :meth:`load`, ``value=`` in :meth:`load_all`.
+
+                A failure inside an included file is offered **once per level**:
+                first for the included file itself (``phase="load"``), then for
+                each file that included it (``phase="include"``), with the same
+                exception object each time — so a predicate can skip just that
+                include, or the whole including file.
+
+                Logging: every offer is logged at DEBUG. A skip under the
+                **bool** form is also logged at WARNING, naming the source, the
+                phase and the error's type but never its text (which can quote a
+                configuration line). A skip a predicate approved stays at DEBUG,
+                with the traceback attached.
             inject_env: If True and *interpolate* is set, expose
                 ``os.environ`` to templates as the ``env`` global.
             strict: If True, undefined Jinja2 variables raise during
@@ -543,11 +596,56 @@ class ConfigLoader(ConfigBackend):
             lambda path: ConfigBackend.get_class_by_path(path)()
         )
         self.key_factory = key_factory or (lambda path, value: path.stem)
+        # Remembered because the two forms log differently: a user predicate
+        # has already seen the error, a bool never did.
+        self._ignore_error_is_bool = not callable(ignore_error)
         self.ignore_error = (
             ignore_error
             if callable(ignore_error)
             else lambda error, *args, **kwargs: bool(ignore_error)
         )
+
+    def _offer_error(
+        self,
+        error: BaseException,
+        *,
+        phase: str,
+        path: typing.Optional[object],
+        **extra: object,
+    ) -> bool:
+        """Offer one failure to `ignore_error`, and log the outcome.
+
+        The only caller of `self.ignore_error`, so every phase passes the same
+        keywords. Returns the predicate's answer: True to skip and continue.
+
+        Logging: every offer is DEBUG. A skip under the **bool** form is also
+        WARNING, because nothing else would show it and a blanket
+        ``ignore_error=True`` must not make failures invisible; that line names
+        the source, the phase and the error's **type** only — never its text,
+        which can quote a configuration line. A skip a predicate approved stays
+        at DEBUG (with the traceback attached), since the predicate saw it.
+        """
+        logger.debug("%s error for %s: %s", phase, path, type(error).__name__)
+        skip = bool(
+            self.ignore_error(error, phase=phase, path=path, loader=self, **extra)
+        )
+        if not skip:
+            return False
+        if self._ignore_error_is_bool:
+            logger.warning(
+                "skipped %s during %s after %s (ignore_error=True)",
+                path,
+                phase,
+                type(error).__name__,
+            )
+        else:
+            logger.debug(
+                "ignore_error predicate skipped %s during %s",
+                path,
+                phase,
+                exc_info=error,
+            )
+        return True
 
     def _getpath(self, path: str | Path):
         return path if isinstance(path, Path) else self.path_factory(path)
@@ -623,7 +721,7 @@ class ConfigLoader(ConfigBackend):
                     return str(val)
 
             key_factory = _key
-        logger.debug(f"Loading file: {path}")
+        logger.debug("Loading file: %s", path)
         _loader = loader_factory(path)
         is_command = isinstance(_loader, CommandBackend)
         if is_command and not allow_commands:
@@ -798,6 +896,9 @@ class ConfigLoader(ConfigBackend):
                 recursive=recursive,
                 text_fallback=True,
             ):
+                # Which step this source reached, so the one handler below can
+                # name the phase and add the frame without a second offer.
+                step = "load"
                 try:
                     name, result = self._load(
                         path,
@@ -811,43 +912,48 @@ class ConfigLoader(ConfigBackend):
                     # The merge is its own step, so a strategy's failure is
                     # attributed as "while merging <source>" rather than as a
                     # failure to read it.
-                    try:
-                        if _join_init:
-                            results = merge(
-                                results,
-                                result,
+                    step = "merge"
+                    if _join_init:
+                        results = merge(
+                            results,
+                            result,
+                            configloaderkey=name,
+                            **merge_options,
+                        )
+                    else:
+                        # Probe for the hook instead of catching
+                        # AttributeError: an error raised inside a real
+                        # init() must surface, not look like "this strategy
+                        # has no init".
+                        init = getattr(merge, "init", None)
+                        if callable(init):
+                            results = init(
+                                initial=result,
                                 configloaderkey=name,
                                 **merge_options,
                             )
                         else:
-                            # Probe for the hook instead of catching
-                            # AttributeError: an error raised inside a real
-                            # init() must surface, not look like "this strategy
-                            # has no init".
-                            init = getattr(merge, "init", None)
-                            if callable(init):
-                                results = init(
-                                    initial=result,
-                                    configloaderkey=name,
-                                    **merge_options,
-                                )
-                            else:
-                                results = result
-                            _join_init = True
-                    except Exception as error:  # noqa: BLE001 - context, re-raises
-                        _add_error_context(error, frame=ErrorFrame("merge", str(path)))
-                        raise
+                            results = result
+                        _join_init = True
                 # Deliberately broad: ``ignore_error`` is a user predicate designed
                 # to decide per-error whether to skip ANY load failure (a YAML parse
                 # error, a missing file, a backend error...), so narrowing the tuple
                 # would break that contract. KeyboardInterrupt/SystemExit are
-                # BaseException and already excluded. The error is never swallowed
-                # silently — it is handed to the predicate and logged.
+                # BaseException and already excluded. Every offer is logged, and a
+                # skip under ignore_error=True is logged at WARNING (see
+                # _offer_error).
                 except (
                     Exception
                 ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
-                    logger.debug("load error for %s: %s", path, error)
-                    if self.ignore_error(error, path=path, loader=self):
+                    # One offer per failure: the step says which phase it is,
+                    # so a merge failure is never also offered as a load one.
+                    if step == "merge":
+                        _add_error_context(error, frame=ErrorFrame("merge", str(path)))
+                    if self._offer_error(
+                        error,
+                        phase="merge" if step == "merge" else _error_phase(error),
+                        path=path,
+                    ):
                         continue
                     raise
 
@@ -898,8 +1004,9 @@ class ConfigLoader(ConfigBackend):
                 except (
                     Exception
                 ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
-                    logger.debug("interpolation error: %s", error)
-                    if not self.ignore_error(error, result=result, loader=self):
+                    if not self._offer_error(
+                        error, phase="interpolate", path=None, result=result
+                    ):
                         raise
 
             # Make every nested mapping dot-accessible, once, here. This also
@@ -1022,8 +1129,9 @@ class ConfigLoader(ConfigBackend):
             except (
                 Exception
             ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
-                logger.debug("load_all error for %s: %s", path, error)
-                if not self.ignore_error(error, path=path, value=value, loader=self):
+                if not self._offer_error(
+                    error, phase=_error_phase(error), path=path, value=value
+                ):
                     raise
 
 
