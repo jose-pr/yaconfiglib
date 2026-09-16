@@ -47,6 +47,12 @@ ConfigLoader(base_dir="conf", recursive=True).load("**/*.yaml")
   `z[1].yaml`, that is what loads. For an *absolute* pattern under a directory
   whose name contains `[`, `*` or `?`, pass that directory as `base_dir` (or
   `glob.escape` it), since there is no literal base to expand from.
+- **A directory that cannot be listed contributes nothing, silently.** If a
+  directory under a glob is unreadable, its files are skipped without an error
+  and without reaching `ignore_error` — the expansion machinery swallows the
+  `OSError` before yaconfiglib sees it. A glob is therefore not a way to assert
+  that a layer of configuration was read; name such files explicitly if their
+  absence must be an error.
 - On Windows, a `**` source that crosses a **junction** can repeat files; that
   is an upstream `pathlib-next` limitation, not a yaconfiglib rule.
 

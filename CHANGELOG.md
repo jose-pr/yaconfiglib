@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- A directory that cannot be listed during glob expansion (a permission error, say) is
+  now skipped silently instead of raising: the expansion machinery in `pathlib-next`
+  0.9.4+ swallows the error, so it never reaches `ignore_error` either. Name a file
+  explicitly if its absence has to be an error.
 - Glob matches now merge in a fixed order — path components compared by code point — on
   every operating system and filesystem, where the order used to be whatever the
   directory listing returned. A layered set of globbed files that relied on listing order
