@@ -14,6 +14,7 @@ except ImportError:
     Pathname = Path
 
 from yaconfiglib.backends.base import ConfigBackend, _filter_include_kwargs
+from yaconfiglib.errors import ConfigTypeError
 from yaconfiglib.utils.source import _rebase_include_sources
 
 logger = logging.getLogger(__name__)
@@ -234,7 +235,7 @@ class YamlConfig(ConfigBackend):
                 # reach the nested load through the effective policy instead.
                 kwargs = _filter_include_kwargs(kwargs)
             else:
-                raise TypeError(f"Un-supported YAML node {node!r}")
+                raise ConfigTypeError(f"Un-supported YAML node {node!r}")
 
             kwargs["master"] = ldr
             # An included document is part of a bigger one: the driving load

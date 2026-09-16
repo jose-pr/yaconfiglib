@@ -148,7 +148,8 @@ class TestInMemoryTextMaterialization:
         from yaconfiglib import ConfigLoader
 
         # A CRLF marker line used to leave "x.json\r" as the virtual name, so
-        # backend detection failed with "Not reader for name".
+        # backend detection failed (then "Not reader for name", now
+        # "No backend reads name").
         assert ConfigLoader().load(source) == {"a": 1}
 
     @pytest.mark.parametrize("codec", ["utf-8-sig", "utf-16", "utf-32"])

@@ -11,6 +11,7 @@ try:
 except ImportError:
     from pathlib import Path as _Path  # type: ignore[no-redef]
 
+from ..errors import ConfigValueError
 from .base import ConfigBackend
 
 __all__ = ["DotenvBackend"]
@@ -173,7 +174,7 @@ class DotenvBackend(ConfigBackend):
         def reject(line: int, reason: str) -> None:
             message = f"{label}: line {line}: {reason}"
             if strict:
-                raise ValueError(message)
+                raise ConfigValueError(message)
             logger.warning("%s", message)
 
         result: dict[str, str] = {}
@@ -204,7 +205,7 @@ class DotenvBackend(ConfigBackend):
             if quote in ('"', "'"):
                 value, after, closed = _scan_quoted(text, value_at, quote)
                 if not closed:
-                    raise ValueError(
+                    raise ConfigValueError(
                         f"{label}: line {line}: unterminated quoted value "
                         f"for {key!r}"
                     )
@@ -228,5 +229,5 @@ class DotenvBackend(ConfigBackend):
             result[key.lower() if lowercase else key] = value
 
         if strict and not result:
-            raise ValueError(f"{label}: no KEY=value assignment found")
+            raise ConfigValueError(f"{label}: no KEY=value assignment found")
         return result

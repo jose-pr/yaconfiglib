@@ -1300,7 +1300,7 @@ class TestMissingOptionalBackend:
             "    print(type(exc).__name__, exc)\n",
         )
         assert "yaconfiglib[toml]" in done.stdout, done.stdout + done.stderr
-        assert "Not reader for" in done.stdout
+        assert "No backend reads" in done.stdout
 
     def test_toml_loader_name_names_extra(self, tmp_path):
         done = self._without(

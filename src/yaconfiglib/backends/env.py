@@ -10,6 +10,7 @@ try:
 except ImportError:
     from pathlib import Path as _Path  # type: ignore[no-redef]
 
+from ..errors import ConfigValueError
 from .base import ConfigBackend
 
 __all__ = ["EnvVarBackend"]
@@ -55,8 +56,8 @@ def _has_prefix(key: str, prefix: str) -> bool:
     return key.startswith(prefix)
 
 
-def _conflict(name: str, other: str, path: "tuple[str, ...]") -> ValueError:
-    return ValueError(
+def _conflict(name: str, other: str, path: "tuple[str, ...]") -> ConfigValueError:
+    return ConfigValueError(
         f"environment variables {other!r} and {name!r} both define "
         f"{'.'.join(path)!r}: one is a value and the other nests keys under it. "
         "Rename or remove one of them."

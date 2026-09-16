@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 from .backends import ConfigBackend as ConfigBackend
+from .errors import (
+    CommandsDisabledError as CommandsDisabledError,
+    ConfigError as ConfigError,
+    ConfigTypeError as ConfigTypeError,
+    ConfigValueError as ConfigValueError,
+    UnknownLoaderError as UnknownLoaderError,
+    UnsupportedFormatError as UnsupportedFormatError,
+    load_error_types as load_error_types,
+)
 from .loader import (
     ConfigLoader as ConfigLoader,
     ConfigLoaderMergeMethod as ConfigLoaderMergeMethod,
-    CommandsDisabledError as CommandsDisabledError,
     DotAccessibleDict as DotAccessibleDict,
     load as load,
     loads as loads,
@@ -23,7 +31,13 @@ from .utils.merge import (
 __all__ = [
     "ConfigLoader",
     "ConfigLoaderMergeMethod",
+    "ConfigError",
+    "ConfigValueError",
+    "ConfigTypeError",
+    "UnsupportedFormatError",
+    "UnknownLoaderError",
     "CommandsDisabledError",
+    "load_error_types",
     "DotAccessibleDict",
     "MergeMethod",
     "typed_merge",

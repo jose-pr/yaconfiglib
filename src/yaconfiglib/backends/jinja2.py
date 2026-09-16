@@ -18,6 +18,7 @@ except ImportError:
     MemPath = None  # type: ignore[assignment,misc]
 
 from yaconfiglib.backends.base import ConfigBackend
+from yaconfiglib.errors import UnsupportedFormatError
 from yaconfiglib.backends.command import CommandBackend
 from yaconfiglib.utils import jinja2
 from yaconfiglib.utils.source import _materialize_temp
@@ -119,7 +120,7 @@ class Jinja2ConfigLoader(ConfigBackend):
         try:
             rendered_cls = ConfigBackend.get_class_by_path(stripped)
         except NotImplementedError:
-            raise NotImplementedError(
+            raise UnsupportedFormatError(
                 f"No backend for {path.name!r}: a template must keep the format "
                 "extension it renders to, as in config.yaml.j2"
             ) from None

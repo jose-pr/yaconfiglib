@@ -4,6 +4,9 @@ import logging
 import re as _re
 import typing as _ty
 
+from ..errors import ConfigTypeError as _ConfigTypeError
+from ..errors import UnsupportedFormatError as _UnsupportedFormatError
+
 try:
     from pathlib_next import LocalPath as _LocalPath
     from pathlib_next import Path as _Path
@@ -186,7 +189,7 @@ class ConfigBackend(_ty.Protocol):
             pathname = kwargs.pop("pathname")
             kwargs = _filter_include_kwargs(kwargs)
         else:
-            raise TypeError(f"Un-supported YAML node {node!r}")
+            raise _ConfigTypeError(f"Un-supported YAML node {node!r}")
 
         return self.load(pathname, *args, **kwargs, master=loader)
 
@@ -256,13 +259,34 @@ class ConfigBackend(_ty.Protocol):
         ``loader="yaml"`` (or similar) instead of a backend instance.
         """
         for scls in cls.__subclasses__(recursive=True):
-            _name = getattr(scls, "NAME", None)
-            if not _name:
-                _name = (
-                    scls.__name__.lower().removesuffix("loader").removesuffix("config")
-                )
-            if _name == name:
+            if cls._derived_name(scls) == name:
                 return scls
+
+    @staticmethod
+    def _derived_name(backend_cls: type) -> str:
+        """The name ``loader=`` accepts for *backend_cls*.
+
+        An explicit :attr:`NAME` wins; otherwise the class name, lowercased with
+        a trailing ``Loader``/``Config`` stripped. One helper, so a lookup by
+        name and the name list in an error message cannot drift apart.
+        """
+        name = getattr(backend_cls, "NAME", None)
+        if not name:
+            name = (
+                backend_cls.__name__.lower()
+                .removesuffix("loader")
+                .removesuffix("config")
+            )
+        return name
+
+    @classmethod
+    def _registered_names(cls) -> "_ty.List[str]":
+        """Every name ``loader=`` currently accepts, sorted and de-duplicated.
+
+        Empty names are dropped: `ConfigLoader` itself derives ``""``.
+        """
+        names = {cls._derived_name(scls) for scls in cls.__subclasses__(recursive=True)}
+        return sorted(name for name in names if name)
 
     @classmethod
     def can_load_path(cls, path: _Path) -> bool:
@@ -299,13 +323,16 @@ class ConfigBackend(_ty.Protocol):
         """Find the first registered backend class whose :meth:`can_load_path` matches *path*.
 
         Raises:
-            NotImplementedError: If no registered backend claims *path*. The
-                message names the extra to install when the format's optional
-                dependency is what is missing.
+            UnsupportedFormatError: If no registered backend claims *path*.
+                Also a `NotImplementedError`, which is what this raised
+                before. The message names the extra to install when the
+                format's optional dependency is what is missing, and lists the
+                names ``loader=`` accepts.
         """
         for scls in cls.__subclasses__(recursive=True):
             if scls.can_load_path(path):
                 return scls
-        raise NotImplementedError(
-            f"Not reader for {path}{cls._missing_backend_hint(path=path)}"
+        raise _UnsupportedFormatError(
+            f"No backend reads {path}{cls._missing_backend_hint(path=path)}"
+            f"; pass loader=<name> (registered: {', '.join(cls._registered_names())})"
         )

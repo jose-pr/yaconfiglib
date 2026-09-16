@@ -30,8 +30,10 @@ __all__ = [
 ]
 
 
-class CommandsDisabledError(ValueError):
-    """Raised when a command source is loaded while ``allow_commands`` is False."""
+# Defined in `yaconfiglib.errors` (a leaf module, like this one) and re-exported
+# here, where it used to live: `except CommandsDisabledError` imported from
+# either place must match the same class.
+from ..errors import CommandsDisabledError as CommandsDisabledError  # noqa: E402
 
 
 #: ``(allow_commands, sandbox, strict)`` in effect for the current context.

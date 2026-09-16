@@ -32,6 +32,14 @@ except ImportError as exc:  # Jinja2 missing, or installed but unimportable
 
 from .backends import ConfigBackend
 from .backends.command import CommandBackend
+from .errors import (
+    ConfigError,
+    ConfigTypeError,
+    ConfigValueError,
+    UnknownLoaderError,
+    UnsupportedFormatError,
+    load_error_types,
+)
 from .utils.enum import IntEnum
 from .utils.merge import Merge, MergeMethod, is_array
 from .utils.source import (
@@ -249,7 +257,7 @@ def _interpolate_document(
         if key in resolving:
             if strict:
                 chain = resolving[resolving.index(key) :] + [key]
-                raise ValueError(
+                raise ConfigValueError(
                     "interpolation reference cycle: "
                     + " -> ".join(str(item) for item in chain)
                 )
@@ -557,9 +565,11 @@ class ConfigLoader(ConfigBackend):
         if isinstance(loader, str):
             backend_cls = ConfigBackend.get_class_by_name(loader)
             if not backend_cls:
-                raise ValueError(
-                    f"Unknown configuration format/loader: {loader}"
+                raise UnknownLoaderError(
+                    f"Unknown configuration format/loader: {loader!r}"
                     f"{ConfigBackend._missing_backend_hint(name=loader)}"
+                    f"; registered: "
+                    f"{', '.join(ConfigBackend._registered_names())}"
                 )
             loader_factory = lambda path: backend_cls()
         elif callable(getattr(loader, "load", None)):
@@ -622,7 +632,9 @@ class ConfigLoader(ConfigBackend):
             chain = _LOAD_CHAIN.get()
             source = str(path)
             if source in chain:
-                raise ValueError(f"include cycle: {' -> '.join(chain + (source,))}")
+                raise ConfigValueError(
+                    f"include cycle: {' -> '.join(chain + (source,))}"
+                )
             token = _LOAD_CHAIN.set(chain + (source,))
             try:
                 value = _loader.load(path, **_options)
@@ -809,7 +821,7 @@ class ConfigLoader(ConfigBackend):
                         if member is None:
                             continue
                         if not isinstance(member, typing.Mapping):
-                            raise TypeError(
+                            raise ConfigTypeError(
                                 f"flatten=True: member {member_key!r} is a "
                                 f"{type(member).__name__}, not a mapping"
                             )
@@ -820,13 +832,13 @@ class ConfigLoader(ConfigBackend):
                         if member is None:
                             continue
                         if isinstance(member, (str, bytes)) or not is_array(member):
-                            raise TypeError(
+                            raise ConfigTypeError(
                                 f"flatten=True: member {index} is a "
                                 f"{type(member).__name__}, not a sequence"
                             )
                         result.extend(member)
                 else:
-                    raise TypeError(
+                    raise ConfigTypeError(
                         "flatten=True requires merged results to be a mapping or sequence"
                     )
             else:
