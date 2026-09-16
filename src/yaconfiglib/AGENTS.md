@@ -30,12 +30,30 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 - **`load_as(model_cls, *pathname, **kwargs) -> T`** — like `load`, but takes **several**
   sources and hydrates the merged mapping into `model_cls` (see `.load_as` below).
   Keywords route as in `load`, so `strict`/`base_dir`/`merge` configure the loader.
-- **`dump(obj, fp, **kwargs) -> None`** / **`dumps(obj, **kwargs) -> str`** — serialize
-  *obj* to YAML (delegates to `backends.yaml.YamlConfig.dumps`) and write it to *fp* (a
-  path or a writable file-like) or return it as a string. Always YAML, whatever *fp* is
-  named. Every `dict` subclass — a loaded `DotAccessibleDict` included — is written as a
-  plain mapping, so the output loads back; a caller-supplied `Dumper=`/`dumper_cls=`
-  is used as given and restores PyYAML's default handling.
+- **`dump(obj, fp, *, encoding=None, **kwargs) -> None`** /
+  **`dumps(obj, **kwargs) -> str`** — serialize *obj* to YAML (delegates to
+  `backends.yaml.YamlConfig.dumps`) and write it to *fp* or return it as a string. Always
+  YAML, whatever *fp* is named. Every `dict` subclass — a loaded `DotAccessibleDict`
+  included — is written as a plain mapping and a `tuple` as a plain sequence, so the
+  output loads back; every other Python object keeps PyYAML's tag (a `Decimal` stays
+  `!!python/object/apply:decimal.Decimal`). A caller-supplied `Dumper=`/`dumper_cls=`
+  is used as given and restores PyYAML's representers.
+  Two `yaml.dump` keywords default differently **with any dumper**: `sort_keys=False` and
+  `allow_unicode=True`. Pass either explicitly for PyYAML's behaviour.
+  `dumps(encoding=...)` raises `TypeError` — it returns `str`; encode the result, or use
+  `dump(..., encoding=...)`.
+  **`dump` targets**, in dispatch order: an object with `write` (a binary one is detected
+  by the `TypeError` it raises before writing anything, then handed `content.encode(enc)`);
+  a `str`/`bytes` path; an object with `write_text` (`pathlib.Path`, pathlib-next
+  `LocalPath`/`MemPath`, remote paths — before the `os.PathLike` branch, because
+  `os.fspath(MemPath(...))` raises); any other `os.PathLike`; else `TypeError`. `encoding`
+  (default `utf-8`) covers everything `dump` opens or encodes itself, and is **ignored for
+  a text stream**, whose own codec applies. Where the target codec is not a UTF codec
+  (`open(p, "w")` on a Windows codepage), `allow_unicode` falls back to `False` rather
+  than letting the write raise `UnicodeEncodeError`. A path target is opened in text mode,
+  so it gets platform line endings; pass a file object opened with `newline=""` for LF.
+  *obj* is serialized **before** the target is opened, so an unrepresentable value leaves
+  an existing file untouched.
 - **`ConfigLoader`** — the main orchestrator; see below.
 - **`ConfigLoaderMergeMethod`** — `MergeMethod` extended with `Last`/`List`/`Hash`; see
   "Merge strategies".
@@ -439,6 +457,10 @@ distinguish merge branches.
   resolution anchor (`_yaconfiglib_include_origin`) and the call's encoding
   (`_yaconfiglib_include_encoding`, inherited through `master`) ride on the same
   instance.
+  `.dumps(data, dumper_cls=None, **options)` defaults `Dumper` to
+  `DEFAULT_DUMPER_CLS` (the private `_PlainMappingDumper`: a `dict` multi-representer plus
+  an exact-`tuple` list representer), and defaults `sort_keys=False` and
+  `allow_unicode=True` whatever dumper is used. `encoding=` raises `TypeError`.
 Every file backend accepts a `str` as well as a `Path` (converted through
 `path_factory=` or `DEFAULT_PATH_FACTORY`), takes `encoding=None` to mean
 `DEFAULT_ENCODING`, and ignores one leading UTF-8 byte-order mark. That is what makes a

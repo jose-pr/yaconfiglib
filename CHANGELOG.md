@@ -62,6 +62,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `yaconfiglib.dumps()` and `dump()` keep mapping keys in their original order and write
+  non-ASCII characters as-is; they sorted keys and escaped every non-ASCII character, so a
+  written configuration no longer resembled the one that was read. Pass `sort_keys=True`
+  or `allow_unicode=False` for the previous output. `dump()` to a text file whose encoding
+  is not a UTF codec (for example `open(path, "w")` on Windows) still escapes non-ASCII,
+  since that codec cannot hold it.
+- `yaconfiglib.dumps(..., encoding=...)` raises `TypeError`; it returned `bytes` from a
+  function documented to return `str`. Call `.encode()` on the result, or use
+  `dump(obj, fp, encoding=...)`.
 - `yaconfiglib.load(None)` raises `TypeError` and `yaconfiglib.load("")` raises
   `ValueError`; both returned `None`, so an unset config path loaded as an empty
   configuration. Check the path before calling, or pass it among the sources of
@@ -217,6 +226,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Tuples are written as plain YAML lists. They were `!!python/tuple`, which this
+  library's own loader refuses — and interpolating a bare `{{ expr }}` can produce one,
+  so a config could dump to something it could not read back.
+- `yaconfiglib.dump(obj, path, encoding=...)` writes in that encoding; it raised
+  `TypeError: write() argument must be str, not bytes`. `dump()` now also accepts binary
+  file objects (`open(path, "wb")`, `io.BytesIO`, `gzip.open`) and pathlib-next paths such
+  as `MemPath`, which raised `NotImplementedError: __fspath__`. A binary target with
+  `encoding="utf-16"` gets a single BOM; it used to get one before every written chunk,
+  which did not load back.
 - `yaconfiglib.loads()` honors a first line such as `#!settings.toml` that names a
   recognized format, as `ConfigLoader.load()` does; the line was read as a YAML comment
   and the document misparsed. A first line no backend recognizes (a real shebang, a

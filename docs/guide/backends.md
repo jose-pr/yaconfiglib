@@ -263,6 +263,19 @@ Only a name a backend recognizes counts, so a real shebang line
 (`#!/usr/bin/env python`) stays part of the document, and a script name never
 runs. Bytes are read with `encoding=` (UTF-8 by default, BOM ignored).
 
+Writing works the same way round. `yaconfiglib.dump()` takes a path, a text
+or binary file object, or a `pathlib` path, and `encoding=` covers whatever
+it opens itself:
+
+```python
+yaconfiglib.dump(cfg, "out.yaml")
+yaconfiglib.dump(cfg, fh, encoding="utf-16")
+```
+
+Keys keep the order they were written in, and non-ASCII text is written
+as-is — except to a text file whose own codec cannot hold it, where it is
+escaped instead of failing.
+
 An `!include` inside an open file resolves against the loader's `base_dir`,
 not the file's own directory, because there is no directory to resolve
 against once the content has been read — pass the path instead of the file
