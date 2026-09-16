@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import contextvars
 import copy as _copy
 import dataclasses
@@ -1360,21 +1361,100 @@ def load_as(model_cls: type[T], *pathname: SourceLike, **kwargs) -> T:
     return ConfigLoader(**loader_kwargs).load_as(model_cls, *pathname, **load_kwargs)
 
 
-def dump(obj: object, fp: typing.Any, **kwargs) -> None:
-    """Dump configuration object to a file pointer or file path."""
-    content = dumps(obj, **kwargs)
+def _is_utf_codec(name: typing.Optional[str]) -> bool:
+    """Whether *name* is a UTF codec, and so can hold any text.
+
+    A name nothing recognizes counts as non-UTF: the conservative answer keeps
+    escapes, which every codec can write.
+    """
+    if not name:
+        return False
+    try:
+        return codecs.lookup(name).name.startswith("utf-")
+    except LookupError:
+        return False
+
+
+def dump(
+    obj: object, fp: typing.Any, *, encoding: typing.Optional[str] = None, **kwargs
+) -> None:
+    """Write *obj* as YAML to *fp*.
+
+    *fp* may be a text file object, a binary one (`io.BytesIO`,
+    ``open(path, "wb")``, `gzip.open`), a path as `str`/`bytes`, a
+    `pathlib.Path`, or a pathlib-next path such as a ``MemPath``.
+
+    *encoding* (UTF-8 by default) applies to everything this function opens or
+    encodes itself. It is **not** used for a text file object, which writes in
+    its own codec. Non-ASCII text is written as-is, except where the target
+    codec is not a UTF codec (``open(path, "w")`` on a Windows console codepage,
+    for example): there it is escaped, because the alternative is
+    `UnicodeEncodeError`. Pass ``allow_unicode=`` to decide for yourself.
+
+    A path target is opened in text mode, so it gets the platform's line
+    endings, like `json.dump` and `open`. For LF everywhere, pass a file object
+    opened with ``newline=""``.
+
+    *obj* is serialized before *fp* is opened, so a value YAML cannot represent
+    leaves an existing file untouched.
+
+    Raises:
+        TypeError: If *fp* is none of the above.
+    """
+    enc = encoding or "utf-8"
+    # The stream's own codec decides for a text stream; for everything else
+    # it is the codec we are about to use.
+    target_codec = enc
     if hasattr(fp, "write"):
-        fp.write(content)
-    else:
-        with open(fp, "w", encoding="utf-8") as f:
-            f.write(content)
+        stream_codec = getattr(fp, "encoding", None)
+        if isinstance(stream_codec, str):
+            target_codec = stream_codec
+    if not _is_utf_codec(target_codec):
+        kwargs.setdefault("allow_unicode", False)
+
+    content = dumps(obj, **kwargs)
+
+    if hasattr(fp, "write"):
+        try:
+            fp.write(content)
+        except TypeError:
+            # A binary target rejects str before writing anything, so there is
+            # nothing to undo here.
+            fp.write(content.encode(enc))
+        return
+    if isinstance(fp, (str, bytes)):
+        with open(fp, "w", encoding=enc) as handle:
+            handle.write(content)
+        return
+    # Before the os.PathLike branch: a MemPath is an os.PathLike whose
+    # __fspath__ raises, and write_text is what every path type here has.
+    write_text = getattr(fp, "write_text", None)
+    if callable(write_text):
+        write_text(content, encoding=enc)
+        return
+    if isinstance(fp, os.PathLike):
+        with open(os.fspath(fp), "w", encoding=enc) as handle:
+            handle.write(content)
+        return
+    raise TypeError(
+        f"dump() cannot write to {type(fp).__name__}; pass a file object, a "
+        "path, or a pathlib path"
+    )
 
 
 def dumps(obj: object, **kwargs) -> str:
     """Serialize *obj* to a YAML string (always YAML; see :class:`~yaconfiglib.backends.yaml.YamlConfig`).
 
-    A loaded configuration writes as a plain mapping, so the output can be
-    loaded back. Call a backend instance's ``dumps()`` for another format.
+    A loaded configuration writes as a plain mapping and a ``tuple`` as a plain
+    sequence, so the output can be loaded back; every other Python object keeps
+    PyYAML's tag. Mapping keys keep their order (``sort_keys=False``) and
+    non-ASCII text is written as-is (``allow_unicode=True``) — pass either
+    keyword to override. Call a backend instance's ``dumps()`` for another
+    format.
+
+    Raises:
+        TypeError: If ``encoding=`` is passed; this returns `str`. Encode the
+            result, or use :func:`dump` with ``encoding=``.
     """
     from .backends.yaml import YamlConfig
 

@@ -2,6 +2,7 @@
 Tests for ConfigLoader — loading, merging, and example file compatibility.
 """
 
+import io
 import pathlib
 import subprocess
 import sys
@@ -416,10 +417,17 @@ class TestTopLevelAPI:
         assert yaconfiglib.load(str(target)) == {"a": 1, "b": {"c": 2}}
 
     @pytest.mark.usefixtures("needs_yaml")
-    def test_dumps_keeps_exact_type_representers(self):
+    def test_dumps_other_python_types_keep_pyyaml_tags(self):
+        import decimal
+
         import yaconfiglib
 
-        assert "!!python/tuple" in yaconfiglib.dumps({"t": (1, 2)})
+        # Only dict subclasses and tuples are re-represented; everything else
+        # keeps PyYAML's own tag, so a dataclass, an OrderedDict or a path
+        # dumps as it always did.
+        assert "!!python/object/apply:decimal.Decimal" in yaconfiglib.dumps(
+            {"x": decimal.Decimal("1.1")}
+        )
 
     @pytest.mark.usefixtures("needs_yaml")
     def test_dumps_does_not_modify_global_yaml_dumper(self):
@@ -1868,3 +1876,135 @@ class TestLoadsAndLoadArguments:
         # An ASCII-compatible codec must not decode the payload on its way to
         # a byte-oriented backend.
         assert yaconfiglib.loads(payload, loader=Raw()) == payload
+
+
+@pytest.mark.usefixtures("needs_yaml")
+class TestDumpOutputContract:
+    """What the writer produces, and where it can write it.
+
+    `dumps()` sorted keys and escaped every non-ASCII character, so a written
+    config no longer looked like the one that was read; it wrote a tuple — a
+    value this library's own interpolation produces — as `!!python/tuple`,
+    which its loader refuses; and `dump()` crashed on `encoding=`, on binary
+    targets and on a `MemPath`.
+    """
+
+    def test_dumps_keeps_insertion_order(self):
+        import yaconfiglib
+
+        assert yaconfiglib.dumps({"zeta": 1, "alpha": 2}) == "zeta: 1\nalpha: 2\n"
+
+    def test_dumps_writes_non_ascii_as_is(self):
+        import yaconfiglib
+
+        assert yaconfiglib.dumps({"a": "café"}) == "a: café\n"
+
+    def test_dumps_tuple_is_a_plain_sequence(self):
+        import yaconfiglib
+
+        out = yaconfiglib.dumps({"t": (1, 2)})
+        assert "python/tuple" not in out
+        assert yaconfiglib.loads(out) == {"t": [1, 2]}
+
+    def test_dumps_pyyaml_defaults_can_be_restored(self):
+        import yaconfiglib
+
+        out = yaconfiglib.dumps({"b": 1, "a": "é"}, sort_keys=True, allow_unicode=False)
+        assert out == 'a: "\\xE9"\nb: 1\n'
+
+    def test_dumps_rejects_encoding(self):
+        import yaconfiglib
+
+        with pytest.raises(TypeError, match="encoding"):
+            yaconfiglib.dumps({"a": 1}, encoding="utf-8")
+
+    @pytest.mark.parametrize("codec", ["utf-8", "utf-16"])
+    def test_dump_path_uses_encoding(self, tmp_path, codec):
+        import yaml
+
+        import yaconfiglib
+
+        target = tmp_path / "out.yaml"
+        yaconfiglib.dump({"a": "café"}, str(target), encoding=codec)
+        assert yaml.safe_load(target.read_text(encoding=codec)) == {"a": "café"}
+
+    @pytest.mark.parametrize("kind", ["bytesio", "wb_file", "gzip"])
+    def test_dump_binary_targets(self, tmp_path, kind):
+        import yaconfiglib
+
+        obj = {"a": "café"}
+        expected = yaconfiglib.dumps(obj).encode("utf-8")
+        if kind == "bytesio":
+            buffer = io.BytesIO()
+            yaconfiglib.dump(obj, buffer)
+            written = buffer.getvalue()
+        elif kind == "wb_file":
+            target = tmp_path / "out.yaml"
+            with open(target, "wb") as handle:
+                yaconfiglib.dump(obj, handle)
+            written = target.read_bytes()
+        else:
+            import gzip
+
+            target = tmp_path / "out.yaml.gz"
+            with gzip.open(target, "wb") as handle:
+                yaconfiglib.dump(obj, handle)
+            with gzip.open(target, "rb") as handle:
+                written = handle.read()
+        assert written == expected
+
+    def test_dump_binary_stream_with_encoding_loads_back(self):
+        import yaconfiglib
+
+        buffer = io.BytesIO()
+        yaconfiglib.dump({"a": 1}, buffer, encoding="utf-16")
+        # One BOM, not one per written chunk: PyYAML's own encoding= applied
+        # its codec per chunk, and the result did not load back.
+        assert yaconfiglib.load(io.BytesIO(buffer.getvalue()), encoding="utf-16") == {
+            "a": 1
+        }
+
+    def test_dump_to_mempath(self):
+        import yaml
+
+        import yaconfiglib
+        from yaconfiglib.utils.source import MemPath
+
+        if MemPath is None:
+            pytest.skip("pathlib_next is not installed")
+        obj = {"a": 1}
+        target = MemPath("dumped.yaml")
+        # os.fspath(MemPath) raises, so write_text is the only way in.
+        yaconfiglib.dump(obj, target)
+        assert yaml.safe_load(target.read_text(encoding="utf-8")) == obj
+
+    def test_dump_non_utf_text_stream_keeps_escapes(self, tmp_path):
+        import yaml
+
+        import yaconfiglib
+
+        target = tmp_path / "out.yaml"
+        with open(target, "w", encoding="cp1252") as handle:
+            # cp1252 cannot hold this text, so it must be escaped rather than
+            # raising UnicodeEncodeError.
+            yaconfiglib.dump({"n": "日本"}, handle)
+        assert yaml.safe_load(target.read_text(encoding="cp1252")) == {"n": "日本"}
+
+    def test_dump_path_uses_text_mode_line_endings(self, tmp_path):
+        import os
+
+        import yaconfiglib
+
+        target = tmp_path / "out.yaml"
+        yaconfiglib.dump({"a": 1, "b": 2}, str(target))
+        assert (b"\r\n" in target.read_bytes()) == (os.linesep == "\r\n")
+
+    def test_dump_serialization_error_leaves_target(self, tmp_path):
+        import yaconfiglib
+
+        target = tmp_path / "out.yaml"
+        target.write_text("old\n", encoding="utf-8")
+        with pytest.raises(Exception):
+            yaconfiglib.dump({"g": (x for x in [])}, str(target))
+        # Serialization happens before the file is opened.
+        assert target.read_text(encoding="utf-8") == "old\n"

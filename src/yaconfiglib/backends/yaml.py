@@ -73,6 +73,12 @@ class _PlainMappingDumper(yaml.Dumper):
 _PlainMappingDumper.add_multi_representer(
     dict, yaml.representer.SafeRepresenter.represent_dict
 )
+# Exact `tuple` only: interpolation of a bare `{{ expr }}` can produce one, and
+# PyYAML writes it as !!python/tuple, which this library's own loader refuses.
+# A namedtuple keeps its own representer, like every other object.
+_PlainMappingDumper.add_representer(
+    tuple, yaml.representer.SafeRepresenter.represent_list
+)
 
 
 class YamlConfig(ConfigBackend):
@@ -272,8 +278,30 @@ class YamlConfig(ConfigBackend):
 
         Defaults to :attr:`DEFAULT_DUMPER_CLS`, which writes every ``dict``
         subclass — a loaded :class:`~yaconfiglib.loader.DotAccessibleDict`
-        included — as a plain mapping, so the output loads back. A
-        *dumper_cls* (or a ``Dumper=`` option) of your own is used as given.
+        included — as a plain mapping, so the output loads back, and a
+        ``tuple`` as a plain sequence. Every other Python object keeps
+        PyYAML's own tag (a `~decimal.Decimal` stays
+        ``!!python/object/apply:decimal.Decimal``). A *dumper_cls* (or a
+        ``Dumper=`` option) of your own is used as given, which restores
+        PyYAML's representers.
+
+        Two `yaml.dump` keywords default differently here, whatever dumper is
+        used: ``sort_keys=False``, because a configuration's key order is
+        written on purpose, and ``allow_unicode=True``, so text stays readable
+        instead of being escaped. Pass either explicitly to get PyYAML's
+        behaviour back.
+
+        Raises:
+            TypeError: If ``encoding=`` is passed. This returns `str`; encode
+                the result yourself, or use
+                :func:`~yaconfiglib.loader.dump` with ``encoding=``.
         """
+        if "encoding" in options:
+            raise TypeError(
+                "dumps() returns str and does not accept encoding=; call "
+                ".encode() on the result, or use dump(obj, fp, encoding=...)"
+            )
         options.setdefault("Dumper", dumper_cls or self.DEFAULT_DUMPER_CLS)
+        options.setdefault("sort_keys", False)
+        options.setdefault("allow_unicode", True)
         return yaml.dump(data, **options)
