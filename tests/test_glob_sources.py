@@ -291,3 +291,120 @@ class TestHashKeyCollisions:
         assert [
             r.getMessage() for r in caplog.records if "Hash merge" in r.getMessage()
         ] == []
+
+
+@pytest.fixture
+def locked_tree(tmp_path, monkeypatch):
+    """A tree with one directory whose listing raises `PermissionError`.
+
+    Patches `_scandir`, **not** `iterdir`: pathlib-next 0.9.4+ lists through
+    `_scandir`, so an `iterdir` patch is never reached and makes an unreadable
+    directory look readable. A monkeypatch rather than real ACLs, so this runs
+    the same on Windows and in a root-owned CI container.
+    """
+    (tmp_path / "lock" / "ok").mkdir(parents=True)
+    (tmp_path / "lock" / "locked").mkdir(parents=True)
+    (tmp_path / "lock" / "ok" / "a.json").write_text('{"a": 1}', encoding="utf-8")
+    (tmp_path / "lock" / "locked" / "b.json").write_text('{"b": 2}', encoding="utf-8")
+
+    from yaconfiglib.utils.source import Path as SourcePath
+
+    original = SourcePath._scandir
+
+    def patched(self, *args, **kwargs):
+        if self.name == "locked":
+            raise PermissionError(13, "Permission denied", str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(SourcePath(str(tmp_path))), "_scandir", patched)
+    return tmp_path
+
+
+class TestGlobExpansionErrors:
+    """A directory glob expansion cannot list is reported, not silently dropped.
+
+    pathlib skips an unreadable directory without a word, so a whole
+    configuration layer could disappear. pathlib-next 0.9.7 added
+    `glob(on_error=)`, which is what lets `ignore_error` see it.
+    """
+
+    def test_unreadable_directory_raises_by_default(self, locked_tree):
+        from yaconfiglib import ConfigLoader
+
+        loader = ConfigLoader(base_dir=str(locked_tree))
+        with pytest.raises(PermissionError):
+            loader.load("lock/**/*.json", recursive=True)
+
+    def test_ignore_error_true_skips_only_that_directory(self, locked_tree):
+        from yaconfiglib import ConfigLoader
+
+        loader = ConfigLoader(base_dir=str(locked_tree), ignore_error=True)
+        # The readable sibling still loads: one locked subdirectory must not
+        # drop the whole layer.
+        assert loader.load("lock/**/*.json", recursive=True) == {"a": 1}
+
+    def test_predicate_receives_error_directory_and_loader(self, locked_tree):
+        from yaconfiglib import ConfigLoader
+
+        seen = []
+
+        def record(error, **context):
+            seen.append((error, context))
+            return True
+
+        loader = ConfigLoader(base_dir=str(locked_tree), ignore_error=record)
+        loader.load("lock/**/*.json", recursive=True)
+        # Once per unreadable directory, whatever the pattern visits.
+        assert len(seen) == 1
+        error, context = seen[0]
+        assert isinstance(error, PermissionError)
+        assert context["path"].name == "locked"
+        assert context["loader"] is loader
+
+    def test_glob_expansion_offer_uses_glob_phase(self, locked_tree):
+        from yaconfiglib import ConfigLoader
+
+        seen = []
+
+        def record(error, **context):
+            seen.append((context["phase"], context["path"].name))
+            return True
+
+        loader = ConfigLoader(base_dir=str(locked_tree), ignore_error=record)
+        result = loader.load("lock/**/*.json", recursive=True)
+        assert seen == [("glob", "locked")]
+        assert result == {"a": 1}
+
+    def test_load_all_skips_unreadable_directory(self, locked_tree):
+        from yaconfiglib import ConfigLoader
+
+        loader = ConfigLoader(base_dir=str(locked_tree), ignore_error=True)
+        assert list(loader.load_all("lock/**/*.json", recursive=True)) == [{"a": 1}]
+
+    def test_parse_sources_on_error_true_continues(self, locked_tree):
+        from yaconfiglib.utils.source import Path as SourcePath
+        from yaconfiglib.utils.source import parse_sources
+
+        matches = list(
+            parse_sources(
+                ["lock/**/*.json"],
+                base_dir=SourcePath(str(locked_tree)),
+                recursive=True,
+                on_error=lambda error, directory: True,
+            )
+        )
+        assert [p.name for p in matches] == ["a.json"]
+
+    def test_parse_sources_on_error_false_reraises(self, locked_tree):
+        from yaconfiglib.utils.source import Path as SourcePath
+        from yaconfiglib.utils.source import parse_sources
+
+        with pytest.raises(PermissionError):
+            list(
+                parse_sources(
+                    ["lock/**/*.json"],
+                    base_dir=SourcePath(str(locked_tree)),
+                    recursive=True,
+                    on_error=lambda error, directory: False,
+                )
+            )

@@ -545,8 +545,49 @@ def _classify_source(source, base_dir, encoding, path_factory, recursive):
     return "literal", (path,)
 
 
-def _expand_pattern(path, glob_base, source, recursive):
-    """Ask pathlib-next (or the stdlib fallback) to expand one pattern."""
+def _glob_error_hook(on_error, path_factory):
+    """Adapt *on_error* to the hook `Path.glob(on_error=)` expects.
+
+    Upstream calls ``hook(error)`` with ``error.filename`` naming the directory;
+    returning treats that directory as empty and raising propagates. This
+    package's own callback is ``(error, directory) -> bool``, because a caller
+    should not have to know which attribute holds the directory, and it gets a
+    path object rather than the string upstream fills in.
+
+    The directory is remembered: pathlib-next reports the same unreadable
+    directory **twice** for a ``**`` pattern (measured on 0.9.7), and a
+    predicate that counts or prompts must be asked once per directory.
+    """
+    asked = set()
+
+    def hook(error: OSError) -> None:
+        # A parent that does not exist, or is not a directory, is not a failure
+        # to report: the pattern simply matches nothing, which is what pathlib
+        # does and what this package already documented.
+        if isinstance(error, (FileNotFoundError, NotADirectoryError)):
+            return
+        filename = getattr(error, "filename", None)
+        key = str(filename)
+        if key in asked:
+            return
+        asked.add(key)
+        directory = path_factory(filename) if filename else None
+        if on_error(error, directory):
+            logger.debug(
+                "skipping directory %s during glob expansion: %s", directory, error
+            )
+            return
+        raise error
+
+    return hook
+
+
+def _expand_pattern(path, glob_base, source, recursive, on_error=None):
+    """Ask pathlib-next (or the stdlib fallback) to expand one pattern.
+
+    *on_error* is the already-adapted hook (see `_glob_error_hook`), or None to
+    keep pathlib's silent skip.
+    """
     if HAS_PATHLIB_NEXT and isinstance(path, Path):
         # The test is isinstance, not hasattr("glob"): a STDLIB path has .glob
         # too, but no `recursive` keyword, and base_dir may be one.
@@ -556,16 +597,17 @@ def _expand_pattern(path, glob_base, source, recursive):
             # Only a RELATIVE source can go this way: glob() rejects a
             # non-relative pattern, which is what an absolute include source is
             # after rebasing.
-            return glob_base.glob(str(source), recursive=recursive)
+            return glob_base.glob(str(source), recursive=recursive, on_error=on_error)
         # No base to expand from (an absolute pattern, or no base_dir):
         # glob(None) expands the pattern the path itself carries, splitting at
         # the first wildcard. Added in pathlib-next 0.9.6, which is why the
         # floor is >=0.9.6 — 0.9.4 removed the glob("") spelling for pathlib
         # parity, and on 0.9.0-0.9.3 glob(None) returns silently partial
         # matches.
-        return path.glob(None, recursive=recursive)
+        return path.glob(None, recursive=recursive, on_error=on_error)
     # Fallback path traversal: stdlib glob takes the pattern as an argument, so
-    # separate it from its directory.
+    # separate it from its directory. It has no error hook and swallows a
+    # listing failure itself, so *on_error* cannot be honoured here.
     return path.parent.glob(path.name)
 
 
@@ -627,6 +669,7 @@ def parse_sources(
     memo: _ty.Iterable[str | Path] = None,
     path_factory: type[Path] = None,
     recursive: bool = None,
+    on_error: "_ty.Optional[_ty.Callable[[OSError, _ty.Any], bool]]" = None,
 ) -> _ty.Iterator[Path]:
     """Resolve *sources* into a flat stream of loadable :class:`Path`-like objects.
 
@@ -644,6 +687,7 @@ def parse_sources(
         memo=memo,
         path_factory=path_factory,
         recursive=recursive,
+        on_error=on_error,
     ):
         yield item
 
@@ -655,6 +699,7 @@ def _iter_sources(
     memo: _ty.Iterable[str | Path] = None,
     path_factory: type[Path] = None,
     recursive: bool = None,
+    on_error: "_ty.Optional[_ty.Callable[[OSError, _ty.Any], bool]]" = None,
     *,
     text_fallback: bool = False,
 ) -> "_ty.Iterator[_ty.Tuple[_ty.Any, _ty.Optional[str]]]":
@@ -726,6 +771,12 @@ def _iter_sources(
         path_factory: Callable building a path from a string source.
         recursive: Whether glob expansion should recurse into
             subdirectories (``**``).
+        on_error: Called as ``on_error(error, directory)`` when glob expansion
+            cannot list a directory. Return `True` to skip that directory —
+            the rest of the pattern still expands — or anything falsy to let
+            the `OSError` propagate. Without it the directory is skipped
+            silently, as pathlib does. Asked once per directory, and only on
+            the pathlib-next path: the stdlib fallback has no hook.
         text_fallback: Store in-memory text as UTF-8 when *encoding* cannot
             represent it, reporting that codec back, instead of raising
             `UnicodeEncodeError`.
@@ -747,6 +798,7 @@ def _iter_sources(
             *encoding* and *text_fallback* is not set.
     """
     path_factory = path_factory or Path
+    glob_error = _glob_error_hook(on_error, path_factory) if on_error else None
     if memo is None:
         memo = set()
     elif not isinstance(memo, set):
@@ -787,7 +839,7 @@ def _iter_sources(
             continue
 
         path, glob_base, source = payload
-        matches = _expand_pattern(path, glob_base, source, recursive)
+        matches = _expand_pattern(path, glob_base, source, recursive, glob_error)
         for match in _ordered_file_matches(matches):
             key = _dedup_key(match)
             if key in literal_keys:

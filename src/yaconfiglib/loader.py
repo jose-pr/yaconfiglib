@@ -536,10 +536,12 @@ class ConfigLoader(ConfigBackend):
 
                 *phase* is ``"load"`` (reading or parsing *path* failed),
                 ``"include"`` (a source included by *path* failed), ``"merge"``
-                (merging *path* into the running result failed) or
-                ``"interpolate"`` (rendering the merged document failed).
-                *path* is the source, or ``None`` where no single source
-                applies. Extras: ``result=`` for ``"interpolate"`` in
+                (merging *path* into the running result failed),
+                ``"interpolate"`` (rendering the merged document failed) or
+                ``"glob"`` (a directory could not be listed while expanding a
+                pattern — *path* is that directory, and skipping it still loads
+                the rest of the pattern). *path* is the source, or ``None``
+                where no single source applies. Extras: ``result=`` for ``"interpolate"`` in
                 :meth:`load`, ``value=`` in :meth:`load_all`.
 
                 A failure inside an included file is offered **once per level**:
@@ -894,6 +896,9 @@ class ConfigLoader(ConfigBackend):
                 encoding=encoding,
                 path_factory=self.path_factory,
                 recursive=recursive,
+                on_error=lambda error, directory: self._offer_error(
+                    error, phase="glob", path=directory
+                ),
                 text_fallback=True,
             ):
                 # Which step this source reached, so the one handler below can
@@ -1093,6 +1098,9 @@ class ConfigLoader(ConfigBackend):
             encoding=encoding,
             path_factory=self.path_factory,
             recursive=self.recursive,
+            on_error=lambda error, directory: self._offer_error(
+                error, phase="glob", path=directory
+            ),
             text_fallback=True,
         ):
             value = None
