@@ -104,7 +104,10 @@ class IniConfig(ConfigBackend):
             default_section=ini_default_section or self.DEFAULT_SECTION,
             interpolation=_interpolation(choice),
         )
-        parser.read_string(self._read_text(path, encoding), path.name)
+        # The full path, so two app.ini files in a glob are
+        # distinguishable; as_posix() because configparser formats
+        # its source with %r, which doubles Windows backslashes.
+        parser.read_string(self._read_text(path, encoding), path.as_posix())
         result = {}
         for section in parser.sections():
             d = result[section] = {}

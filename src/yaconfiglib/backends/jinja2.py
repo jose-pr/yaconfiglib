@@ -18,7 +18,11 @@ except ImportError:
     MemPath = None  # type: ignore[assignment,misc]
 
 from yaconfiglib.backends.base import ConfigBackend
-from yaconfiglib.errors import UnsupportedFormatError
+from yaconfiglib.errors import (
+    ErrorFrame,
+    UnsupportedFormatError,
+    _add_error_context,
+)
 from yaconfiglib.backends.command import CommandBackend
 from yaconfiglib.utils import jinja2
 from yaconfiglib.utils.source import _materialize_temp
@@ -124,8 +128,13 @@ class Jinja2ConfigLoader(ConfigBackend):
                 f"No backend for {path.name!r}: a template must keep the format "
                 "extension it renders to, as in config.yaml.j2"
             ) from None
+        # name/filename reach the compiled code, so a template error
+        # names the file instead of "<unknown>", and so does its traceback
+        # frame.
         template = jinja2.load_template(
             self._read_text(path, encoding),
+            name=path.name,
+            filename=str(path),
             environment=environment,
         )
         context = {"pathname": PosixPathname(path.as_posix())}
@@ -160,11 +169,17 @@ class Jinja2ConfigLoader(ConfigBackend):
         # The rendered document lives in memory or in a temp file, so relative
         # includes inside it resolve next to the template they came from.
         kwargs.setdefault("origin", path)
-        rendered = rendered_loader.load(
-            target,
-            encoding=encoding,
-            loader=parent_loader,
-            path_factory=path_factory,
-            **kwargs,
-        )
+        try:
+            rendered = rendered_loader.load(
+                target,
+                encoding=encoding,
+                loader=parent_loader,
+                path_factory=path_factory,
+                **kwargs,
+            )
+        except Exception as error:  # noqa: BLE001 - adds context, re-raises
+            # Line numbers in a parse error refer to the RENDERED text, so the
+            # frame has to say which template produced them.
+            _add_error_context(error, frame=ErrorFrame("render", str(path)))
+            raise
         return rendered

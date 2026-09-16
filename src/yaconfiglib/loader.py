@@ -36,8 +36,10 @@ from .errors import (
     ConfigError,
     ConfigTypeError,
     ConfigValueError,
+    ErrorFrame,
     UnknownLoaderError,
     UnsupportedFormatError,
+    _add_error_context,
     load_error_types,
 )
 from .utils.enum import IntEnum
@@ -183,6 +185,26 @@ else:
 _LOAD_CHAIN: "contextvars.ContextVar[typing.Tuple[str, ...]]" = contextvars.ContextVar(
     "yaconfiglib_load_chain", default=()
 )
+
+
+def _add_encoding_hint(error: BaseException, encoding: typing.Optional[str]) -> None:
+    """Tell a decode failure which ``encoding=`` would have worked.
+
+    The codec is a load argument, so "invalid start byte" is actionable only
+    once the message says which codec was used and names a likely one. A
+    UTF-16 byte-order mark is recognizable, so it is named outright.
+    """
+    if not isinstance(error, UnicodeDecodeError):
+        return
+    data = error.object if isinstance(error.object, (bytes, bytearray)) else b""
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        suggestion = "encoding='utf-16'"
+    else:
+        suggestion = "pass encoding=... naming the file's codec"
+    reason = getattr(error, "reason", "")
+    marker = f" (read as {encoding or 'utf-8'}; {suggestion})"
+    if marker not in reason:
+        error.reason = f"{reason}{marker}"
 
 
 def _environ_snapshot() -> typing.Mapping[str, str]:
@@ -622,30 +644,39 @@ class ConfigLoader(ConfigBackend):
         )
         _options.update(reader_args)
 
-        if is_command:
-            # A command is not a file that can include itself.
-            value = _loader.load(path, **_options)
-        else:
-            # Sources currently being loaded, outermost first. A path that is
-            # already in the chain is an include cycle (a.yaml -> b.yaml -> a.yaml),
-            # which used to recurse until RecursionError.
-            chain = _LOAD_CHAIN.get()
-            source = str(path)
-            if source in chain:
-                raise ConfigValueError(
-                    f"include cycle: {' -> '.join(chain + (source,))}"
-                )
-            token = _LOAD_CHAIN.set(chain + (source,))
-            try:
+        try:
+            if is_command:
+                # A command is not a file that can include itself.
                 value = _loader.load(path, **_options)
-            finally:
-                _LOAD_CHAIN.reset(token)
-        if transform:
-            value = jinja2.eval(transform, environment=_expression_environment())(
-                value=value, pathname=_pathname(path)
-            )
-
-        return key_factory(path, value), value
+            else:
+                # Sources currently being loaded, outermost first. A path that is
+                # already in the chain is an include cycle (a.yaml -> b.yaml -> a.yaml),
+                # which used to recurse until RecursionError.
+                chain = _LOAD_CHAIN.get()
+                source = str(path)
+                if source in chain:
+                    raise ConfigValueError(
+                        f"include cycle: {' -> '.join(chain + (source,))}"
+                    )
+                token = _LOAD_CHAIN.set(chain + (source,))
+                try:
+                    value = _loader.load(path, **_options)
+                finally:
+                    _LOAD_CHAIN.reset(token)
+            if transform:
+                value = jinja2.eval(transform, environment=_expression_environment())(
+                    value=value, pathname=_pathname(path)
+                )
+            return key_factory(path, value), value
+        except Exception as error:  # noqa: BLE001 - names the source, re-raises
+            # Deliberately every type: a parse error, a decode error, a missing
+            # file or a backend's own error must all say which source failed.
+            # The error is re-raised unchanged — same type, same identity.
+            # Hint first: it belongs to the error's own text, which
+            # _add_error_context then snapshots before appending its suffix.
+            _add_encoding_hint(error, encoding)
+            _add_error_context(error, source=str(path))
+            raise
 
     def load(
         self,
@@ -777,27 +808,35 @@ class ConfigLoader(ConfigBackend):
                         allow_commands=allow_commands,
                         **reader_args,
                     )
-                    if _join_init:
-                        results = merge(
-                            results,
-                            result,
-                            configloaderkey=name,
-                            **merge_options,
-                        )
-                    else:
-                        # Probe for the hook instead of catching AttributeError:
-                        # an error raised inside a real init() must surface, not
-                        # look like "this strategy has no init".
-                        init = getattr(merge, "init", None)
-                        if callable(init):
-                            results = init(
-                                initial=result,
+                    # The merge is its own step, so a strategy's failure is
+                    # attributed as "while merging <source>" rather than as a
+                    # failure to read it.
+                    try:
+                        if _join_init:
+                            results = merge(
+                                results,
+                                result,
                                 configloaderkey=name,
                                 **merge_options,
                             )
                         else:
-                            results = result
-                        _join_init = True
+                            # Probe for the hook instead of catching
+                            # AttributeError: an error raised inside a real
+                            # init() must surface, not look like "this strategy
+                            # has no init".
+                            init = getattr(merge, "init", None)
+                            if callable(init):
+                                results = init(
+                                    initial=result,
+                                    configloaderkey=name,
+                                    **merge_options,
+                                )
+                            else:
+                                results = result
+                            _join_init = True
+                    except Exception as error:  # noqa: BLE001 - context, re-raises
+                        _add_error_context(error, frame=ErrorFrame("merge", str(path)))
+                        raise
                 # Deliberately broad: ``ignore_error`` is a user predicate designed
                 # to decide per-error whether to skip ANY load failure (a YAML parse
                 # error, a missing file, a backend error...), so narrowing the tuple

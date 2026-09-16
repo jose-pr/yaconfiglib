@@ -13,8 +13,8 @@ except ImportError:
 
     Pathname = Path
 
-from yaconfiglib.backends.base import ConfigBackend, _filter_include_kwargs
-from yaconfiglib.errors import ConfigTypeError
+from yaconfiglib.backends.base import ConfigBackend, _include_call
+from yaconfiglib.errors import ErrorFrame, _add_error_context
 from yaconfiglib.utils.source import _rebase_include_sources
 
 logger = logging.getLogger(__name__)
@@ -155,7 +155,15 @@ class YamlConfig(ConfigBackend):
         if loader is not None:
             self._register_include_tags(loader_cls, loader, path_factory)
 
-        loader_instance = loader_cls(path.read_text(encoding=encoding))
+        try:
+            loader_instance = loader_cls(path.read_text(encoding=encoding))
+        except yaml.reader.ReaderError as error:
+            # Raised from inside the constructor (a non-printable byte), so
+            # there is no instance whose name could be set.
+            error.name = str(path)
+            raise
+        # Every mark PyYAML makes from here on names this file.
+        loader_instance.name = str(path)
         # Make the driving ConfigLoader reachable from the include constructor
         # (see _register_include_tags._construct) so nested !include/!load
         # resolve through THIS loader's settings, not the first one registered.
@@ -222,20 +230,11 @@ class YamlConfig(ConfigBackend):
             )
 
         def _construct(ldr: yaml.Loader, node: yaml.Node) -> object:
-            args = ()
-            kwargs = {}
-            if isinstance(node, yaml.nodes.ScalarNode):
-                pathname = ldr.construct_scalar(node)
-            elif isinstance(node, yaml.nodes.SequenceNode):
-                pathname, *args = ldr.construct_sequence(node, deep=True)
-            elif isinstance(node, yaml.nodes.MappingNode):
-                kwargs = ldr.construct_mapping(node, deep=True)
-                pathname = kwargs.pop("pathname")
-                # A document may only pass the allowlisted options; trust settings
-                # reach the nested load through the effective policy instead.
-                kwargs = _filter_include_kwargs(kwargs)
-            else:
-                raise ConfigTypeError(f"Un-supported YAML node {node!r}")
+            # Shared with ConfigBackend._yaml_tag_constructor: one reading of
+            # the three documented forms, and one error for a malformed one. A
+            # document may only pass the allowlisted options; trust settings
+            # reach the nested load through the effective policy instead.
+            pathname, args, kwargs = _include_call(ldr, node)
 
             kwargs["master"] = ldr
             # An included document is part of a bigger one: the driving load
@@ -267,7 +266,19 @@ class YamlConfig(ConfigBackend):
             pathname = _rebase_include_sources(pathname, origin)
             if args:
                 args = tuple(_rebase_include_sources(arg, origin) for arg in args)
-            return active.load(pathname, *args, **kwargs)
+            try:
+                return active.load(pathname, *args, **kwargs)
+            except Exception as error:  # noqa: BLE001 - adds context, re-raises
+                # Deliberately every type: any load failure must say which
+                # document included the file, and narrowing would drop exactly
+                # the backend errors this attribution exists for.
+                _add_error_context(
+                    error,
+                    frame=ErrorFrame(
+                        "include", node.start_mark.name, node.start_mark.line + 1
+                    ),
+                )
+                raise
 
         for tag in _INCLUDE_TAGS:
             loader_cls.add_constructor(tag, _construct)

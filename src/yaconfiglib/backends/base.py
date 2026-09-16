@@ -63,6 +63,50 @@ def _record_missing_backend(name: str, pattern: str, hint: str, reason: str) -> 
     _MISSING_BACKENDS[name] = (_re.compile(pattern, _re.IGNORECASE), hint, reason)
 
 
+def _include_call(loader: "_yaml.Loader", node: "_yaml.Node") -> tuple:
+    """Read an ``!include``/``!load`` node as ``(pathname, args, kwargs)``.
+
+    One place for the three documented forms, so the tag constructor and the
+    loader-driven one cannot disagree about them. A malformed form raises
+    PyYAML's own `ConstructorError`, whose mark names the file and line —
+    where a mapping without ``pathname`` used to surface as a bare
+    ``KeyError: 'pathname'`` and an empty sequence as an unpacking
+    `ValueError`, neither of which said where.
+
+    Validation runs **before** the allowlist filter, so a document that omits
+    ``pathname`` is reported as malformed rather than as a dropped key.
+    """
+    args: tuple = ()
+    kwargs: dict = {}
+    if isinstance(node, _yaml.nodes.ScalarNode):
+        pathname = loader.construct_scalar(node)
+    elif isinstance(node, _yaml.nodes.SequenceNode):
+        items = loader.construct_sequence(node, deep=True)
+        if not items:
+            raise _yaml.constructor.ConstructorError(
+                None,
+                None,
+                "an !include/!load sequence needs a path as its first item",
+                node.start_mark,
+            )
+        pathname, *rest = items
+        args = tuple(rest)
+    elif isinstance(node, _yaml.nodes.MappingNode):
+        kwargs = loader.construct_mapping(node, deep=True)
+        pathname = kwargs.pop("pathname", None)
+        if not pathname:
+            raise _yaml.constructor.ConstructorError(
+                None,
+                None,
+                "an !include/!load mapping needs a non-empty 'pathname' key",
+                node.start_mark,
+            )
+        kwargs = _filter_include_kwargs(kwargs)
+    else:
+        raise _ConfigTypeError(f"Un-supported YAML node {node!r}")
+    return pathname, args, kwargs
+
+
 def _filter_include_kwargs(kwargs: dict) -> dict:
     """Keep only the include-mapping keys a document is allowed to set.
 
@@ -177,20 +221,7 @@ class ConfigBackend(_ty.Protocol):
         equivalent ``self.load(pathname, *args, **kwargs, master=loader)``
         call.
         """
-        args = ()
-        kwargs = {}
-        pathname: str | _Pathname | _ty.Sequence[str | _Pathname]
-        if isinstance(node, _yaml.nodes.ScalarNode):
-            pathname = loader.construct_scalar(node)
-        elif isinstance(node, _yaml.nodes.SequenceNode):
-            pathname, *args = loader.construct_sequence(node, deep=True)
-        elif isinstance(node, _yaml.nodes.MappingNode):
-            kwargs = loader.construct_mapping(node, deep=True)
-            pathname = kwargs.pop("pathname")
-            kwargs = _filter_include_kwargs(kwargs)
-        else:
-            raise _ConfigTypeError(f"Un-supported YAML node {node!r}")
-
+        pathname, args, kwargs = _include_call(loader, node)
         return self.load(pathname, *args, **kwargs, master=loader)
 
     def load(self, path: _Path, **options) -> object:
