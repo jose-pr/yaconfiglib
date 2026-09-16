@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- The `yaml` extra now requires PyYAML `>=6.0,<7`, and the `jinja2` and `transform`
+  extras Jinja2 `>=3.0,<4`. An environment pinned to Jinja2 2.x or to PyYAML below 6.0
+  no longer resolves: Jinja2 2.x cannot import beside MarkupSafe 2.1 or later, and
+  PyYAML below 6.0 publishes no wheels for Python 3.11+. Raise the pin.
 - The documentation site is rebuilt from `main` whenever documentation or source files
   change, not only when a release is published. Between releases the published site can
   therefore describe behaviour that is not on PyPI yet.

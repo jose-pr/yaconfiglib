@@ -29,9 +29,9 @@ dependencies = [
 
 [project.optional-dependencies]
 toml = ["tomli>=2.0,<3; python_version < '3.11'"]
-yaml = ["pyyaml"]
+yaml = ["pyyaml>=6.0,<7"]
 transform = ["yaconfiglib[jinja2]"]
-jinja2 = ["jinja2"]
+jinja2 = ["jinja2>=3.0,<4"]
 dev = ["pytest", "build", "hatchling", "twine", "black"]
 docs = ["mkdocs", "mkdocs-material", "mkdocstrings[python]"]
 

@@ -42,10 +42,10 @@ pip install "yaconfiglib[yaml,toml,jinja2]"
 
 | Extra | Adds | Needed for |
 | --- | --- | --- |
-| `yaconfiglib[yaml]` | `pyyaml` | YAML parsing and `!include`/`!load` tags |
+| `yaconfiglib[yaml]` | `pyyaml` 6.x | YAML parsing and `!include`/`!load` tags |
 | `yaconfiglib[toml]` | `tomli` (Python < 3.11 only) | TOML parsing; 3.11+ uses stdlib `tomllib` |
-| `yaconfiglib[jinja2]` | `jinja2` | Interpolation, `.j2` templated sources, `env.VAR` injection |
-| `yaconfiglib[transform]` | `jinja2` | Alias of `[jinja2]`, for the `transform:` option of `!include`/`!load` |
+| `yaconfiglib[jinja2]` | `jinja2` 3.x | Interpolation, `.j2` templated sources, `env.VAR` injection |
+| `yaconfiglib[transform]` | `jinja2` 3.x | Alias of `[jinja2]`, for the `transform:` option of `!include`/`!load` |
 
 ## Quick start
 
