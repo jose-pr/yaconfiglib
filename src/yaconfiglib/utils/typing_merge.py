@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import collections.abc as _abc
+import inspect
 import sys
 import types
 import typing
@@ -11,6 +13,13 @@ T = typing.TypeVar("T")
 __all__ = ["typed_merge", "OpaqueMerge", "opaque", "TypedNamespace"]
 
 _NONE_TYPE = type(None)
+# Deliberately a superset of backends/env.py's word sets: typed_merge sees raw
+# strings from INI and dotenv, where '1'/'0' are common spellings of a flag.
+# Never import those sets from a backend — utils must not depend on backends.
+_BOOL_WORDS = {
+    **{word: True for word in ("true", "yes", "on", "1")},
+    **{word: False for word in ("false", "no", "off", "0")},
+}
 # types.UnionType (the X | Y syntax at runtime) is 3.10+; guard with getattr.
 _UNION_TYPE = getattr(types, "UnionType", None)
 
@@ -123,6 +132,81 @@ def _type_hints(origin: type) -> dict:
     return hints
 
 
+def _construct_sequence(origin: type, value: object, items: list) -> object:
+    """Build *items* into *origin*, or fall back to *value* if it refuses them."""
+    target = origin
+    if inspect.isabstract(origin):
+        # Sequence[str] / MutableSequence[int] resolve to an abstract class that
+        # cannot be instantiated: keep the value's own concrete type, else list.
+        target = type(value) if isinstance(value, _abc.Sequence) else list
+    try:
+        return target(items)
+    except TypeError:
+        # An unconstructible sequence type — a tuple subclass with a fixed
+        # __new__, say. Restore the last-value-wins result this branch gave
+        # before it started rebuilding. Element errors are raised above, so
+        # this catch cannot swallow one.
+        return value
+
+
+def _merge_sequence(
+    origin: type, cls_args: tuple, hints: dict, value: object, init: bool
+) -> object:
+    """Rebuild *value* as a sequence of type *origin*, coercing every item."""
+    if (
+        isinstance(value, str)
+        or isinstance(value, _abc.Mapping)
+        or not isinstance(value, _abc.Iterable)
+    ):
+        # A scalar or mapping where a sequence was declared is an authoring
+        # error the merge cannot guess at (wrap it as one item? split it?).
+        # bytes stays allowed: a bytearray hint legitimately consumes it.
+        raise TypeError(
+            f"cannot merge a {type(value).__name__} value into sequence type "
+            f"{origin.__name__}"
+        )
+
+    if origin is range:
+        # A range cannot be rebuilt from its items; do not walk it to find out.
+        return value
+
+    fields = getattr(origin, "_fields", None)
+    if issubclass(origin, tuple) and fields is not None:
+        # A NamedTuple: each item takes its field's hint and the constructor
+        # enforces arity. Never zip(fields, value) — zip truncates, so a
+        # three-item value would silently come back as a two-field instance.
+        items = [
+            typed_merge(
+                hints.get(fields[i], type(item)) if i < len(fields) else type(item),
+                item,
+                init=init,
+            )
+            for i, item in enumerate(value)
+        ]
+        return origin(*items)
+
+    child_cls = cls_args[0] if cls_args else None
+    if issubclass(origin, tuple):
+        # 3.9 spells Tuple[()]'s args as ((),) where later versions give ().
+        args = () if cls_args == ((),) else cls_args
+        if args and not (len(args) == 2 and args[1] is Ellipsis):
+            items = list(value)
+            if len(items) != len(args):
+                raise TypeError(
+                    f"cannot merge {len(items)} items into a "
+                    f"{len(args)}-element {origin.__name__} hint"
+                )
+            coerced = [
+                typed_merge(arg or type(item), item, init=init)
+                for arg, item in zip(args, items)
+            ]
+            return _construct_sequence(origin, value, coerced)
+        child_cls = args[0] if args else None
+
+    items = [typed_merge(child_cls or type(item), item, init=init) for item in value]
+    return _construct_sequence(origin, value, items)
+
+
 def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
     """Recursively merge *objects* into an instance of *cls*.
 
@@ -132,8 +216,11 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
 
     The merge is type-guided: for mappings/dataclasses, fields are collected
     across all objects and merged field-by-field; for sequences, the last
-    object's value is taken with each element coerced through the element type.
-    For simple scalars, the last object wins.
+    object's value is taken with each element coerced through the element type
+    (a str or mapping value for a sequence hint raises ``TypeError``). For
+    simple scalars, the last object wins, coerced through the hint — a ``bool``
+    hint reads true/yes/on/1 and false/no/off/0 and raises ``ValueError`` on any
+    other string.
     """
     objects = tuple(obj for obj in objects if obj is not None)
     if not objects:
@@ -189,22 +276,16 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
 
     if issubclass(origin, typing.Mapping) and len(cls_args) > 1:
         child_cls = cls_args[1]
-    elif issubclass(origin, typing.Sequence) and not issubclass(origin, str):
-        if cls_args:
-            child_cls = cls_args[0]
 
-    # Sequence type: use last object, convert each element via child type.
+    # Sequence type: use the last object, converting each element.
     # The test is a CLASS test on the unwrapped origin. It used to be
     # `is_array(origin) and not is_scalar(origin)` — instance checks applied to a
     # class object, so `isinstance(list, (list, tuple))` was False and this whole
     # branch was unreachable; List[str] fell through to the scalar tail and
     # returned its elements uncoerced. str/bytes are Sequences too and must be
     # excluded, or every string hint would be rebuilt character by character.
-    if issubclass(origin, typing.Sequence) and not issubclass(origin, (str, bytes)):
-        value = objects[-1]
-        return origin(
-            typed_merge(child_cls or type(item), item, init=init) for item in value
-        )
+    if issubclass(origin, _abc.Sequence) and not issubclass(origin, (str, bytes)):
+        return _merge_sequence(origin, cls_args, hints, objects[-1], init)
 
     # Mapping / Namespace / dataclass: merge field by field.
     if issubclass(origin, (typing.Mapping, Namespace)) or is_dataclass(origin):
@@ -244,7 +325,17 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
 
     # Scalar / unknown: last value wins.
     value = objects[-1]
-    return value if isinstance(value, origin) else origin(value)
+    if isinstance(value, origin):
+        return value
+    if origin is bool and isinstance(value, str):
+        # bool('false') is True, which silently inverts every flag read from a
+        # format that has no booleans (INI, dotenv, a command's output). An
+        # unrecognized word raises, the way int('abc') does.
+        try:
+            return _BOOL_WORDS[value.strip().lower()]
+        except KeyError:
+            raise ValueError(f"cannot interpret {value!r} as a bool") from None
+    return origin(value)
 
 
 # ---------------------------------------------------------------------------

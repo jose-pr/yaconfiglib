@@ -149,6 +149,18 @@ not `Union[int, str]`); reordering the union does not change the result.
 `Annotated[X, ...]` is stripped and coerces through `X`, and an `Any` member
 anywhere in the union makes the whole hint `Any` — last object wins, uncoerced.
 
+A sequence hint needs a sequence value: a string or a mapping raises
+`TypeError` rather than being split into characters or keys, so pass a list.
+Abstract hints (`Sequence[str]`, `MutableSequence[int]`) keep the value's own
+concrete type, a `NamedTuple` is rebuilt through its field hints,
+`Tuple[int, str]` coerces by position and raises on a length mismatch, and a
+type that cannot be rebuilt from its items — `range`, or a `tuple` subclass with
+a fixed `__new__` — is returned as it is.
+
+A `bool` hint parses strings, since INI, dotenv and command output have no
+booleans: `true/yes/on/1` and `false/no/off/0`, case- and space-insensitive.
+Any other string raises `ValueError` instead of silently becoming `True`.
+
 Two per-type hooks let a class customize how it is merged.
 
 ### `__merge__` — take over merging for a type

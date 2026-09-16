@@ -45,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `typed_merge` parses string booleans for a `bool` hint: `true/yes/on/1` and
+  `false/no/off/0` (stripped, case-insensitive). Any other string now raises
+  `ValueError`, where every non-empty string used to become `True` — including
+  `"false"`. Use one of the listed words.
+- `typed_merge` raises `TypeError` when a sequence hint is given a string, a mapping or
+  a non-iterable, instead of splitting it into characters or keys. Pass a list.
+- `typed_merge` raises `TypeError` when a `Tuple[...]` hint's length does not match the
+  value's, instead of dropping the extra items.
 - `typed_merge`: a `None` source no longer overrides a value from an earlier source. To
   clear a field, pass an explicit empty value (`""`, `[]`, `{}`) instead of `None`.
 - `typed_merge`: in a multi-member union, a value that is already an instance of one of
@@ -113,6 +121,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `typed_merge` handles the sequence hints that broke in 0.11.1, when the element
+  coercion branch first became reachable: abstract `Sequence[...]`/`MutableSequence[...]`
+  hints (which raised "Can't instantiate abstract class"), `NamedTuple` hints (rebuilt
+  through their field types instead of being handed a generator), `range`, and lists
+  holding either.
+- `typed_merge` coerces a heterogeneous `Tuple[int, str]` hint by position instead of
+  applying the first type argument to every element.
 - `typed_merge` skips `None` sources at every level instead of merging them: an
   `Optional[...]` field set to `None` by a later source no longer crashes
   (`vars(None)`) or replaces the earlier value with `None`, `'None'` or `False`.

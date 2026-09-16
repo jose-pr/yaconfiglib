@@ -774,3 +774,99 @@ class TestTypedMergeNoneUnionsAndHints:
         merged = typed_merge(_PartiallyTyped, _PartiallyTyped(port="8080"))
         assert merged.port == 8080
         assert merged.later is None
+
+
+# ---------------------------------------------------------------------------
+# typed_merge: sequence hints and scalar coercion
+# ---------------------------------------------------------------------------
+
+
+class _Point(typing.NamedTuple):
+    x: int
+    y: int
+
+
+class _Pair(tuple):
+    """A tuple subclass that cannot be rebuilt from an iterable of items."""
+
+    def __new__(cls, a, b):
+        return super().__new__(cls, (a, b))
+
+
+class TestTypedMergeSequencesAndScalars:
+    def test_abstract_sequence_hint(self):
+        assert typed_merge(typing.Sequence[str], [1, 2]) == ["1", "2"]
+        assert typed_merge(typing.MutableSequence[int], ["1", "2"]) == [1, 2]
+        # An abstract hint keeps the value's own concrete type.
+        assert typed_merge(typing.Sequence[int], ("1", "2")) == (1, 2)
+
+    def test_dataclass_sequence_field(self):
+        @dataclass
+        class Cfg:
+            hosts: typing.Sequence[str] = ()
+
+        assert typed_merge(Cfg, Cfg(hosts=["a"]), Cfg(hosts=[1, 2])).hosts == ["1", "2"]
+        assert typed_merge(Cfg, {"hosts": ["a"]}, {"hosts": [1]}).hosts == ["1"]
+
+    def test_namedtuple_hint_rebuilds_with_field_types(self):
+        merged = typed_merge(_Point, ("1", "2"))
+        assert merged == _Point(1, 2)
+        assert isinstance(merged, _Point)
+        # Arity is the type's own contract, and a surplus item must not vanish.
+        with pytest.raises(TypeError):
+            typed_merge(_Point, ("1", "2", "3"))
+
+    def test_list_of_namedtuples_and_ranges_kept(self):
+        points = [_Point(1, 2), _Point(3, 4)]
+        assert typed_merge(list, points) == points
+        assert typed_merge(typing.List[_Point], [("1", "2")]) == [_Point(1, 2)]
+        assert typed_merge(list, [range(3)]) == [range(3)]
+
+    def test_range_hint_returned_unchanged(self):
+        r = range(5)
+        assert typed_merge(range, r) is r
+
+    def test_heterogeneous_tuple_coerces_by_position(self):
+        assert typed_merge(typing.Tuple[int, str], ("1", 2)) == (1, "2")
+        # The homogeneous form still applies one type to every element.
+        assert typed_merge(typing.Tuple[int, ...], ("1", "2", "3")) == (1, 2, 3)
+
+    def test_heterogeneous_tuple_length_mismatch_raises(self):
+        with pytest.raises(TypeError):
+            typed_merge(typing.Tuple[int, str], ("1", "2", "3"))
+        with pytest.raises(TypeError):
+            typed_merge(typing.Tuple[int, str], ("1",))
+
+    def test_empty_tuple_hint(self):
+        assert typed_merge(typing.Tuple[()], ()) == ()
+
+    def test_sequence_hint_rejects_string_and_mapping_values(self):
+        with pytest.raises(TypeError):
+            typed_merge(typing.List[str], "abc")
+        with pytest.raises(TypeError):
+            typed_merge(typing.List[str], {"a": 1})
+        with pytest.raises(TypeError):
+            typed_merge(typing.List[int], 5)
+
+    def test_unconstructible_sequence_falls_back_to_last_value(self):
+        pair = _Pair("1", "2")
+        assert typed_merge(_Pair, pair) is pair
+
+    def test_bytearray_hint_still_accepts_bytes(self):
+        assert typed_merge(bytearray, b"ab") == bytearray(b"ab")
+
+    def test_bool_hint_parses_strings(self):
+        for word in ("true", "TRUE", " yes ", "On", "1"):
+            assert typed_merge(bool, word) is True, word
+        for word in ("false", "FALSE", " no ", "Off", "0"):
+            assert typed_merge(bool, word) is False, word
+
+        @dataclass
+        class Cfg:
+            debug: bool = False
+
+        assert typed_merge(Cfg, {"debug": "false"}).debug is False
+
+    def test_bool_hint_rejects_unrecognized_string(self):
+        with pytest.raises(ValueError):
+            typed_merge(bool, "maybe")

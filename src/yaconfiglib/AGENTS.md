@@ -206,7 +206,9 @@ distinguish merge branches.
   `Namespace`-likes merge field-by-field (collecting a field's value across every
   object, then recursing per-field using its type hint); sequences take the last
   object's value, converting each element via the type arg if generic; scalars use the
-  last object, coerced through `cls` if not already an instance. `objects` empty →
+  last object, coerced through `cls` if not already an instance — a **`bool`** hint
+  parses `true/yes/on/1` and `false/no/off/0` (stripped, case-insensitive) and raises
+  `ValueError` on any other string, where `bool('false')` would be `True`. `objects` empty →
   `None`. `init=False` builds via `cls.__new__` + attribute/item assignment instead of
   `cls(**merged)` — use when `__init__` has required positional-only args or side
   effects you want to skip.
@@ -218,6 +220,16 @@ distinguish merge branches.
     mapping's value type, `List[str]`/`Tuple[str, ...]` coerce each element, and an
     unparametrized `dict`/`list` leaves element types alone. `str`/`bytes` hints are
     never treated as element sequences.
+  - **Sequence hints** require a sequence value: a `str`, a `Mapping`, or a non-iterable
+    raises `TypeError` instead of being split into characters or keys (`bytes` stays
+    allowed, so a `bytearray` hint consumes it). An **abstract** origin
+    (`Sequence[str]`, `MutableSequence[int]`) is built as the value's own concrete type,
+    else `list`. A **`NamedTuple`** is rebuilt as `origin(*items)` with each item taking
+    its field's hint — never zipped against `_fields`, which would truncate a surplus
+    item — so the constructor enforces arity. A **heterogeneous `Tuple[int, str]`**
+    coerces by position and raises `TypeError` on a length mismatch; `Tuple[X, ...]`
+    applies `X` to every element. **`range`** and any type whose constructor rejects a
+    list of items (a `tuple` subclass with a fixed `__new__`) are returned unchanged.
   - A **`Union`/`Optional`** hint is resolved against the value being merged: `NoneType`
     members are dropped (so `Optional[Dict[str, int]]` behaves exactly like
     `Dict[str, int]`), then the first member the value is already an instance of wins —
