@@ -270,13 +270,17 @@ def parse_sources(
                 memo.add(memo_key)
             if not is_cmd and has_glob_pattern(path):
                 # stdlib glob pattern fallback uses glob.glob on string paths
-                if hasattr(path, "glob") and HAS_PATHLIB_NEXT:
-                    try:
-                        yield from path.glob("", recursive=recursive)
-                    except TypeError:
-                        pattern = path.name
-                        parent_dir = path.parent
-                        yield from parent_dir.glob(pattern)
+                # The test is isinstance, not hasattr("glob"): a STDLIB path has
+                # .glob too, but no `recursive` keyword, and base_dir may be one.
+                if HAS_PATHLIB_NEXT and isinstance(path, Path):
+                    # glob(None) expands the pattern the path itself carries,
+                    # splitting at the first wildcard — so a pattern spanning
+                    # several segments ("envs/*/db.yaml") works, and nothing here
+                    # has to know where the wildcards are. Added in
+                    # pathlib-next 0.9.6, which is why the floor is >=0.9.6:
+                    # 0.9.4 removed the glob("") spelling for pathlib parity, and
+                    # on 0.9.0-0.9.3 glob(None) returns silently partial matches.
+                    yield from path.glob(None, recursive=recursive)
                 else:
                     # Fallback path traversal
                     # If it's a standard Path, glob is supported: path.glob(pattern)

@@ -168,6 +168,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Glob sources work again with current `pathlib-next`. 0.9.4 removed the `glob("")`
+  spelling this package used to expand a pattern, for parity with `pathlib`, so every glob
+  source and every `recursive=` load raised `ValueError: Unacceptable pattern: ''` on
+  0.9.4 and 0.9.5. It now uses `glob(None)`, the supported form, and requires
+  `pathlib-next>=0.9.6` — where that form was added. Upgrade `pathlib-next` if a pin holds
+  it below 0.9.6.
 - Without an importable Jinja2, `transform=`, `key_factory='%...'` and
   `interpolate=True` raise `ImportError` naming `yaconfiglib[jinja2]` and the original
   import error — even under `ignore_error=True`, since the check runs before any source
