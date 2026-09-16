@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `DotenvBackend(strict=True)` and the per-call `dotenv_strict=True` make an unparseable
+  `.env` line, or a file with no assignment at all, raise `ValueError`.
 - `yaconfiglib.load_as(model_cls, *sources, **options)`: the top-level form the README
   and the model guide already showed. It takes several sources, and routes keywords like
   `yaconfiglib.load()`, so `strict`/`base_dir`/`merge` configure the loader.
@@ -45,6 +47,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `.env` double-quoted values decode `\n`, `\r`, `\t`, `\"` and `\\`, so a value that
+  needs a literal backslash (a Windows path) belongs in single quotes, which stay raw.
+- An unterminated quoted `.env` value raises `ValueError` instead of silently swallowing
+  the rest of the file.
+- A quoted `.env` value ends at its first matching quote, and only whitespace or a `#`
+  comment may follow it. `KEY='it's here'` and `KEY="say "hi""` used to load whole and
+  are now skipped with a warning — write `KEY="it's here"` or escape the inner quotes.
+- In an unquoted `.env` value quotes are ordinary characters, so `KEY=a "b # c"` gives
+  `a "b`. Quote the whole value to keep the `#`.
+- A `.env` line that cannot be parsed is skipped with a logged warning rather than in
+  silence.
 - `typed_merge` coerces mapping **keys** through a `Dict[K, V]` hint's key type, so
   `Dict[int, str]` can be satisfied by JSON, TOML, INI or env sources, which only
   produce string keys. Keys that differ only by type (`"80"` and `80`) now merge into
@@ -128,6 +141,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- A multi-line quoted `.env` value loads whole. A PEM key or any other value spanning
+  several lines was truncated at the first line break.
+- An apostrophe in an unquoted `.env` value no longer disables comment stripping, so
+  `KEY=it's here # comment` gives `it's here`.
+- `.env` keys containing `.` or `-` are kept instead of silently dropping the line.
+- A `.env` value containing a form feed, vertical tab, `\x1c`-`\x1e`, U+0085, U+2028 or
+  U+2029 is no longer cut at that character: only a newline ends an entry. A
+  Windows-1252 file read with `encoding="latin-1"` therefore keeps such a value whole —
+  though byte `0x85` then arrives as U+0085, so read those files with
+  `encoding="cp1252"`.
 - JSON, TOML, INI and `.env` files saved with a UTF-8 byte-order mark now load. The
   mark previously dropped the first `.env` variable, prefixed the first TOML key with an
   invisible character, and made JSON and INI raise.

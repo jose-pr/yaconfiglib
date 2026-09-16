@@ -57,6 +57,23 @@ config = yaconfiglib.load(".env")
 Supports `KEY=value` and `export KEY=value` syntax, single/double-quoted
 values, and `#` comments (both full-line and inline, outside quotes).
 
+- A key may contain `.` and `-` after its first character.
+- A **double-quoted** value may span newlines, and `\n`, `\r`, `\t`, `\"`
+  and `\\` are decoded inside it. Any other backslash pair is kept as it is.
+- A **single-quoted** value may span newlines and is kept raw — use it for a
+  literal backslash, such as a Windows path (`DIR='C:\new'`).
+- A quoted value ends at its first matching quote, and only whitespace or a
+  `#` comment may follow it on that line.
+- In an **unquoted** value, quote characters are ordinary: `KEY=it's here # c`
+  gives `it's here`.
+- Only a newline ends an entry, so a form feed, vertical tab, `\x1c`-`\x1e`,
+  U+0085, U+2028 or U+2029 inside a value is kept rather than cutting it short.
+- A line that cannot be parsed is skipped with a logged warning. Pass
+  `DotenvBackend(strict=True)` or `dotenv_strict=True` to raise `ValueError`
+  instead — that also rejects a file holding no assignment at all. An
+  unterminated quoted value always raises, in either mode, because it would
+  otherwise swallow the rest of the file.
+
 Dotenv claims `.env`, `*.env` and staged names such as `.env.local` and
 `.env.development.local`. A name whose **final** suffix belongs to another
 format goes to that format's backend instead: `app.env.yaml` is YAML,

@@ -351,7 +351,18 @@ marker, and would add a BOM there.
 - **`IniConfig`** (`.ini`/`.cfg`) —
   `.load(path, encoding=None, path_factory=None, **options)`.
 - **`DotenvBackend`** (`NAME="dotenv"`, `.env`, `*.env`, `.env.<stage>[.<more>]`) —
-  strips inline `#` comments outside quoted values; preserves `#` inside quotes. It gives
+  `DotenvBackend(lowercase=True, strict=False)`;
+  `.load(path, encoding=None, path_factory=None, lowercase=None, dotenv_strict=None,
+  **_options) -> dict[str, str]`. Keys may contain `.`/`-`; double-quoted values may
+  span newlines and decode `\n \r \t \" \\`; single-quoted values may span newlines
+  and are raw (use them for a literal backslash); an unquoted value treats quotes as
+  ordinary characters and is cut at a `#` preceded by whitespace. A quoted value ends at
+  its first matching quote, and only whitespace or a `#` comment may follow. **Only a
+  newline ends an entry** — a form feed, U+0085, U+2028 and friends are value characters,
+  which is why the scanner splits on `"\n"` and never uses `str.splitlines()` or a bare
+  `\s`. An unparseable line warns and is skipped, or raises under
+  `strict`/`dotenv_strict` (which also rejects an assignment-free file); an unterminated
+  quote always raises. It gives
   way when the name's final suffix belongs to another format (`app.env.yaml` → YAML,
   `.env.j2` → rendered) or when any other backend, including a custom one, claims the
   name: the regex excludes the known suffixes AND `can_load_path` defers to every

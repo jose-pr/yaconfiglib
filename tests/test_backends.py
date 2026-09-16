@@ -954,3 +954,141 @@ class TestBackendIOContract:
     def test_utf8_bom_ignored(self, tmp_path, name, body, check):
         (tmp_path / name).write_bytes(b"\xef\xbb\xbf" + body.encode("utf-8"))
         assert ConfigLoader(base_dir=tmp_path).load(name) == check
+
+
+class TestDotenvParsing:
+    def test_multiline_double_quoted_value(self, tmp_path):
+        (tmp_path / "c.env").write_text(
+            'KEY="-----BEGIN KEY-----\nline2\n-----END KEY-----"\nPORT=1\n'
+        )
+        result = ConfigLoader(base_dir=tmp_path).load("c.env")
+        assert result == {
+            "key": "-----BEGIN KEY-----\nline2\n-----END KEY-----",
+            "port": "1",
+        }
+
+    def test_multiline_single_quoted_value(self, tmp_path):
+        (tmp_path / "c.env").write_text("KEY='a\nb'\nPORT=1\n")
+        result = ConfigLoader(base_dir=tmp_path).load("c.env")
+        assert result == {"key": "a\nb", "port": "1"}
+
+    def test_unterminated_quote_raises(self, tmp_path):
+        (tmp_path / "c.env").write_text('KEY="never closed\nPORT=1\n')
+        with pytest.raises(ValueError) as excinfo:
+            ConfigLoader(base_dir=tmp_path).load("c.env")
+        assert "line 1" in str(excinfo.value)
+        assert "KEY" in str(excinfo.value)
+
+    def test_double_quoted_escapes_decoded(self, tmp_path):
+        body = "".join(
+            (
+                'NL="a',
+                chr(92),
+                'nb"',
+                "\n",
+                'TAB="a',
+                chr(92),
+                'tb"',
+                "\n",
+                'QUOTE="say ',
+                chr(92),
+                '"hi',
+                chr(92),
+                '""',
+                "\n",
+                'BACK="C:',
+                chr(92),
+                chr(92),
+                'tmp"',
+                "\n",
+            )
+        )
+        (tmp_path / "c.env").write_text(body)
+        result = ConfigLoader(base_dir=tmp_path).load("c.env")
+        assert result == {
+            "nl": "a\nb",
+            "tab": "a\tb",
+            "quote": 'say "hi"',
+            "back": "C:" + chr(92) + "tmp",
+        }
+
+    def test_unknown_escape_kept(self, tmp_path):
+        (tmp_path / "c.env").write_text('KEY="a' + chr(92) + 'qb"\n')
+        result = ConfigLoader(base_dir=tmp_path).load("c.env")
+        assert result == {"key": "a" + chr(92) + "qb"}
+
+    def test_single_quoted_value_is_raw(self, tmp_path):
+        (tmp_path / "c.env").write_text("KEY='it" + chr(92) + "'s'\n")
+        result = ConfigLoader(base_dir=tmp_path).load("c.env")
+        assert result == {"key": "it" + chr(92) + "'s"}
+
+    def test_dotted_and_dashed_keys(self, tmp_path):
+        (tmp_path / "c.env").write_text("DOTTED.KEY=1\nDASH-KEY=2\n")
+        result = ConfigLoader(base_dir=tmp_path).load("c.env")
+        assert result == {"dotted.key": "1", "dash-key": "2"}
+
+    def test_bare_key_line_warns_and_is_skipped(self, tmp_path, caplog):
+        import logging
+
+        (tmp_path / "c.env").write_text("NOEQ\nAFTER=ok\n")
+        with caplog.at_level(logging.WARNING):
+            result = ConfigLoader(base_dir=tmp_path).load("c.env")
+        assert result == {"after": "ok"}
+        assert "line 1" in caplog.text
+
+    def test_apostrophe_in_unquoted_value_strips_comment(self, tmp_path):
+        (tmp_path / "c.env").write_text("APOS=it's here # comment\n")
+        result = ConfigLoader(base_dir=tmp_path).load("c.env")
+        assert result == {"apos": "it's here"}
+
+    def test_text_after_closing_quote_warns_and_skips(self, tmp_path, caplog):
+        import logging
+
+        (tmp_path / "c.env").write_text("S='it's here'\nAFTER=ok\n")
+        with caplog.at_level(logging.WARNING):
+            result = ConfigLoader(base_dir=tmp_path).load("c.env")
+        assert result == {"after": "ok"}
+        assert "line 1" in caplog.text
+
+    def test_strict_raises_on_unparseable_line(self, tmp_path):
+        from yaconfiglib.backends.dotenv import DotenvBackend
+
+        (tmp_path / "c.env").write_text("NOEQ\nAFTER=ok\n")
+        with pytest.raises(ValueError):
+            DotenvBackend(strict=True).load(tmp_path / "c.env")
+
+    def test_strict_raises_without_assignments(self, tmp_path):
+        (tmp_path / "c.env").write_text("# only a comment\n\n")
+        with pytest.raises(ValueError):
+            ConfigLoader(base_dir=tmp_path).load("c.env", dotenv_strict=True)
+
+    def test_unicode_line_separators_stay_in_value(self, tmp_path):
+        separators = [
+            "\x0b",
+            "\x0c",
+            "\x1c",
+            "\x1d",
+            "\x1e",
+            "\x85",
+            "\u2028",
+            "\u2029",
+        ]
+        lines = ["K{}=x{}y".format(index, sep) for index, sep in enumerate(separators)]
+        lines.append('D="q\u2028r"')
+        lines.append("S='q\u2029r'")
+        lines.append("C=3")
+        (tmp_path / "u.env").write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
+        result = ConfigLoader(base_dir=tmp_path).load("u.env")
+        expected = {
+            "k{}".format(index): "x{}y".format(sep)
+            for index, sep in enumerate(separators)
+        }
+        expected["d"] = "q\u2028r"
+        expected["s"] = "q\u2029r"
+        expected["c"] = "3"
+        assert result == expected
+
+    def test_latin1_nel_byte_stays_in_value(self, tmp_path):
+        (tmp_path / "c.env").write_bytes(b"MSG=wait\x85done\nPORT=1\n")
+        result = ConfigLoader(base_dir=tmp_path).load("c.env", encoding="latin-1")
+        assert result == {"msg": "wait\x85done", "port": "1"}
