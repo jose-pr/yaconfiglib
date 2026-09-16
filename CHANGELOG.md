@@ -164,6 +164,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Without an importable Jinja2, `transform=`, `key_factory='%...'` and
+  `interpolate=True` raise `ImportError` naming `yaconfiglib[jinja2]` and the original
+  import error — even under `ignore_error=True`, since the check runs before any source
+  is read. The first two previously raised `AttributeError: 'NoneType' object has no
+  attribute 'eval'`, or quietly returned `None` when errors were being ignored. Install
+  the extra, or catch `ImportError`.
 - The security guide now states that `!include` can read any local file the
   process can (absolute paths and `..` are not confined to `base_dir`), even with
   `allow_commands=False` and `sandbox=True`: those controls stop code execution and

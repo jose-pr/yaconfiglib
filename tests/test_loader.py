@@ -3,6 +3,8 @@ Tests for ConfigLoader — loading, merging, and example file compatibility.
 """
 
 import pathlib
+import subprocess
+import sys
 import typing
 
 import pytest
@@ -1677,3 +1679,76 @@ class TestRecursiveGlob:
         assert {"a": 1} in recursive_docs and {"b": 2} in recursive_docs
         plain_docs = list(ConfigLoader(base_dir=tmp_path).load_all("**/*.yaml"))
         assert plain_docs == [{"b": 2}]
+
+
+class TestJinja2Unavailable:
+    """Every Jinja2-backed option names the extra when Jinja2 cannot import.
+
+    The loads run in a child process with jinja2 blocked, and with
+    ignore_error=True — which also pins that the error is raised before the
+    predicate is consulted, rather than being swallowed into a None result.
+    """
+
+    @staticmethod
+    def _run(tmp_path, body, blocked=("jinja2",)):
+        blocks = "\n".join(f"sys.modules[{name!r}] = None" for name in blocked)
+        code = (
+            "import sys, json\n"
+            f"{blocks}\n"
+            "from yaconfiglib import ConfigLoader\n"
+            f"{body}\n"
+        )
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            timeout=60,
+        )
+
+    @pytest.mark.parametrize(
+        "option",
+        [
+            'transform="value.a"',
+            'key_factory="%pathname.stem"',
+            "interpolate=True",
+        ],
+    )
+    def test_feature_names_jinja2_extra(self, tmp_path, option):
+        (tmp_path / "a.json").write_text('{"a": 1}')
+        done = self._run(
+            tmp_path,
+            "loader = ConfigLoader(base_dir="
+            f"{str(tmp_path)!r}, ignore_error=True)\n"
+            "try:\n"
+            f"    print('RESULT', loader.load('a.json', {option}))\n"
+            "except Exception as exc:\n"
+            "    print(type(exc).__name__, exc)\n",
+        )
+        assert "ImportError" in done.stdout, done.stdout + done.stderr
+        assert "yaconfiglib[jinja2]" in done.stdout
+        assert "RESULT" not in done.stdout
+
+    def test_broken_jinja2_reports_import_failure(self, tmp_path):
+        (tmp_path / "a.json").write_text('{"a": 1}')
+        done = self._run(
+            tmp_path,
+            "try:\n"
+            "    import jinja2\n"
+            "except ImportError as exc:\n"
+            "    reason = str(exc)\n"
+            "else:\n"
+            "    reason = None\n"
+            "loader = ConfigLoader(base_dir="
+            f"{str(tmp_path)!r}, ignore_error=True)\n"
+            "try:\n"
+            "    loader.load('a.json', transform='value.a')\n"
+            "except ImportError as exc:\n"
+            "    print('REASON-MATCH', reason is not None and reason in str(exc))\n"
+            "    print('CAUSE', isinstance(exc.__cause__, ImportError))\n",
+            # Only markupsafe: jinja2 is then installed but unimportable, the
+            # real shape of a Jinja2 2.x beside MarkupSafe 2.1+.
+            blocked=("markupsafe",),
+        )
+        assert "REASON-MATCH True" in done.stdout, done.stdout + done.stderr
+        assert "CAUSE True" in done.stdout

@@ -19,8 +19,14 @@ from pathlib import PurePosixPath
 
 try:
     from .utils import jinja2
-except ImportError:
+
+    _JINJA2_IMPORT_ERROR: "typing.Optional[ImportError]" = None
+except ImportError as exc:  # Jinja2 missing, or installed but unimportable
     jinja2 = None
+    # Kept so the error can say WHY, not just that the extra is missing: a
+    # Jinja2 2.x beside MarkupSafe 2.1+ fails on `soft_unicode`, which looks
+    # nothing like "not installed".
+    _JINJA2_IMPORT_ERROR = exc
 
 from .backends import ConfigBackend
 from .backends.command import CommandBackend
@@ -338,6 +344,22 @@ def _hydrate(model_cls: type, data: typing.Mapping) -> object:
 
 class _IgnoreError(typing.Protocol):
     def __call__(self, error: Exception, *args, **kwargs) -> bool: ...
+
+
+def _require_jinja2(feature: str):
+    """Return the Jinja2 helper module, or explain what to install.
+
+    Called before a load's source loop, so the error reaches the caller rather
+    than an `ignore_error` predicate: without this, `transform=` and a `%`
+    key_factory raised `AttributeError: 'NoneType' object has no attribute
+    'eval'`, and returned None when errors were being ignored.
+    """
+    if jinja2 is not None:
+        return jinja2
+    hint = f"{feature} requires Jinja2: pip install yaconfiglib[jinja2]"
+    if _JINJA2_IMPORT_ERROR is None:
+        raise ImportError(hint)
+    raise ImportError(f"{hint} ({_JINJA2_IMPORT_ERROR})") from _JINJA2_IMPORT_ERROR
 
 
 class ConfigLoader(ConfigBackend):
@@ -659,6 +681,20 @@ class ConfigLoader(ConfigBackend):
         # made one call's override silently leak into every later load()).
         merge_options = self.merge_options if merge_options is None else merge_options
 
+        # Fail here, before the source loop, so a missing Jinja2 reaches the
+        # caller instead of an ignore_error predicate.
+        _effective_key_factory = (
+            self.key_factory if key_factory is None else key_factory
+        )
+        if transform is not None:
+            _require_jinja2("transform=")
+        if isinstance(
+            _effective_key_factory, str
+        ) and _effective_key_factory.startswith("%"):
+            _require_jinja2("key_factory='%...'")
+        if interpolate:
+            _require_jinja2("interpolate=True")
+
         # Every source, nested !include and interpolation below runs under the
         # effective trust policy, so a per-call allow_commands=False/sandbox=True
         # reaches nested loads too. The policy can only tighten.
@@ -841,6 +877,16 @@ class ConfigLoader(ConfigBackend):
         allow_commands = (
             self.allow_commands if allow_commands is None else allow_commands
         )
+        # Same pre-flight as load(): reader_args may carry transform= or a
+        # "%..." key_factory through to each source.
+        _all_transform = reader_args.get("transform")
+        _all_key_factory = reader_args.get("key_factory", self.key_factory)
+        if _all_transform is not None:
+            _require_jinja2("transform=")
+        if isinstance(_all_key_factory, str) and _all_key_factory.startswith("%"):
+            _require_jinja2("key_factory='%...'")
+        if interpolate:
+            _require_jinja2("interpolate=True")
         for path in parse_sources(
             pathname,
             base_dir=self.base_dir,

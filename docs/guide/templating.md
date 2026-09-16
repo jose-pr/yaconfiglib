@@ -1,5 +1,12 @@
 # Templating
 
+Interpolation, `transform=` and a `%`-prefixed `key_factory` all need Jinja2
+(`pip install "yaconfiglib[jinja2]"`). If it is missing — or installed but
+unimportable, which a Jinja2 2.x beside MarkupSafe 2.1+ is — those options
+raise `ImportError` naming the extra and the underlying import error. That
+happens before `ignore_error` is consulted, so an ignoring load fails loudly
+rather than returning an unrendered or empty result.
+
 yaconfiglib integrates Jinja2 in two distinct ways: **interpolating**
 already-loaded configuration values, and **rendering whole files** as
 templates before parsing them. Both require `yaconfiglib[jinja2]`.

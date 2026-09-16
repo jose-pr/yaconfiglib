@@ -68,6 +68,12 @@ All constructor args become instance defaults, overridable per-call. Notable one
   nested `!include`, raises `CommandsDisabledError` instead of executing. Set this when
   loading configuration you don't fully trust. A per-call value reaches nested includes
   too. Does **not** restrict a `CommandBackend` constructed and called outside a load.
+- **Jinja2 is required** by `interpolate=True`, `transform=` and a `%` `key_factory`.
+  If it is missing or unimportable, each raises `ImportError` naming `yaconfiglib[jinja2]`
+  and the original import error, **before** the source loop and therefore before
+  `ignore_error` sees anything. (It used to be `AttributeError: 'NoneType' object has
+  no attribute 'eval'`, or a silent `None` under `ignore_error=True`.) A call that uses
+  none of the three never touches Jinja2.
 - `interpolate=True` — after every source is merged, each string in the result is
   rendered **once**, with the whole merged document as scope — `!include`d values
   included, so they see the including document's keys. Top-level keys render after the
