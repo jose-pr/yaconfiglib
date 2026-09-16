@@ -33,7 +33,13 @@ from .backends import ConfigBackend
 from .backends.command import CommandBackend
 from .utils.enum import IntEnum
 from .utils.merge import Merge, MergeMethod, is_array
-from .utils.source import CommandSource, SourceLike, _iter_sources
+from .utils.source import (
+    CommandSource,
+    SourceLike,
+    _backend_claims,
+    _iter_sources,
+    _marker_view,
+)
 from .utils.trust import (
     CommandsDisabledError,
     current_policy,
@@ -1255,26 +1261,86 @@ def load(fp: typing.Any, **kwargs) -> object:
     Keyword arguments :class:`ConfigLoader` accepts configure the loader (and so
     also apply to nested ``!include`` targets); every other keyword is passed to
     :meth:`ConfigLoader.load`, which forwards unknown ones to the backend.
+
+    Raises:
+        TypeError: If *fp* is ``None``.
+        ValueError: If *fp* is an empty string. For optional layers, pass them
+            among the sources of :meth:`ConfigLoader.load`, which skips falsy
+            ones.
     """
+    if fp is None:
+        raise TypeError(
+            "load() got None for fp; check the path before calling, or pass it "
+            "among the sources of ConfigLoader().load(...), which skips a falsy "
+            "source"
+        )
+    if fp == "" or fp == b"":
+        raise ValueError(
+            "load() got an empty source; check the path before calling, or pass "
+            "it among the sources of ConfigLoader().load(...), which skips a "
+            "falsy source"
+        )
     loader_kwargs, load_kwargs = _split_loader_kwargs(kwargs)
     loader_inst = ConfigLoader(**loader_kwargs)
     return loader_inst.load(fp, **load_kwargs)
 
 
-def loads(s: str | bytes, **kwargs) -> object:
+def _marker_name(view: str | bytes, encoding: str) -> typing.Optional[str]:
+    """The ``#!name`` first line of *view*, if it names a recognized format.
+
+    ``None`` when there is no marker line, when its name decodes to nothing a
+    backend claims (``#!/usr/bin/env python``, ``#!gen.sh``), or when it does
+    not decode at all — in every one of those cases the line is content.
+    """
+    marker, newline = ("#!", "\n") if isinstance(view, str) else (b"#!", b"\n")
+    if not view.startswith(marker):
+        return None
+    name = view[len(marker) :].split(newline, 1)[0]
+    if isinstance(name, bytes):
+        try:
+            name = name.decode(encoding or "utf-8")
+        except UnicodeDecodeError:
+            return None
+    name = name.strip()
+    return name if name and _backend_claims(name) else None
+
+
+def loads(s: typing.Union[str, bytes, bytearray], **kwargs) -> object:
     """Load configuration from a string or bytes in memory.
 
+    The text is parsed as **YAML** unless ``loader=`` is given, or its first
+    line is ``#!<name>`` naming a format some backend recognizes
+    (``"#!app.toml\\n..."``). Any other first line — a real shebang, a script
+    name — is content, so nothing that loads today parses differently.
+
+    ``bytes`` (and ``bytearray``) are read with ``encoding=``, UTF-8 by
+    default, and a BOM is ignored. They reach a byte-oriented ``loader=``
+    backend unchanged.
+
     Keyword arguments are routed as in :func:`load`.
+
+    Raises:
+        TypeError: For any other type of *s*.
     """
+    if isinstance(s, bytearray):
+        s = bytes(s)
+    elif not isinstance(s, (str, bytes)):
+        raise TypeError(f"loads() expects str or bytes, not {type(s).__name__}")
+
+    # Read encoding BEFORE the split, which keeps it in kwargs: it configures
+    # the loader (and so every include) as well as decoding this document.
+    encoding = kwargs.get("encoding")
     loader_kwargs, load_kwargs = _split_loader_kwargs(kwargs)
     loader_inst = ConfigLoader(**loader_kwargs)
-    # Use parse_sources inline memory doc marker
-    marker = "#!\n"
-    if isinstance(s, bytes):
-        content = marker.encode("utf-8") + s
-    else:
-        content = marker + s
-    return loader_inst.load(content, **load_kwargs)
+
+    # The same marker view ConfigLoader.load uses: bytes untouched for a codec
+    # that spells "#!" in ASCII, decoded for the codecs that cannot.
+    view = _marker_view(s, encoding) if isinstance(s, bytes) else s
+    if _marker_name(view, encoding) is None:
+        # No usable name: prepend the unnamed marker, so the document keeps
+        # yaconfiglib's YAML default and its own first line stays content.
+        view = ("#!\n" if isinstance(view, str) else b"#!\n") + view
+    return loader_inst.load(view, **load_kwargs)
 
 
 def load_as(model_cls: type[T], *pathname: SourceLike, **kwargs) -> T:

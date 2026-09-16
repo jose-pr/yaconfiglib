@@ -425,6 +425,9 @@ def _flatten_sources(sources, encoding):
     """
     for source in sources:
         if not source:
+            # DEBUG, not a warning: passing None for an absent optional layer
+            # is the documented pattern, so this fires on correct code.
+            logger.debug("skipping empty source %r", source)
             continue
 
         # Before every other branch: a file object is iterable, so without
@@ -690,6 +693,10 @@ def _iter_sources(
       materialized, an ``!include`` inside it resolves against *base_dir* —
       pass the path instead for file-relative includes.
     * A nested iterable of any of the above, flattened.
+
+    Falsy items such as ``None`` and ``""`` are skipped (logged at DEBUG), so
+    optional layers can be passed unconditionally:
+    ``load("base.yaml", os.environ.get("OVERRIDE"))``.
 
     Glob expansion belongs to the path type (pathlib-next, or the stdlib
     fallback). What this function adds: a pattern is recognized by the

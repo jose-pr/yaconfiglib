@@ -1752,3 +1752,119 @@ class TestJinja2Unavailable:
         )
         assert "REASON-MATCH True" in done.stdout, done.stdout + done.stderr
         assert "CAUSE True" in done.stdout
+
+
+@pytest.mark.usefixtures("needs_yaml")
+class TestLoadsAndLoadArguments:
+    """The stdlib-style string API: what it parses, and what it refuses.
+
+    `loads()` read every string as YAML, so a document naming its own format
+    on its first line was misparsed, and bytes in any codec that does not
+    spell ``#!`` in ASCII failed with a message about paths. `load(None)` and
+    `load("")` quietly returned None, turning an unset config path into an
+    empty configuration.
+    """
+
+    @pytest.mark.parametrize("fmt", ["toml", "json"])
+    def test_loads_honors_recognized_marker_line(self, request, fmt):
+        import yaconfiglib
+
+        if fmt == "toml":
+            request.getfixturevalue("needs_toml")
+            doc = "#!c.toml\n[s]\nk = 'v'\n"
+            assert yaconfiglib.loads(doc) == {"s": {"k": "v"}}
+        else:
+            assert yaconfiglib.loads('#!c.json\n{"n": 1e5}') == {"n": 100000.0}
+
+    def test_loads_unrecognized_marker_line_is_content(self):
+        import yaconfiglib
+
+        # A real shebang names no format, so the line stays content and the
+        # document keeps the YAML default (where that line is a comment).
+        assert yaconfiglib.loads("#!/usr/bin/env x\na: 1\n") == {"a": 1}
+
+    def test_loads_script_marker_line_is_not_run(self):
+        import yaconfiglib
+
+        # CommandBackend is excluded from the claim, so a script name never
+        # turns a string into a program.
+        assert yaconfiglib.loads("#!gen.sh\na: 1\n") == {"a": 1}
+
+    def test_loads_without_loader_is_yaml(self):
+        import yaconfiglib
+
+        # YAML is the documented default, and 1e5 is a string in YAML 1.1.
+        assert yaconfiglib.loads('{"n": 1e5}') == {"n": "1e5"}
+        assert yaconfiglib.loads('{"n": 1e5}', loader="json") == {"n": 100000.0}
+
+    @pytest.mark.parametrize("codec", ["utf-8-sig", "utf-16", "utf-16-le", "utf-32"])
+    def test_loads_bytes_in_any_codec(self, codec):
+        import yaconfiglib
+
+        assert yaconfiglib.loads("a: café\n".encode(codec), encoding=codec) == {
+            "a": "café"
+        }
+
+    def test_loads_utf8_bom_bytes_default_codec(self):
+        import yaconfiglib
+
+        assert yaconfiglib.loads("k: 1\n".encode("utf-8-sig")) == {"k": 1}
+
+    def test_loads_bytearray(self):
+        import yaconfiglib
+
+        assert yaconfiglib.loads(bytearray(b"a: 1\n")) == {"a": 1}
+
+    @pytest.mark.parametrize("bad", [None, 42])
+    def test_loads_rejects_other_types(self, bad):
+        import yaconfiglib
+
+        with pytest.raises(TypeError, match="str or bytes"):
+            yaconfiglib.loads(bad)
+
+    def test_load_none_raises_type_error(self):
+        import yaconfiglib
+
+        with pytest.raises(TypeError, match="load"):
+            yaconfiglib.load(None)
+
+    @pytest.mark.parametrize("empty", ["", b""])
+    def test_load_empty_raises_value_error(self, empty):
+        import yaconfiglib
+
+        with pytest.raises(ValueError, match="load"):
+            yaconfiglib.load(empty)
+
+    def test_load_empty_iterable_returns_default(self):
+        import yaconfiglib
+
+        # Unchanged: only the single-source form is strict.
+        assert yaconfiglib.load([], default={"d": 1}) == {"d": 1}
+
+    def test_config_loader_skips_none_layer(self, tmp_path):
+        (tmp_path / "base.yaml").write_text("a: 1\n", encoding="utf-8")
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        # The hiera pattern: load("base.yaml", os.environ.get("OVERRIDE")).
+        assert loader.load("base.yaml", None) == {"a": 1}
+
+    def test_parse_sources_logs_skipped_empty_source(self, caplog):
+        import logging
+
+        caplog.set_level(logging.DEBUG, logger="yaconfiglib.utils.source")
+        assert list(parse_sources([None, ""])) == []
+        assert any(
+            "skipping empty source" in record.message for record in caplog.records
+        )
+
+    def test_loads_bytes_reach_backend_instance_verbatim(self):
+        import yaconfiglib
+        from yaconfiglib.backends import ConfigBackend
+
+        class Raw(ConfigBackend):
+            def load(self, path, **options):
+                return path.read_bytes()
+
+        payload = bytes([0xFF, 0x00])
+        # An ASCII-compatible codec must not decode the payload on its way to
+        # a byte-oriented backend.
+        assert yaconfiglib.loads(payload, loader=Raw()) == payload
