@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- Python 3.14 is tested in CI and declared in the package classifiers.
 - `ini_interpolation` (per call) and `IniConfig(interpolation=...)` choose how `%` is
   handled in an INI file: `"basic"` (the default, unchanged), `"extended"` for
   `${section:key}` references, or `None` to read values verbatim. A logging or alembic
@@ -52,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- The documentation site is rebuilt from `main` whenever documentation or source files
+  change, not only when a release is published. Between releases the published site can
+  therefore describe behaviour that is not on PyPI yet.
 - The source distribution no longer includes `benchmarks/`, and files matching
   `*.local.*` are excluded from both the source distribution and the wheel.
 - `EnvVarBackend` with `nested_delimiter` raises `ValueError` naming both variables when
