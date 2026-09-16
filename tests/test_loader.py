@@ -357,6 +357,44 @@ class TestTopLevelAPI:
 
         assert yaconfiglib.loads("a: 1", merge=None) == {"a": 1}
 
+    def test_dumps_loaded_config_round_trips(self):
+        import yaconfiglib
+
+        original = "a: 1\nb:\n  c: 2\n"
+        config = yaconfiglib.loads(original)
+        config.b  # wraps the child lazily, which used to get tagged too
+
+        out = yaconfiglib.dumps(config)
+
+        assert "python/" not in out
+        assert yaconfiglib.loads(out) == yaconfiglib.loads(original)
+
+    def test_dump_file_round_trip_of_loaded_config(self, tmp_path):
+        import yaconfiglib
+
+        source = tmp_path / "in.yaml"
+        source.write_text("a: 1\nb:\n  c: 2\n", encoding="utf-8")
+        target = tmp_path / "out.yaml"
+
+        yaconfiglib.dump(yaconfiglib.load(str(source)), str(target))
+
+        assert yaconfiglib.load(str(target)) == {"a": 1, "b": {"c": 2}}
+
+    def test_dumps_keeps_exact_type_representers(self):
+        import yaconfiglib
+
+        assert "!!python/tuple" in yaconfiglib.dumps({"t": (1, 2)})
+
+    def test_dumps_does_not_modify_global_yaml_dumper(self):
+        import yaml
+
+        import yaconfiglib
+
+        yaconfiglib.dumps({"a": 1})
+
+        assert dict not in yaml.Dumper.yaml_multi_representers
+        assert dict not in yaml.SafeDumper.yaml_multi_representers
+
     def test_load_file(self, tmp_path):
         from yaconfiglib import load
 

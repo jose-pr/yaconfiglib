@@ -57,6 +57,24 @@ def _owned_loader_cls(base: type) -> type:
     return owned
 
 
+class _PlainMappingDumper(yaml.Dumper):
+    """Dumper that writes every ``dict`` subclass as a plain YAML mapping.
+
+    Loaded configurations are `DotAccessibleDict`s, and PyYAML's default dumper
+    tags an unknown dict subclass as ``!!python/object/new:...``, which its own
+    safe loader then refuses. A multi-representer covers subclasses (including
+    children wrapped lazily on attribute access) without touching the exact-type
+    representers, so tuples, OrderedDicts and the rest dump exactly as before.
+    ``add_multi_representer`` copies the table into this subclass: the global
+    ``yaml.Dumper`` is left alone.
+    """
+
+
+_PlainMappingDumper.add_multi_representer(
+    dict, yaml.representer.SafeRepresenter.represent_dict
+)
+
+
 class YamlConfig(ConfigBackend):
     """Backend for ``*.yaml``/``*.yml`` files.
 
@@ -73,7 +91,7 @@ class YamlConfig(ConfigBackend):
 
     PATHNAME_REGEX = re.compile(r".*\.((yaml)|(yml))$", re.IGNORECASE)
     DEFAULT_LOADER_CLS = _IncludeSafeLoader
-    DEFAULT_DUMPER_CLS = yaml.Dumper
+    DEFAULT_DUMPER_CLS = _PlainMappingDumper
 
     def load(
         self,
@@ -249,7 +267,13 @@ class YamlConfig(ConfigBackend):
 
         loader_cls._yaconfiglib_include_registered = True  # type: ignore[attr-defined]
 
-    def dumps(self, data: str, dumper_cls: yaml.Dumper = None, **options) -> str:
-        """Serialize *data* to a YAML string using *dumper_cls* (defaults to :attr:`DEFAULT_DUMPER_CLS`)."""
+    def dumps(self, data: object, dumper_cls: yaml.Dumper = None, **options) -> str:
+        """Serialize *data* to a YAML string using *dumper_cls*.
+
+        Defaults to :attr:`DEFAULT_DUMPER_CLS`, which writes every ``dict``
+        subclass — a loaded :class:`~yaconfiglib.loader.DotAccessibleDict`
+        included — as a plain mapping, so the output loads back. A
+        *dumper_cls* (or a ``Dumper=`` option) of your own is used as given.
+        """
         options.setdefault("Dumper", dumper_cls or self.DEFAULT_DUMPER_CLS)
         return yaml.dump(data, **options)

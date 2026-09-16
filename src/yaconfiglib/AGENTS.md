@@ -23,7 +23,10 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
   Keywords route as in `load`, so `strict`/`base_dir`/`merge` configure the loader.
 - **`dump(obj, fp, **kwargs) -> None`** / **`dumps(obj, **kwargs) -> str`** — serialize
   *obj* to YAML (delegates to `backends.yaml.YamlConfig.dumps`) and write it to *fp* (a
-  path or a writable file-like) or return it as a string.
+  path or a writable file-like) or return it as a string. Always YAML, whatever *fp* is
+  named. Every `dict` subclass — a loaded `DotAccessibleDict` included — is written as a
+  plain mapping, so the output loads back; a caller-supplied `Dumper=`/`dumper_cls=`
+  is used as given and restores PyYAML's default handling.
 - **`ConfigLoader`** — the main orchestrator; see below.
 - **`ConfigLoaderMergeMethod`** — `MergeMethod` extended with `Last`/`List`/`Hash`; see
   "Merge strategies".
@@ -221,7 +224,8 @@ distinguish merge branches.
     shared option set to every backend it calls.
   - Optional **`load_all(self, path, **options) -> Iterable[object]`** (default: yields
     one `load()` result), **`dumps(self, data, **options) -> str`** (default: raises
-    `NotImplementedError`).
+    `NotImplementedError`). Call a backend instance's `dumps()` for a non-YAML
+    format: the top-level `yaconfiglib.dump`/`dumps` always write YAML.
   - Class attrs: `PATHNAME_REGEX` (matched against the path's filename to auto-select
     this backend; `None` → name-only selection, e.g. `EnvVarBackend`), `NAME` (explicit
     `loader="name"` registry key; default derived from the class name, lowercased,

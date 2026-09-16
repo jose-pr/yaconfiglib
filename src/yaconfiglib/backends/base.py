@@ -165,12 +165,13 @@ class ConfigBackend(_ty.Protocol):
         """
         yield self.load(path, **options)
 
-    def dumps(self, data: str, **options) -> str:
+    def dumps(self, data: object, **options) -> str:
         """Serialize *data* back to this backend's text format.
 
-        Optional — only needed for backends used with
-        :func:`yaconfiglib.dump`/:func:`yaconfiglib.dumps`. Raises
-        :class:`NotImplementedError` by default.
+        Optional. Note that :func:`yaconfiglib.dump`/:func:`yaconfiglib.dumps`
+        always write YAML; call a backend instance's ``dumps()`` directly to
+        serialize to another format. Raises :class:`NotImplementedError` by
+        default.
         """
         raise NotImplementedError
 

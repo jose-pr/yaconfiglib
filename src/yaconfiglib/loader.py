@@ -985,7 +985,11 @@ def dump(obj: object, fp: typing.Any, **kwargs) -> None:
 
 
 def dumps(obj: object, **kwargs) -> str:
-    """Dump configuration object to string (delegates to YamlConfig dumper by default)."""
+    """Serialize *obj* to a YAML string (always YAML; see :class:`~yaconfiglib.backends.yaml.YamlConfig`).
+
+    A loaded configuration writes as a plain mapping, so the output can be
+    loaded back. Call a backend instance's ``dumps()`` for another format.
+    """
     from .backends.yaml import YamlConfig
 
     backend = YamlConfig()

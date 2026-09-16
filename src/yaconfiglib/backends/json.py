@@ -37,6 +37,6 @@ class JsonConfig(ConfigBackend):
             path.read_text(encoding=encoding), **(json_decoder_options or {})
         )
 
-    def dumps(self, data: str, **options) -> str:
+    def dumps(self, data: object, **options) -> str:
         """Serialize *data* to a JSON string via :func:`json.dumps`."""
         return json.dumps(data, **options)
