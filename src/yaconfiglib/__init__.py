@@ -7,6 +7,7 @@ from .loader import (
     CommandsDisabledError as CommandsDisabledError,
     load as load,
     loads as loads,
+    load_as as load_as,
     dump as dump,
     dumps as dumps,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "ConfigBackend",
     "load",
     "loads",
+    "load_as",
     "dump",
     "dumps",
 ]

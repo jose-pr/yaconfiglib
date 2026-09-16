@@ -958,6 +958,242 @@ class TestInterpolationScope:
         assert result["v"] == "from-environment"
 
 
+class TestLoadAs:
+    """yaconfiglib.load_as and the hydration branches behind it."""
+
+    @staticmethod
+    def _fake_pydantic(monkeypatch, version):
+        """Install a fake pydantic module and return its BaseModel."""
+        import sys
+        import types as _types
+
+        module = _types.ModuleType("pydantic")
+
+        class BaseModel:
+            def __init__(self, **values):
+                self.values = values
+
+            if version == "v2":
+
+                @classmethod
+                def model_validate(cls, data):
+                    built = cls(**data)
+                    built.built_with = "model_validate"
+                    return built
+
+            else:
+
+                @classmethod
+                def parse_obj(cls, data):
+                    built = cls(**data)
+                    built.built_with = "parse_obj"
+                    return built
+
+        module.BaseModel = BaseModel
+        monkeypatch.setitem(sys.modules, "pydantic", module)
+        return BaseModel
+
+    def test_top_level_load_as_dataclass(self, tmp_path):
+        import dataclasses
+
+        import yaconfiglib
+
+        @dataclasses.dataclass
+        class DB:
+            host: str
+            port: int = 5432
+
+        (tmp_path / "db.yaml").write_text("host: h\nport: 6\n", encoding="utf-8")
+
+        result = yaconfiglib.load_as(DB, str(tmp_path / "db.yaml"))
+
+        assert result == DB(host="h", port=6)
+
+    def test_top_level_load_as_multiple_sources_deep_merge(self, tmp_path):
+        import dataclasses
+
+        import yaconfiglib
+
+        @dataclasses.dataclass
+        class DB:
+            host: str
+            port: int = 5432
+
+        (tmp_path / "a.yaml").write_text("host: a\nport: 1\n", encoding="utf-8")
+        (tmp_path / "b.yaml").write_text("port: 2\n", encoding="utf-8")
+
+        result = yaconfiglib.load_as(
+            DB, str(tmp_path / "a.yaml"), str(tmp_path / "b.yaml"), merge="deep"
+        )
+
+        assert result == DB(host="a", port=2)
+
+    def test_top_level_load_as_constructor_option_strict(self, tmp_path):
+        import dataclasses
+
+        from jinja2.exceptions import UndefinedError
+
+        import yaconfiglib
+
+        @dataclasses.dataclass
+        class DB:
+            host: str = ""
+
+        (tmp_path / "db.yaml").write_text('host: "{{ missing }}"\n', encoding="utf-8")
+
+        with pytest.raises(UndefinedError):
+            yaconfiglib.load_as(
+                DB, str(tmp_path / "db.yaml"), interpolate=True, strict=True
+            )
+
+    def test_load_as_pydantic_v2_via_fake_module(self, tmp_path, monkeypatch):
+        base_model = self._fake_pydantic(monkeypatch, "v2")
+
+        class Settings(base_model):
+            pass
+
+        (tmp_path / "s.yaml").write_text("a: 1\n", encoding="utf-8")
+
+        result = ConfigLoader(base_dir=tmp_path).load_as(Settings, "s.yaml")
+
+        assert result.built_with == "model_validate"
+        assert result.values == {"a": 1}
+
+    def test_load_as_pydantic_v1_via_fake_module(self, tmp_path, monkeypatch):
+        base_model = self._fake_pydantic(monkeypatch, "v1")
+
+        class Settings(base_model):
+            pass
+
+        (tmp_path / "s.yaml").write_text("a: 1\n", encoding="utf-8")
+
+        result = ConfigLoader(base_dir=tmp_path).load_as(Settings, "s.yaml")
+
+        assert result.built_with == "parse_obj"
+
+    def test_load_as_plain_class_fallback(self, tmp_path):
+        class Plain:
+            def __init__(self, a):
+                self.a = a
+
+        (tmp_path / "p.yaml").write_text("a: 7\n", encoding="utf-8")
+
+        result = ConfigLoader(base_dir=tmp_path).load_as(Plain, "p.yaml")
+
+        assert result.a == 7
+
+    def test_load_as_non_dict_raises_type_error(self, tmp_path):
+        class Plain:
+            pass
+
+        (tmp_path / "list.yaml").write_text("- 1\n- 2\n", encoding="utf-8")
+
+        with pytest.raises(TypeError, match="must be a dictionary"):
+            ConfigLoader(base_dir=tmp_path).load_as(Plain, "list.yaml")
+
+    def test_load_as_dataclass_ignores_self_key(self, tmp_path):
+        import dataclasses
+
+        import yaconfiglib
+
+        @dataclasses.dataclass
+        class DB:
+            host: str
+
+        (tmp_path / "db.yaml").write_text("self: oops\nhost: h\n", encoding="utf-8")
+
+        result = yaconfiglib.load_as(DB, str(tmp_path / "db.yaml"))
+
+        assert result == DB(host="h")
+
+    def test_load_as_nested_dataclass_field_is_hydrated(self, tmp_path):
+        import dataclasses
+
+        import yaconfiglib
+
+        @dataclasses.dataclass
+        class DB:
+            host: str
+
+        @dataclasses.dataclass
+        class App:
+            name: str
+            db: DB
+
+        (tmp_path / "app.yaml").write_text(
+            "name: svc\ndb:\n  host: h\n", encoding="utf-8"
+        )
+
+        result = yaconfiglib.load_as(App, str(tmp_path / "app.yaml"))
+
+        assert result.db == DB(host="h")
+
+    def test_load_as_optional_nested_dataclass_none_is_kept(self, tmp_path):
+        import dataclasses
+        import typing as t
+
+        @dataclasses.dataclass
+        class DB:
+            host: str
+
+        @dataclasses.dataclass
+        class App:
+            db: t.Optional[DB] = None
+
+        (tmp_path / "app.yaml").write_text("db: null\n", encoding="utf-8")
+
+        result = ConfigLoader(base_dir=tmp_path).load_as(App, "app.yaml")
+
+        assert result.db is None
+
+    def test_load_as_does_not_import_pydantic(self, tmp_path, monkeypatch):
+        import dataclasses
+        import sys
+
+        import yaconfiglib
+
+        @dataclasses.dataclass
+        class DB:
+            host: str
+
+        looked_up = []
+
+        class _Recorder:
+            def find_module(self, name, path=None):  # pragma: no cover - py<3.12 shim
+                looked_up.append(name)
+                return None
+
+            def find_spec(self, name, path=None, target=None):
+                looked_up.append(name)
+                return None
+
+        monkeypatch.delitem(sys.modules, "pydantic", raising=False)
+        monkeypatch.setattr(sys, "meta_path", [_Recorder()] + list(sys.meta_path))
+        (tmp_path / "db.yaml").write_text("host: h\n", encoding="utf-8")
+
+        yaconfiglib.load_as(DB, str(tmp_path / "db.yaml"))
+
+        assert "pydantic" not in looked_up
+
+    def test_load_as_keeps_initvar_parameter(self, tmp_path):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class DC:
+            host: str
+            seed: dataclasses.InitVar[int] = 0
+            derived: int = dataclasses.field(init=False, default=0)
+
+            def __post_init__(self, seed):
+                self.derived = seed * 2
+
+        (tmp_path / "dc.yaml").write_text("host: h\nseed: 21\n", encoding="utf-8")
+
+        result = ConfigLoader(base_dir=tmp_path).load_as(DC, "dc.yaml")
+
+        assert result.derived == 42
+
+
 class TestIgnoreErrorPredicate:
     def test_predicate_skips_only_selected_errors(self, tmp_path):
         (tmp_path / "good.yaml").write_text("x: 1\n")

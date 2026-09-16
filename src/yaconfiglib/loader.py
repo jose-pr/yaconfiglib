@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import contextvars
+import dataclasses
 import inspect
 import logging
 import os
+import sys
 import types
 import typing
 
@@ -38,6 +40,7 @@ __all__ = [
     "CommandsDisabledError",
     "load",
     "loads",
+    "load_as",
     "dump",
     "dumps",
 ]
@@ -246,6 +249,79 @@ def _expression_environment():
     if is_hardened():
         return jinja2.get_environment(False, True)
     return None
+
+
+def _pydantic_model(model_cls: object) -> bool:
+    """True when *model_cls* is a Pydantic model class.
+
+    Probes ``sys.modules`` instead of importing pydantic: a class can only
+    subclass ``pydantic.BaseModel`` if pydantic is already imported, so this is
+    exact, and a project that does not use pydantic never pays the import.
+    """
+    pydantic = sys.modules.get("pydantic")
+    if pydantic is None or not isinstance(model_cls, type):
+        return False
+    base_model = getattr(pydantic, "BaseModel", None)
+    return isinstance(base_model, type) and issubclass(model_cls, base_model)
+
+
+def _model_field_types(model_cls: type) -> dict:
+    """Resolved annotations of *model_cls*, empty when they cannot be resolved."""
+    try:
+        return typing.get_type_hints(model_cls)
+    except (NameError, TypeError, AttributeError):
+        # e.g. a user's `X | None` annotation on the 3.9 floor: hydrate shallowly.
+        return {}
+
+
+def _nested_model(hint: object) -> object:
+    """The model class *hint* names, looking through ``Optional[...]``."""
+    candidates = [hint]
+    if typing.get_origin(hint) is typing.Union:
+        candidates = list(typing.get_args(hint))
+    for candidate in candidates:
+        if candidate is type(None) or not isinstance(candidate, type):
+            continue
+        if dataclasses.is_dataclass(candidate) or _pydantic_model(candidate):
+            return candidate
+    return None
+
+
+def _hydrate(model_cls: type, data: typing.Mapping) -> object:
+    """Build *model_cls* from *data*, recursing into model-typed fields.
+
+    Fields annotated with a dataclass or Pydantic model (or ``Optional`` of one)
+    are built as instances rather than left as plain dicts. Containers of models
+    (``List[Model]``) stay as they are.
+    """
+    if _pydantic_model(model_cls):
+        # Pydantic validates and coerces nested models itself.
+        if hasattr(model_cls, "model_validate"):  # v2
+            return model_cls.model_validate(data)
+        if hasattr(model_cls, "parse_obj"):  # v1
+            return model_cls.parse_obj(data)
+
+    if dataclasses.is_dataclass(model_cls):
+        # The class signature, not __init__: it excludes `self` and init=False
+        # fields while keeping InitVar parameters, which the field list drops.
+        valid = {
+            name
+            for name, param in inspect.signature(model_cls).parameters.items()
+            if param.kind
+            in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        }
+        hints = _model_field_types(model_cls)
+        values = {}
+        for key, value in data.items():
+            if key not in valid:
+                continue
+            nested = _nested_model(hints.get(key))
+            if nested is not None and isinstance(value, typing.Mapping):
+                value = _hydrate(nested, value)
+            values[key] = value
+        return model_cls(**values)
+
+    return model_cls(**data)
 
 
 class _IgnoreError(typing.Protocol):
@@ -664,49 +740,20 @@ class ConfigLoader(ConfigBackend):
     def load_as(self, model_cls: type[T], *pathname: SourceLike, **kwargs) -> T:
         """Load configuration sources and instantiate as *model_cls*.
 
-        Supports Pydantic models (if installed) or dataclasses. If neither matches,
-        falls back to passing kwargs/dict unpacking to the constructor.
+        Supports Pydantic models (when pydantic is already imported) or
+        dataclasses. If neither matches, falls back to passing the loaded
+        mapping to the constructor as keyword arguments.
+
+        Note that *kwargs* goes to :meth:`load`, so constructor-only options
+        (``strict``, ``base_dir``, ...) belong on the ``ConfigLoader``.
+        :func:`yaconfiglib.load_as` routes them for you.
         """
         data = self.load(*pathname, **kwargs)
         if not isinstance(data, dict):
             raise TypeError(
                 "Loaded configuration must be a dictionary to load as a model"
             )
-
-        # Try Pydantic integration (strictly optional)
-        try:
-            import pydantic
-
-            if issubclass(model_cls, pydantic.BaseModel):
-                # Pydantic V2 and V1 compatibility helper
-                if hasattr(model_cls, "model_validate"):
-                    return model_cls.model_validate(data)
-                elif hasattr(model_cls, "parse_obj"):
-                    return model_cls.parse_obj(data)
-        except ImportError:
-            pass
-
-        # Try dataclass
-        from dataclasses import is_dataclass
-
-        if is_dataclass(model_cls):
-            # Safe init passing only valid dataclass field names
-            import inspect
-
-            sig = inspect.signature(model_cls.__init__)
-            valid_keys = {
-                name
-                for name, param in sig.parameters.items()
-                if param.kind
-                in (
-                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    inspect.Parameter.KEYWORD_ONLY,
-                )
-            }
-            filtered = {k: v for k, v in data.items() if k in valid_keys}
-            return model_cls(**filtered)
-
-        return model_cls(**data)
+        return _hydrate(model_cls, data)
 
     def load_all(
         self,
@@ -908,6 +955,23 @@ def loads(s: str | bytes, **kwargs) -> object:
     else:
         content = marker + s
     return loader_inst.load(content, **load_kwargs)
+
+
+def load_as(model_cls: type[T], *pathname: SourceLike, **kwargs) -> T:
+    """Load one or more sources and instantiate *model_cls* from the result.
+
+    Unlike :func:`load`, this takes **several** sources, merged in order.
+    Keyword arguments are routed as in :func:`load`, so constructor options
+    (``strict``, ``base_dir``, ``merge``, ...) configure the loader and reach
+    nested includes.
+
+    A Pydantic model is validated by pydantic itself (when pydantic is already
+    imported); a dataclass gets only the keys its signature accepts, with
+    fields annotated as a dataclass or Pydantic model built as instances;
+    anything else receives the mapping as keyword arguments.
+    """
+    loader_kwargs, load_kwargs = _split_loader_kwargs(kwargs)
+    return ConfigLoader(**loader_kwargs).load_as(model_cls, *pathname, **load_kwargs)
 
 
 def dump(obj: object, fp: typing.Any, **kwargs) -> None:

@@ -18,6 +18,9 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
   `transform=`, `flatten=`, `default=`). `merge=None` falls back to the default. A
   keyword no backend reads is ignored, so a misspelled option fails silently rather than
   raising.
+- **`load_as(model_cls, *pathname, **kwargs) -> T`** — like `load`, but takes **several**
+  sources and hydrates the merged mapping into `model_cls` (see `.load_as` below).
+  Keywords route as in `load`, so `strict`/`base_dir`/`merge` configure the loader.
 - **`dump(obj, fp, **kwargs) -> None`** / **`dumps(obj, **kwargs) -> str`** — serialize
   *obj* to YAML (delegates to `backends.yaml.YamlConfig.dumps`) and write it to *fp* (a
   path or a writable file-like) or return it as a string.
@@ -105,10 +108,15 @@ All constructor args become instance defaults, overridable per-call. Notable one
   wrapped in `DotAccessibleDict`. `merge_options` is a
   **per-call override only** — it is never written back onto `self.merge_options`.
 - **`.load_as(model_cls, *pathname, **kwargs) -> T`** — `.load(...)` then hydrate
-  `model_cls`: a Pydantic `BaseModel` (`model_validate`/`parse_obj`, if pydantic is
-  installed — strictly optional), else a `dataclasses` type (kwargs filtered to valid
-  `__init__` params), else `model_cls(**data)`. Raises `TypeError` if the loaded result
-  isn't a dict.
+  `model_cls`: a Pydantic `BaseModel` (`model_validate`/`parse_obj`), else a
+  `dataclasses` type, else `model_cls(**data)`. Raises `TypeError` if the loaded result
+  isn't a dict. Pydantic is detected by probing `sys.modules`, never by importing it: a
+  class can only subclass `BaseModel` if pydantic is already imported. Dataclass keys are
+  filtered by the **class** signature, so `InitVar` parameters are passed while
+  `field(init=False)` and a document key named `self` are not; a field annotated with a
+  dataclass/Pydantic model (or `Optional` of one) is hydrated into an instance, while
+  containers of models (`List[Model]`) stay as loaded. `**kwargs` goes to `.load()`, so
+  constructor-only options belong on the constructor — or use top-level `load_as`.
 - **`.load_all(*pathname, encoding=None, interpolate=None, sandbox=None,
   allow_commands=None, **reader_args) -> Iterator[object]`** — like `.load()` but yields
   each resolved source's document individually (optionally interpolated independently)
