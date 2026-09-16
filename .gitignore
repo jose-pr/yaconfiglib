@@ -1,14 +1,19 @@
-# Build and distribution outputs
-dist/
-build/
-site/
+# Everything hidden at the repo root, then the exceptions that belong in git
+/.*
+!/.gitignore
+!/.gitattributes
+!/.github/
 
 # Agent and harness tooling
 .agents
-*.local.md
-CLAUDE.md
-CLAUDE.local.md
-.claude/
+*.local.*
+CLAUDE*
+.claude
+
+# Build and distribution outputs
+build/
+dist/
+site/
 
 # Python-specific patterns
 __pycache__/
@@ -21,3 +26,10 @@ __pycache__/
 htmlcov/
 *.egg-info/
 .venv/
+.pyvenv/
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
