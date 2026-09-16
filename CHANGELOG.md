@@ -106,6 +106,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- An error raised inside a custom merge strategy's `init()` propagates instead of being
+  swallowed as "this strategy has no `init`", which silently skipped the hook.
+- `List` and `Hash` work on an enum built with `ConfigLoaderMergeMethod.extend(...)`.
+  The seed value is now chosen by member name, where an identity check against the
+  built-in enum failed for every extension (`List` raised `AttributeError`, `Hash`
+  returned an unkeyed document).
+- `ConfigLoaderMergeMethod` members can be pickled — for example passed to a worker
+  process. The generated enum now records the module it is bound in, so `pickle` can
+  find it again.
+- `load(default=...)` is documented as what the code does: it is returned only when no
+  source loads, and is never merged into a loaded document.
 - `Deep` list extension no longer treats `True`/`False` as duplicates of `1`/`0`, or
   `1.0` as a duplicate of `1`: an item is already present only if an existing one has the
   same type and compares equal. It also keeps the new source's order when that source

@@ -110,7 +110,9 @@ All constructor args become instance defaults, overridable per-call. Notable one
   `allow_commands=False` is in effect. `encoding` also applies to every
   `!include`/`!load` target that names none of its own, at every depth. With
   `interpolate`, the merged result is rendered once at the end of the call (never
-  per source, and never inside an include). Dict results are
+  per source, and never inside an include). `default=` is returned only when **no**
+  source loads (nothing matched, or every source failed under `ignore_error`); it is
+  never merged into a loaded document. Dict results are
   wrapped in `DotAccessibleDict`. `merge_options` is a
   **per-call override only** — it is never written back onto `self.merge_options`.
 - **`.load_as(model_cls, *pathname, **kwargs) -> T`** — `.load(...)` then hydrate
@@ -188,6 +190,9 @@ strategies: `Last` (each source replaces the running result), `List` (collect on
 per source, in order), `Hash` (collect into a dict keyed by `configloaderkey`, i.e. each
 source's merge key). These three require `configloaderkey=` on every call — only
 `ConfigLoader.load()` supplies it; calling them directly needs it passed explicitly.
+Members pickle (so a strategy can be handed to a worker process), and `Last`/`List`/`Hash`
+keep working on an enum built with `ConfigLoaderMergeMethod.extend(...)`: the seed value
+comes from a `_init_<name>` hook looked up by member name, not from an identity check.
 
 `is_scalar(obj) -> bool` (one of `int`/`str`/`bool`/`float`/`None`/`bytes`; unchanged, and
 **not** the merge leaf rule), `is_array(obj, mutable=False) -> bool` (sequence but not a

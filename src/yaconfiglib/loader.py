@@ -75,12 +75,24 @@ class _ConfigLoaderMergeMethod(IntEnum):
         memo: dict = None,
         **options,
     ):
-        if self is ConfigLoaderMergeMethod.List:
-            return [initial]
-        elif self is ConfigLoaderMergeMethod.Hash:
-            return {configloaderkey: initial}
-        else:
+        """Seed the running result from the first source's document.
+
+        Dispatches by member name to an optional ``_init_<name>`` hook, the way
+        ``__call__`` dispatches to ``_<name>``; a member without one starts from
+        the document itself. Identity checks against this module's enum would
+        break on every :meth:`~yaconfiglib.utils.enum.IntEnum.extend`, which is
+        what makes `List`/`Hash` work on an extended enum.
+        """
+        hook = getattr(self, f"_init_{self.name.lower()}", None)
+        if hook is None:
             return initial
+        return hook(initial, configloaderkey)
+
+    def _init_list(self, initial: object, configloaderkey: str):
+        return [initial]
+
+    def _init_hash(self, initial: object, configloaderkey: str):
+        return {configloaderkey: initial}
 
     def _last(
         self,
@@ -606,8 +618,10 @@ class ConfigLoader(ConfigBackend):
             transform: A Jinja2 expression string evaluated against each
                 loaded document (as ``value``) before merging, letting you
                 reshape a document inline.
-            default: Initial value merged against, used when *pathname*
-                yields no sources.
+            default: Returned when **no** source loads — nothing matched the
+                given patterns, or every source failed and *ignore_error*
+                skipped it. It is never merged with a loaded document; put
+                defaults in the first source to layer them.
             key_factory: Overrides the instance's *key_factory* for this
                 call.
             flatten: If True, the final merged result (expected to be a
@@ -681,13 +695,17 @@ class ConfigLoader(ConfigBackend):
                             **merge_options,
                         )
                     else:
-                        try:
-                            results = merge.init(
+                        # Probe for the hook instead of catching AttributeError:
+                        # an error raised inside a real init() must surface, not
+                        # look like "this strategy has no init".
+                        init = getattr(merge, "init", None)
+                        if callable(init):
+                            results = init(
                                 initial=result,
                                 configloaderkey=name,
                                 **merge_options,
                             )
-                        except AttributeError:
+                        else:
                             results = result
                         _join_init = True
                 # Deliberately broad: ``ignore_error`` is a user predicate designed

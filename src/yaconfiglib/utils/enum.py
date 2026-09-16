@@ -18,17 +18,38 @@ class IntEnum(_IntEnum):
         super()._missing_(value)
 
     @classmethod
-    def extend(cls, other: type[T], *, name: str = None) -> T | _ty.Self:
+    def extend(
+        cls,
+        other: "_ty.Type[T]",
+        *,
+        name: "_ty.Optional[str]" = None,
+        module: "_ty.Optional[str]" = None,
+    ) -> "_ty.Type[IntEnum]":
+        """Return a new enum holding this enum's members plus *other*'s.
+
+        Methods and other class attributes of *other*, then of this class, are
+        copied onto the result unless it already has them, so hooks defined on
+        either side keep working on the extension.
+
+        *name* overrides the new enum's name (default: *other*'s). *module* is
+        the module the members claim to live in (default: *other*'s), which is
+        what lets :mod:`pickle` find them again — so bind the result in that
+        module under *name*.
+        """
+        enum_name = name or other.__name__
         enum = IntEnum(
-            name or other.__name__, [(i.name, i.value) for i in _chain(cls, other)]
+            enum_name,
+            [(i.name, i.value) for i in _chain(cls, other)],
+            module=module or other.__module__,
+            qualname=enum_name,
         )
         enum_: dict = enum.__dict__
-        added: list[str] = []
+        added: "_ty.List[str]" = []
         for _cls in [other, cls]:
-            decl: dict[str] = _cls.__dict__
-            for name, obj in decl.items():
-                if name not in enum_ and name not in added:
-                    added.append(name)
-                    setattr(enum, name, obj)
+            decl: dict = _cls.__dict__
+            for attr, obj in decl.items():
+                if attr not in enum_ and attr not in added:
+                    added.append(attr)
+                    setattr(enum, attr, obj)
 
         return enum

@@ -1391,6 +1391,76 @@ class TestMergeLeafTypes:
         assert result["name"] == "app"
 
 
+class TestMergeExtensionHooks:
+    """The merge extension points stay usable for custom and extended strategies."""
+
+    def test_custom_merge_init_errors_propagate(self):
+        class BrokenInit:
+            def init(self, initial, configloaderkey, **options):
+                return initial.missing_attr
+
+            def __call__(self, a, b, **options):
+                return b
+
+        with pytest.raises(AttributeError):
+            ConfigLoader(merge=BrokenInit()).load("#!a.yaml\na: 1\n")
+
+    def test_merge_without_init_uses_first_document(self):
+        from yaconfiglib.utils.merge import MergeMethod
+
+        # utils.merge.MergeMethod has no init(); the first document seeds the result.
+        result = ConfigLoader(merge=MergeMethod.Deep).load(
+            "#!a.yaml\na: 1\n", "#!b.yaml\nb: 2\n"
+        )
+
+        assert result == {"a": 1, "b": 2}
+
+    @pytest.mark.parametrize("member", ["List", "Hash"])
+    def test_extended_enum_keeps_builtin_init(self, member):
+        from yaconfiglib.loader import ConfigLoaderMergeMethod
+        from yaconfiglib.utils.enum import IntEnum
+
+        class _Extra(IntEnum):
+            Mine = 99
+
+        extended = ConfigLoaderMergeMethod.extend(_Extra, name="ExtendedMerge")
+        sources = ("#!a.yaml\na: 1\n", "#!b.yaml\nb: 2\n")
+
+        stock = ConfigLoader(merge=getattr(ConfigLoaderMergeMethod, member)).load(
+            *sources
+        )
+        from_extension = ConfigLoader(merge=getattr(extended, member)).load(*sources)
+
+        assert from_extension == stock
+
+    def test_config_loader_merge_method_members_pickle(self):
+        import pickle
+
+        from yaconfiglib.loader import ConfigLoaderMergeMethod
+
+        for member in ConfigLoaderMergeMethod:
+            assert pickle.loads(pickle.dumps(member)) is member
+
+    def test_default_returned_only_when_nothing_loads(self, tmp_path):
+        (tmp_path / "one.yaml").write_text("a: 1\n", encoding="utf-8")
+        loader = ConfigLoader(base_dir=tmp_path)
+
+        loaded = loader.load("one.yaml", default={"fallback": True})
+        nothing = loader.load("no-such-*.yaml", default={"fallback": True})
+
+        assert "fallback" not in loaded
+        assert nothing == {"fallback": True}
+
+    def test_extend_type_hints_resolve(self):
+        import typing as t
+
+        from yaconfiglib.utils.enum import IntEnum
+
+        # Introspection tools (and mkdocstrings) resolve hints eagerly; on the
+        # 3.9 floor a PEP 604 union or typing.Self here would raise.
+        assert t.get_type_hints(IntEnum.extend)
+
+
 class TestIgnoreErrorPredicate:
     def test_predicate_skips_only_selected_errors(self, tmp_path):
         (tmp_path / "good.yaml").write_text("x: 1\n")
