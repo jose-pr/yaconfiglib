@@ -142,9 +142,10 @@ def parse_sources(
 
     Each item in *sources* may be:
 
-    * A file path (string or ``Path``) — resolved against *base_dir* if
-      relative and not a command URI, and glob-expanded if it contains
-      glob magic characters.
+    * A file path: a ``str``, a pathlib-next path, or any other
+      ``os.PathLike`` such as :class:`pathlib.Path` — resolved against
+      *base_dir* if relative and not a command URI, and glob-expanded if it
+      contains glob magic characters.
     * A command URI (``exec://``, ``cmd://``, ``sh://``, or a ``+fmt``
       variant) — passed through unresolved and unexpanded so
       :class:`~yaconfiglib.backends.command.CommandBackend` can run it.
@@ -187,6 +188,22 @@ def parse_sources(
     for source in sources:
         if not source:
             continue
+
+        # An os.PathLike that is NOT a pathlib-next path (a pathlib.Path, a
+        # PurePath, anything else with __fspath__) becomes the string it spells,
+        # so the str branch below gives it the same command check, path_factory,
+        # base_dir join, memo and glob handling a caller would get by passing
+        # that string. This runs before the stream and Iterable checks, or such
+        # an object would fall through to the Iterable branch.
+        # pathlib-next paths keep their own branch on purpose: MemPath is an
+        # os.PathLike whose __fspath__ raises NotImplementedError.
+        # os.fsdecode, not encoding=: path bytes use the filesystem encoding,
+        # while encoding= describes file *content*.
+        if isinstance(source, _os.PathLike) and not isinstance(
+            source, (str, bytes, Path)
+        ):
+            source = _os.fsdecode(_os.fspath(source))
+
         path_marker = "#!"
         newline = "\n"
 

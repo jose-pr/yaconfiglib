@@ -168,6 +168,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Sources given as a `pathlib.Path` (or any other `os.PathLike`, including a `PurePath`
+  or an object that just defines `__fspath__`) now load instead of raising
+  `ValueError: unable to handle arg ... of type <class 'pathlib.WindowsPath'>`. They get
+  the same `base_dir`, `path_factory` and glob handling as the equivalent string, so
+  `str(path)` workarounds can be dropped.
 - Glob sources work again with current `pathlib-next`. 0.9.4 removed the `glob("")`
   spelling this package used to expand a pattern, for parity with `pathlib`, so every glob
   source and every `recursive=` load raised `ValueError: Unacceptable pattern: ''` on
