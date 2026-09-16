@@ -180,6 +180,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- A `Hash` merge logs a warning when two sources produce the same key — for example
+  `services/*/config.yaml`, whose stems are all `config`, where only the last document
+  was kept and nothing said so. The later document still wins; pass `key_factory` (such
+  as `lambda path, value: path.parent.name`) to keep every source.
 - The same file named two ways now loads once: `conf/app.yaml`, `./conf/app.yaml`,
   `conf/../conf/app.yaml` and, on a case-insensitive filesystem, `conf/App.yaml` are one
   source. Duplicate detection compares normalized absolute paths instead of the string

@@ -252,3 +252,42 @@ class TestConcretePathDedup:
         second = list(parse_sources(["*.json"], base_dir=loader.base_dir, memo=memo))
         assert len(first) == 1
         assert second == []
+
+
+class TestHashKeyCollisions:
+    """`Hash` keys on the filename stem, which a directory glob repeats."""
+
+    def _services(self, tmp_path):
+        for name in ("api", "billing", "web"):
+            _write(tmp_path / "services" / name / "config.json", {"service": name})
+        return tmp_path
+
+    def test_repeated_key_warns_and_keeps_the_last_document(self, tmp_path, caplog):
+        import logging
+
+        self._services(tmp_path)
+        loader = ConfigLoader(
+            base_dir=str(tmp_path), merge=ConfigLoaderMergeMethod.Hash
+        )
+        with caplog.at_level(logging.WARNING, logger="yaconfiglib"):
+            result = loader.load("services/*/config.json")
+        # Every stem is "config", so only the last document survives.
+        assert result == {"config": {"service": "web"}}
+        collisions = [r for r in caplog.records if "config" in r.getMessage()]
+        assert len(collisions) == 2, [r.getMessage() for r in caplog.records]
+
+    def test_parent_directory_key_keeps_every_source(self, tmp_path, caplog):
+        import logging
+
+        self._services(tmp_path)
+        loader = ConfigLoader(
+            base_dir=str(tmp_path),
+            merge=ConfigLoaderMergeMethod.Hash,
+            key_factory=lambda path, value: path.parent.name,
+        )
+        with caplog.at_level(logging.WARNING, logger="yaconfiglib"):
+            result = loader.load("services/*/config.json")
+        assert set(result) == {"api", "billing", "web"}
+        assert [
+            r.getMessage() for r in caplog.records if "Hash merge" in r.getMessage()
+        ] == []

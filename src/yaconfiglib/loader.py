@@ -63,7 +63,9 @@ class _ConfigLoaderMergeMethod(IntEnum):
     * **List** — sources are collected into a list, one entry per source,
       in load order.
     * **Hash** — sources are collected into a dict keyed by each source's
-      merge key (see ``key_factory``).
+      merge key (see ``key_factory``). Two sources with the same key do not
+      both survive: the later document replaces the earlier one, and a
+      warning is logged.
 
     Exposed to callers as :class:`ConfigLoaderMergeMethod`, which extends
     :class:`~yaconfiglib.utils.merge.MergeMethod` with these three values
@@ -132,6 +134,16 @@ class _ConfigLoaderMergeMethod(IntEnum):
         memo: dict = None,
         **options,
     ):
+        if configloaderkey in a:
+            # The default key is the filename stem, so a directory glob like
+            # services/*/config.yaml gives every source the key "config" and
+            # keeps only the last. Warning, not raising: overriding a key on
+            # purpose is part of the documented design.
+            logger.warning(
+                "Hash merge: key %r is produced by more than one source; the later "
+                "document replaces the earlier one (set key_factory to keep both)",
+                configloaderkey,
+            )
         a[configloaderkey] = b
         return a
 

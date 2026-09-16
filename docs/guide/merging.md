@@ -91,7 +91,9 @@ ConfigLoader(base_dir="conf", recursive=True).load("**/*.yaml")
   list, one entry per source, in load order.
 - **`Hash`** — collect every source's result into a dict, keyed by each
   source's merge key (see `key_factory` below). Useful for "load a
-  directory of files, keyed by filename" patterns.
+  directory of files, keyed by filename" patterns. Two sources with the same
+  key do not both survive — the later one replaces the earlier, and a warning
+  says so.
 
 "Scalar" above means any **leaf**: a value that is neither a mapping nor a
 list. Strings, numbers, dates, datetimes, `Decimal`s, sets and objects a
@@ -154,6 +156,19 @@ loader = ConfigLoader(
 `key_factory` accepts a callable `(path, value) -> str`, a string
 attribute name looked up on the path object, or a `"%<jinja-expr>"`
 string evaluated with `pathname` and `value` in scope.
+
+The default key is the **filename stem**, which a directory glob repeats: every
+match of `services/*/config.yaml` is keyed `config`, so all but the last are
+dropped (with a warning). Key on the directory instead:
+
+```python
+loader = ConfigLoader(
+    merge=ConfigLoaderMergeMethod.Hash,
+    key_factory=lambda path, value: path.parent.name,   # api, billing, web
+)
+# or, as a Jinja2 expression:
+#   key_factory="%pathname.parent.name"
+```
 
 ## Overriding merge strategy per call
 

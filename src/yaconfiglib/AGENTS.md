@@ -194,7 +194,9 @@ referencing) document merges instead of raising `RecursionError`. Callers leave 
 `ConfigLoaderMergeMethod` (`loader.py`, extends `MergeMethod`) adds loader-specific
 strategies: `Last` (each source replaces the running result), `List` (collect one entry
 per source, in order), `Hash` (collect into a dict keyed by `configloaderkey`, i.e. each
-source's merge key). These three require `configloaderkey=` on every call — only
+source's merge key; a repeated key replaces the earlier document and logs a WARNING,
+  and since the default key is the filename stem, a directory or recursive glob needs a
+  `key_factory`). These three require `configloaderkey=` on every call — only
 `ConfigLoader.load()` supplies it; calling them directly needs it passed explicitly.
 Members pickle (so a strategy can be handed to a worker process), and `Last`/`List`/`Hash`
 keep working on an enum built with `ConfigLoaderMergeMethod.extend(...)`: the seed value
