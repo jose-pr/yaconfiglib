@@ -93,7 +93,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or delete process environment variables, including ones later command sources
   saw.
 
+### Deprecated
+- `ConfigLoader(log_level=...)` (and the same keyword through `yaconfiglib.load()`) has
+  no effect and now warns. It has not changed logging since 0.11.0, when setting the
+  level on a shared logger was removed. Configure the `yaconfiglib` logger with the
+  `logging` module instead.
+
+### Removed
+- `yaconfiglib.utils.getLogger` and the `yaconfiglib.utils.Logger` re-export, neither
+  documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
+
 ### Fixed
+- `ConfigLoader(log_level=<any int>)` no longer raises `ValueError` for a value that is
+  not one of the `LogLevel` members.
+- `flatten=True` skips empty documents instead of failing inside a comprehension — a
+  `conf.d` glob may hold an empty file — and reports any other member it cannot flatten
+  with a `TypeError` naming that member.
 - `yaconfiglib.dumps()`/`dump()` write a loaded configuration as a plain YAML mapping
   that `yaconfiglib.load()` and other YAML tools read back. Previously the result
   carried a `!!python/object/new:...DotAccessibleDict` tag that the library's own safe
