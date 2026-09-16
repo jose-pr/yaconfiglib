@@ -42,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- Options that `ConfigLoader` itself accepts (`merge`, `encoding`, `recursive`,
+  `interpolate`, ...) passed to `yaconfiglib.load()`/`loads()` now configure the loader,
+  so they also apply to files pulled in with `!include` — a per-call `merge="deep"` now
+  deep-merges an included glob, as the same option on `ConfigLoader(...)` always did. A
+  keyword that no backend reads is ignored rather than rejected, so check the spelling
+  of an option that seems to have no effect.
 - With `interpolate=True`, a bare `{{ expr }}` keeps the expression's type only when
   nothing but a trailing newline surrounds it; with leading or trailing spaces the value
   renders as a string. A YAML `|`/`>` block scalar still yields the expression's type.
@@ -81,6 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saw.
 
 ### Fixed
+- `yaconfiglib.load()` and `loads()` pass backend options through instead of raising
+  `TypeError`: `json_decoder_options`, `ini_default_section`, `environment=` and any
+  other option a backend reads now reach it. They used to be rejected because the
+  helpers matched keywords against a hand-written list.
 - `env` is available when rendering `.j2`/`.jinja2` sources with `inject_env=True`,
   as the templating guide's example shows. Previously it raised
   `UndefinedError: 'env' is undefined`.

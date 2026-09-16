@@ -113,6 +113,10 @@ The template sees `pathname` (the source path) and, with `inject_env=True`,
 `SandboxedEnvironment` when `sandbox=True` or `allow_commands=False` is in
 effect, and undefined variables raise when `strict=True`.
 
+```python
+config = yaconfiglib.load("settings.yaml.j2", environment=my_env)
+```
+
 Pass a custom `jinja2.Environment` with `environment=` if you need custom
 filters, extensions, or undefined-handling beyond the default. Under
 `sandbox=True` or `allow_commands=False` it must be a
