@@ -193,6 +193,60 @@ def _encode_text(
         return content.encode("utf-8"), "utf-8"
 
 
+def _is_stream(source: object) -> bool:
+    """True for a file object: anything that can `read()` its own content.
+
+    Capability, not class. `codecs.open()`, a `SpooledTemporaryFile` before
+    3.11 and a plain custom reader are file objects too, and none of them may
+    be iterated as a list of sources — a file object is iterable, so that is
+    what used to happen to them, one source per line.
+
+    Text, bytes and path types are excluded first: they are sources in their
+    own right, and a path object that grew a `read` method is still a path.
+    """
+    if isinstance(source, (str, bytes, bytearray, Path, _os.PathLike)):
+        return False
+    return callable(getattr(source, "read", None))
+
+
+def _backend_claims(filename: str) -> bool:
+    """Whether a registered backend other than `CommandBackend` claims *filename*.
+
+    Imported inside the function: `backends/jinja2.py` imports this module at
+    module level. `CommandBackend` is excluded on purpose — a file object's
+    content is data, never a program to run, however the file is named.
+    """
+    from ..backends import CommandBackend, ConfigBackend
+
+    try:
+        klass = ConfigBackend.get_class_by_path(_stdlib_pathlib.PurePosixPath(filename))
+    except NotImplementedError:
+        return False
+    return not (isinstance(klass, type) and issubclass(klass, CommandBackend))
+
+
+def _stream_filename(stream: object) -> "_ty.Optional[str]":
+    """The file name to select a stream's backend by, or None for the default.
+
+    A stream is named after its file only when a backend recognizes that name,
+    so every stream that loads as YAML today keeps doing so: `sys.stdin`
+    (``<stdin>``), a gzip file (``x.yaml.gz``) and a file opened on a
+    descriptor (whose `name` is an `int`) are all unclaimed.
+    """
+    name = getattr(stream, "name", None)
+    if isinstance(name, (bytes, _os.PathLike)):
+        try:
+            name = _os.fsdecode(name)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(name, str):
+        return None
+    basename = _os.path.basename(name.replace("\\", "/"))
+    if not basename or not _backend_claims(basename):
+        return None
+    return basename
+
+
 def _marker_view(
     source: bytes, encoding: "_ty.Optional[str]"
 ) -> "_ty.Union[str, bytes]":
@@ -373,6 +427,13 @@ def _flatten_sources(sources, encoding):
         if not source:
             continue
 
+        # Before every other branch: a file object is iterable, so without
+        # this it fell through to the iterable branch and each of its LINES
+        # was loaded as a path, a glob or a command.
+        if _is_stream(source):
+            yield source
+            continue
+
         # An os.PathLike that is NOT a pathlib-next path (a pathlib.Path, a
         # PurePath, anything else with __fspath__) becomes the string it spells,
         # so it gets the same command check, path_factory, base_dir join, memo
@@ -386,7 +447,7 @@ def _flatten_sources(sources, encoding):
         ):
             source = _os.fsdecode(_os.fspath(source))
 
-        if isinstance(source, (_io.IOBase, str, bytes, Path)):
+        if isinstance(source, (str, bytes, Path)):
             yield source
         elif isinstance(source, _ty.Iterable):
             yield from _flatten_sources(source, encoding)
@@ -412,7 +473,7 @@ def _classify_source(source, base_dir, encoding, path_factory, recursive):
     * ``"literal"`` — one concrete path;
     * ``"pattern"`` — a glob, expanded on yield.
     """
-    if isinstance(source, _io.IOBase):
+    if _is_stream(source):
         return "inline", (source, None)
     if isinstance(source, str):
         if source.startswith("#!"):
@@ -517,9 +578,23 @@ def _materialize_inline(
     """
     if path_marker is None:
         content = source.read()
-        # Unique name + default .yaml suffix so backend auto-detection works
-        # for an anonymous stream (YAML is yaconfiglib's default).
-        filename = f"stream-{next(_SOURCE_COUNTER)}.yaml"
+        if isinstance(content, (bytes, bytearray)):
+            content = bytes(content)
+        elif not isinstance(content, str):
+            raise TypeError(
+                f"{type(source).__name__}.read() returned "
+                f"{type(content).__name__}; a stream source must read as str "
+                "or bytes"
+            )
+        # A claimed file name goes in a unique directory, so .name and .stem
+        # match a load by path (a merge="hash" key, a transform's
+        # pathname.name). An unclaimed one keeps the .yaml default, since YAML
+        # is yaconfiglib's default and every such stream parses that way today.
+        counter = next(_SOURCE_COUNTER)
+        basename = _stream_filename(source)
+        filename = (
+            f"stream-{counter}/{basename}" if basename else f"stream-{counter}.yaml"
+        )
     else:
         newline = "\n" if isinstance(source, str) else b"\n"
         name, content = source.split(newline, maxsplit=1)
@@ -603,8 +678,17 @@ def _iter_sources(
       ``mem-N.yaml`` name. Backend selection uses that name. The document's
       own line endings are kept exactly as given, so a ``\r\n`` block scalar
       loads as it would from a file.
-    * An open stream — read once and materialized under a unique
-      ``stream-N.yaml`` name.
+    * An open file object — anything with a callable ``read``, not just an
+      `io` class, so `codecs.open()`, a `tempfile.SpooledTemporaryFile` and a
+      custom reader all count. It is read once and materialized. Its backend
+      follows the basename of its ``name`` when a backend other than
+      :class:`~yaconfiglib.backends.command.CommandBackend` recognizes that
+      name, and is YAML otherwise (``<stdin>``, ``x.yaml.gz``, a descriptor,
+      an unnamed stream). The content is data: it is never read as a list of
+      source paths, never run as a script however the file is named, and a
+      leading ``#!`` line is content rather than a marker. Being
+      materialized, an ``!include`` inside it resolves against *base_dir* —
+      pass the path instead for file-relative includes.
     * A nested iterable of any of the above, flattened.
 
     Glob expansion belongs to the path type (pathlib-next, or the stdlib

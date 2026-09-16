@@ -218,3 +218,189 @@ class TestInMemoryTextMaterialization:
         # An ASCII-compatible codec must not decode a byte payload: a
         # byte-oriented backend reads these bytes back as they were given.
         assert path.read_bytes() == payload
+
+
+#: Files behind the stream tests: (name, content) written under tmp_path.
+_STREAM_FILES = {
+    "toml": ("s.toml", 'title = "x"' + LF + "[db]" + LF + "port = 5432" + LF),
+    "dotenv": ("e.env", "A=1" + LF + "B=2" + LF),
+    "ini": ("i.ini", "[s]" + LF + "k = v" + LF),
+    "json_exponent": ("num.json", '{"n": 1e5, "m": 2E-3}' + LF),
+    "json_tabs": ("tabs.json", "{" + LF + chr(9) + '"a": 1' + LF + "}" + LF),
+}
+
+
+@pytest.mark.usefixtures("needs_yaml")
+class TestStreamSources:
+    """A file object behaves like the file it was opened on.
+
+    Every open file used to be parsed as YAML whatever its name, so a TOML or
+    `.env` file came back as a single string and JSON exponents as strings;
+    and a file-like object that was not an `io` class was iterated instead,
+    turning each of its LINES into a path, glob or command.
+    """
+
+    @pytest.mark.parametrize(
+        "key, mode",
+        [
+            pytest.param("toml", "r", id="toml_text"),
+            pytest.param("toml", "rb", id="toml_binary"),
+            pytest.param("dotenv", "r", id="dotenv"),
+            pytest.param("ini", "r", id="ini"),
+            pytest.param("json_exponent", "r", id="json_exponent"),
+            pytest.param("json_tabs", "r", id="json_tabs"),
+        ],
+    )
+    def test_stream_backend_follows_file_name(self, tmp_path, request, key, mode):
+        from yaconfiglib import ConfigLoader
+
+        if key == "toml":
+            request.getfixturevalue("needs_toml")
+        name, content = _STREAM_FILES[key]
+        path = tmp_path / name
+        path.write_text(content, encoding="utf-8")
+        with open(path, mode) as handle:
+            from_stream = ConfigLoader().load(handle)
+        assert from_stream == ConfigLoader().load(str(path))
+
+    def test_stream_merge_key_is_file_stem(self, tmp_path, request):
+        from yaconfiglib import ConfigLoader
+
+        request.getfixturevalue("needs_toml")
+        name, content = _STREAM_FILES["toml"]
+        path = tmp_path / name
+        path.write_text(content, encoding="utf-8")
+        with open(path) as handle:
+            # The virtual path is stream-<n>/s.toml, so its stem is the file's.
+            assert list(ConfigLoader(merge="hash").load(handle)) == ["s"]
+
+    # codecs.open() is deprecated from 3.14 and is exactly the kind of reader
+    # under test here: a file object that is not an io class.
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    @pytest.mark.parametrize("kind", ["codecs_open", "duck_reader"])
+    def test_non_iobase_readers_are_streams(self, tmp_path, kind):
+        from yaconfiglib import ConfigLoader
+
+        if kind == "codecs_open":
+            import codecs
+
+            path = tmp_path / "c.yaml"
+            path.write_text("a: 1" + LF, encoding="utf-8")
+            with codecs.open(str(path), encoding="utf-8") as handle:
+                assert ConfigLoader().load(handle) == {"a": 1}
+        else:
+
+            class Reader:
+                def read(self, *args):
+                    return "a: 1" + LF
+
+            assert ConfigLoader().load(Reader()) == {"a": 1}
+
+    def test_spooled_temporary_file_is_a_stream(self):
+        import tempfile
+
+        from yaconfiglib import ConfigLoader
+
+        # io.IOBase only on 3.11+, so before that it was iterated line by line.
+        with tempfile.SpooledTemporaryFile(mode="w+b") as handle:
+            handle.write(("server:" + LF + "  port: 8080" + LF).encode("utf-8"))
+            handle.seek(0)
+            assert ConfigLoader().load(handle) == {"server": {"port": 8080}}
+
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
+    def test_reader_lines_are_never_source_specs(self, tmp_path, monkeypatch):
+        import codecs
+
+        from yaconfiglib import ConfigLoader
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "other.yaml").write_text("secret: 1" + LF, encoding="utf-8")
+        (tmp_path / "list.txt").write_text("other.yaml", encoding="utf-8")
+        with codecs.open("list.txt", encoding="utf-8") as handle:
+            # The content is a document, not a list of files to load: this used
+            # to return {"secret": 1}.
+            assert ConfigLoader().load(handle) == "other.yaml"
+
+    def test_reader_returning_non_text_raises_type_error(self):
+        from yaconfiglib import ConfigLoader
+
+        class Reader:
+            def read(self, *args):
+                return 42
+
+        with pytest.raises(TypeError, match="read"):
+            ConfigLoader().load(Reader())
+
+    def test_template_named_stream_is_rendered(self, tmp_path, request):
+        from yaconfiglib import ConfigLoader
+
+        request.getfixturevalue("needs_jinja2")
+        path = tmp_path / "t.yaml.j2"
+        path.write_text("a: {{ 1 + 1 }}" + LF, encoding="utf-8")
+        with open(path) as handle:
+            assert ConfigLoader().load(handle) == {"a": 2}
+
+    @pytest.mark.parametrize("kind", ["gzip", "stringio", "file_descriptor"])
+    def test_unclaimed_stream_names_parse_as_yaml(self, tmp_path, kind):
+        import os
+
+        from yaconfiglib import ConfigLoader
+
+        doc = "a: 1" + LF
+        if kind == "gzip":
+            import gzip
+
+            path = tmp_path / "x.yaml.gz"
+            with gzip.open(path, "wb") as raw:
+                raw.write(doc.encode("utf-8"))
+            with gzip.open(path) as handle:
+                assert ConfigLoader().load(handle) == {"a": 1}
+        elif kind == "stringio":
+            assert ConfigLoader().load(io.StringIO(doc)) == {"a": 1}
+        else:
+            path = tmp_path / "c.yaml"
+            path.write_text(doc, encoding="utf-8")
+            # open(fd).name is an int, so there is no name to dispatch on.
+            with open(os.open(str(path), os.O_RDONLY)) as handle:
+                assert ConfigLoader().load(handle) == {"a": 1}
+
+    @pytest.mark.parametrize(
+        "allow_commands",
+        [
+            pytest.param(True, id="allow_commands_true"),
+            pytest.param(False, id="allow_commands_false"),
+        ],
+    )
+    def test_script_named_stream_is_parsed_not_run(self, tmp_path, allow_commands):
+        from yaconfiglib import ConfigLoader
+
+        path = tmp_path / "x.sh"
+        path.write_text("a: 1" + LF, encoding="utf-8")
+        with open(path) as handle:
+            # A file object's content is data. Naming the file x.sh must not
+            # turn it into a program, under either setting.
+            loader = ConfigLoader(allow_commands=allow_commands)
+            assert loader.load(handle) == {"a": 1}
+
+    def test_stream_marker_line_is_content(self):
+        from yaconfiglib import ConfigLoader
+
+        # A stream is materialized, not marker-parsed: "#!c.toml" is a YAML
+        # comment here, exactly as it would be in a file.
+        assert ConfigLoader().load(io.StringIO("#!c.toml" + LF + "a: 1" + LF)) == {
+            "a": 1
+        }
+
+    def test_template_stream_rendering_a_script_respects_allow_commands(
+        self, tmp_path, request
+    ):
+        from yaconfiglib import CommandsDisabledError, ConfigLoader
+
+        request.getfixturevalue("needs_jinja2")
+        path = tmp_path / "x.sh.j2"
+        path.write_text("echo a: 1" + LF, encoding="utf-8")
+        with open(path) as handle:
+            # The .j2 name renders; its rendered x.sh target then meets the
+            # same allow_commands gate a file by path would.
+            with pytest.raises(CommandsDisabledError):
+                ConfigLoader(allow_commands=False).load(handle)
