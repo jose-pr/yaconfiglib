@@ -162,6 +162,14 @@ dicts merge key-by-key, lists extend with unique items — pass `mergelists=True
 merge dict elements positionally when keys overlap). Call as `method(a, b, *,
 memo=None, **options)`.
 
+A **leaf** is any value that is neither a mapping nor an array: strings, numbers, dates,
+datetimes, `Decimal`, sets, enum members, objects a backend produced. Leaves replace, and
+a shape change (mapping ↔ leaf, string → list, list → mapping) replaces too — no strategy
+raises for a type combination any more. The exception: a mapping overridden by a
+**non-empty list of mappings** folds them in, in order; any other list, `[]` included,
+replaces the mapping. `Deep` list extension keeps unique **non-mapping** items whatever
+their type.
+
 Strategies are copy-on-write: they **never modify their inputs**, so a document whose
 keys share one mapping (a YAML anchor or a `<<:` merge key) can be overridden without
 rewriting its siblings — use the return value. The result may share unchanged
@@ -178,7 +186,8 @@ per source, in order), `Hash` (collect into a dict keyed by `configloaderkey`, i
 source's merge key). These three require `configloaderkey=` on every call — only
 `ConfigLoader.load()` supplies it; calling them directly needs it passed explicitly.
 
-`is_scalar(obj) -> bool`, `is_array(obj, mutable=False) -> bool` (sequence but not a
+`is_scalar(obj) -> bool` (one of `int`/`str`/`bool`/`float`/`None`/`bytes`; unchanged, and
+**not** the merge leaf rule), `is_array(obj, mutable=False) -> bool` (sequence but not a
 mapping/str/bytes; `mutable=True` also requires `MutableSequence`) — used throughout to
 distinguish merge branches.
 

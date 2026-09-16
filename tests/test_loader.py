@@ -1332,6 +1332,57 @@ class TestMergeAnchors:
         assert result["common"]["x"] == 1
 
 
+class TestMergeLeafTypes:
+    """Ordinary YAML/TOML dates and datetimes merge like any other value."""
+
+    @pytest.mark.parametrize("strategy", ["deep", "substitute"])
+    def test_yaml_dates_merge(self, tmp_path, strategy):
+        import datetime
+
+        (tmp_path / "a.yaml").write_text(
+            "name: app\nrelease: 2024-01-01\nholidays:\n  - 2024-12-25\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "b.yaml").write_text(
+            "owner: team\nrelease: 2025-06-01\nholidays:\n  - 2025-12-25\n",
+            encoding="utf-8",
+        )
+
+        result = ConfigLoader(base_dir=tmp_path, merge=strategy).load(
+            "a.yaml", "b.yaml"
+        )
+
+        assert result["name"] == "app"
+        assert result["owner"] == "team"
+        assert result["release"] == datetime.date(2025, 6, 1)
+        if strategy == "deep":
+            assert result["holidays"] == [
+                datetime.date(2024, 12, 25),
+                datetime.date(2025, 12, 25),
+            ]
+        else:
+            assert result["holidays"] == [datetime.date(2025, 12, 25)]
+
+    def test_toml_datetimes_merge(self, tmp_path):
+        (tmp_path / "a.toml").write_text(
+            'name = "app"\nwhen = 2024-01-01T10:00:00Z\n', encoding="utf-8"
+        )
+        (tmp_path / "b.toml").write_text(
+            "when = 2025-06-01T11:30:00Z\n", encoding="utf-8"
+        )
+
+        result = ConfigLoader(base_dir=tmp_path, merge="deep").load("a.toml", "b.toml")
+
+        # Compare the date parts: the tzinfo class differs between tomllib and
+        # the toml package.
+        assert (result["when"].year, result["when"].month, result["when"].day) == (
+            2025,
+            6,
+            1,
+        )
+        assert result["name"] == "app"
+
+
 class TestIgnoreErrorPredicate:
     def test_predicate_skips_only_selected_errors(self, tmp_path):
         (tmp_path / "good.yaml").write_text("x: 1\n")

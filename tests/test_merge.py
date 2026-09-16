@@ -64,6 +64,11 @@ class TestHelpers:
         assert is_array([1], mutable=True)
         assert not is_array((1,), mutable=True)
 
+    def test_binary_buffers_are_not_arrays(self):
+        # A binary buffer is a value, not a sequence to merge element-wise.
+        assert not is_array(bytearray(b"ab"))
+        assert not is_array(memoryview(b"ab"))
+
 
 # ---------------------------------------------------------------------------
 # Simple merge
@@ -98,12 +103,14 @@ class TestSimpleMerge:
     def test_list_replaces_scalar(self):
         assert self.m("old", [1, 2]) == [1, 2]
 
-    def test_unsupported_type_raises(self):
+    def test_unknown_leaf_type_replaces(self):
         class Weird:
             pass
 
-        with pytest.raises(TypeError):
-            self.m({}, Weird())
+        weird = Weird()
+        # Any value that is not a mapping or a list is a leaf, so it replaces
+        # rather than raising.
+        assert self.m({}, weird) is weird
 
 
 # ---------------------------------------------------------------------------
@@ -137,10 +144,6 @@ class TestSubstituteMerge:
         b = [{"b": 2}, {"c": 3}]
         result = self.m(a, b)
         assert result == {"a": 1, "b": 2, "c": 3}
-
-    def test_dict_from_list_with_non_dict_raises(self):
-        with pytest.raises(TypeError):
-            self.m({"a": 1}, [42])
 
 
 # ---------------------------------------------------------------------------
@@ -212,11 +215,123 @@ class TestDeepMerge:
 
 
 # ---------------------------------------------------------------------------
-# Copy-on-write contract
+# Leaf values and shape changes
 # ---------------------------------------------------------------------------
 
 STRATEGIES = [MergeMethod.Simple, MergeMethod.Substitute, MergeMethod.Deep]
 STRATEGY_IDS = ["Simple", "Substitute", "Deep"]
+
+
+class _Colour(__import__("enum").Enum):
+    """A plain Enum member: not an int, so no type whitelist would accept it."""
+
+    RED = "red"
+    BLUE = "blue"
+
+
+def _leaf_document(which):
+    import datetime
+    import decimal
+
+    Colour = _Colour
+
+    if which == "a":
+        return {
+            "release": datetime.date(2024, 1, 1),
+            "at": datetime.datetime(2024, 1, 1, 10, 0),
+            "cutoff": datetime.time(9, 0),
+            "rate": decimal.Decimal("1.5"),
+            "colour": Colour.RED,
+            "tags": {"one"},
+        }
+    return {
+        "release": datetime.date(2025, 6, 1),
+        "at": datetime.datetime(2025, 6, 1, 11, 30),
+        "cutoff": datetime.time(17, 45),
+        "rate": decimal.Decimal("2.5"),
+        "colour": Colour.BLUE,
+        "tags": {"two"},
+    }
+
+
+class TestLeafValues:
+    @pytest.mark.parametrize("strategy", STRATEGIES, ids=STRATEGY_IDS)
+    def test_non_whitelisted_leaf_replaces(self, strategy):
+        a = {"section": _leaf_document("a")}
+        b = {"section": _leaf_document("b")}
+
+        result = strategy(a, b)
+
+        assert result["section"] == _leaf_document("b")
+
+    @pytest.mark.parametrize("mergelists", [False, True], ids=["plain", "mergelists"])
+    def test_deep_list_keeps_non_whitelisted_items(self, mergelists):
+        import datetime
+
+        a = [datetime.date(2024, 1, 1), datetime.datetime(2024, 1, 1, 9, 0), {"x"}]
+        b = [datetime.date(2025, 1, 1), datetime.datetime(2025, 1, 1, 9, 0), {"y"}]
+
+        result = MergeMethod.Deep(a, b, mergelists=mergelists)
+
+        for item in b:
+            assert item in result
+
+    def test_deep_empty_base_list_takes_dates(self):
+        import datetime
+
+        assert MergeMethod.Deep([], [datetime.date(2025, 1, 1)]) == [
+            datetime.date(2025, 1, 1)
+        ]
+
+    def test_simple_list_of_dates_does_not_raise(self):
+        import datetime
+
+        result = MergeMethod.Simple(
+            [datetime.date(2024, 1, 1)], [datetime.date(2025, 1, 1)]
+        )
+
+        assert result == [datetime.date(2025, 1, 1)]
+
+    def test_deep_bytearray_replaces(self):
+        assert MergeMethod.Deep(bytearray(b"ab"), bytearray(b"bc")) == bytearray(b"bc")
+
+
+class TestTypeChangingOverrides:
+    CASES = {
+        "scalar_to_dict": (5, {"k": 1}),
+        "dict_to_scalar": ({"k": 1}, 5),
+        "str_to_list": ("a", [1, 2]),
+        "list_to_dict": ([1, 2], {"k": 1}),
+        "dict_to_scalar_list": ({"k": 1}, [1, 2]),
+    }
+
+    @pytest.mark.parametrize(
+        "strategy",
+        [MergeMethod.Substitute, MergeMethod.Deep],
+        ids=["Substitute", "Deep"],
+    )
+    @pytest.mark.parametrize("case", list(CASES), ids=list(CASES))
+    def test_later_value_replaces(self, strategy, case):
+        a, b = self.CASES[case]
+
+        assert strategy({"x": a}, {"x": b})["x"] == b
+
+    @pytest.mark.parametrize(
+        "strategy",
+        [MergeMethod.Substitute, MergeMethod.Deep],
+        ids=["Substitute", "Deep"],
+    )
+    def test_mapping_folds_only_nonempty_all_mapping_lists(self, strategy):
+        # A list of mappings folds into the mapping...
+        assert strategy({"a": 1}, [{"b": 2}]) == {"a": 1, "b": 2}
+        # ...anything else replaces it, an empty list included ("clear this").
+        assert strategy({"a": 1}, [42]) == [42]
+        assert strategy({"a": 1}, []) == []
+
+
+# ---------------------------------------------------------------------------
+# Copy-on-write contract
+# ---------------------------------------------------------------------------
 
 
 class TestMergeCopyOnWrite:

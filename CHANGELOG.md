@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `is_array()` returns `False` for `bytearray` and `memoryview`, matching `bytes`. Binary
+  buffers are values, so merging replaces them instead of combining them byte-wise.
 - `load_as` builds dataclass fields that are annotated as a dataclass or Pydantic model
   (including `Optional[...]` of one) as instances instead of leaving them as dicts. Code
   that indexed such a field (`cfg.db["host"]`) must use attributes (`cfg.db.host`).
@@ -104,6 +106,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `Deep` and `Substitute` no longer raise `TypeError` on ordinary configuration values
+  they had no rule for — dates, datetimes, times, `Decimal`, sets, enum members, objects
+  a backend produced. Two YAML files with an unquoted `release: 2024-01-01` used to fail
+  the whole load, and with `ignore_error=True` the entire override file was discarded
+  instead.
+- `Deep` list extension keeps items of those types. `holidays: [2024-12-25]` overridden
+  by `holidays: [2025-12-25]` now holds both dates; the override used to be dropped.
+- A type-changing override replaces instead of raising: a mapping overridden by a number,
+  a string by a list, a list by a mapping. A mapping overridden by a list that is not a
+  non-empty list of mappings becomes that list, so `section: []` clears it (it used to
+  keep the mapping, or raise for `[42]`). A non-empty list of mappings still folds into
+  the mapping.
 - Overriding a key under a YAML anchor or a `<<:` merge key no longer rewrites the
   sibling keys that share it. `Deep` and `Substitute` merged into their left-hand
   argument, so an override for one environment silently changed every environment that

@@ -33,7 +33,7 @@ containing `{"server": {"port": 443}}`, a `Deep` merge produces
 - **`Substitute`** — like `Simple`, but nested dicts are merged
   recursively instead of only at the top level; lists still replace.
 - **`Deep`** — fully recursive dict merging. Lists are extended with
-  unique scalar/array items from the new source; pass `mergelists=True`
+  unique non-mapping items from the new source; pass `mergelists=True`
   via `merge_options` to also merge dict elements positionally within a
   list.
 - **`Last`** — each new source simply replaces the previous result
@@ -43,6 +43,16 @@ containing `{"server": {"port": 443}}`, a `Deep` merge produces
 - **`Hash`** — collect every source's result into a dict, keyed by each
   source's merge key (see `key_factory` below). Useful for "load a
   directory of files, keyed by filename" patterns.
+
+"Scalar" above means any **leaf**: a value that is neither a mapping nor a
+list. Strings, numbers, dates, datetimes, `Decimal`s, sets and objects a
+backend produced are all leaves, and a leaf replaces. When the two sides have
+different shapes — a mapping overridden by a number, a string by a list — the
+later value replaces the earlier one rather than raising.
+
+The one special case is a mapping overridden by a **non-empty list of
+mappings**: `Substitute` and `Deep` fold those into the mapping, in order.
+Any other list replaces it, so `section: []` clears a section.
 
 The strategies **never modify their inputs** — each returns a new result and
 leaves both sides as they were. That is what makes YAML anchors and `<<:`
