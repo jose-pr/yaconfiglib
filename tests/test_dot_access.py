@@ -137,3 +137,67 @@ class TestConvertOnce:
         assert type(config["extra"]) is dict
         config.other = plain
         assert config["other"] is plain
+
+
+class TestGetPaths:
+    """What `get()` accepts as a path, and what it returns when one breaks."""
+
+    def test_missing_non_string_key_returns_default(self):
+        config = _load({404: "not_found"})
+        assert config.get(404) == "not_found"
+        assert config.get(500) is None
+        assert config.get(None, "n") == "n"
+        assert config.get(1.5, "f") == "f"
+
+    def test_nested_null_leaf_is_returned(self):
+        config = _load({"password": None, "db": {"password": None}})
+        assert config.get("password", "x") is None
+        assert config.get("db.password", "x") is None
+        assert config.db.password is None
+
+    def test_null_intermediate_returns_default(self):
+        config = _load({"db": None})
+        assert config.get("db.password", "x") == "x"
+
+    def test_dotted_path_indexes_lists(self):
+        config = _load(
+            {"servers": [{"host": "a"}, [{"y": 0}, {"y": 1}]]},
+        )
+        assert config.get("servers.0.host") == "a"
+        assert config.get("servers.1.1.y") == 1
+
+    def test_out_of_range_or_negative_index_returns_default(self):
+        config = _load({"servers": [{"host": "a"}]})
+        assert config.get("servers.5.host", "X") == "X"
+        assert config.get("servers.-1.host", "X") == "X"
+
+    def test_digit_segment_on_a_mapping_is_a_string_key(self):
+        config = _load({"codes": {"0": "zero", 0: "int"}})
+        assert config.get("codes.0") == "zero"
+
+    def test_tuple_path_reaches_keys_containing_dots(self):
+        config = _load({"metadata": {"labels": {"app.kubernetes.io/name": "web"}}})
+        assert config.get(("metadata", "labels", "app.kubernetes.io/name")) == "web"
+
+    def test_tuple_path_uses_int_keys_and_indexes(self):
+        config = _load({"codes": {404: "nf"}, "servers": [{"host": "a"}]})
+        assert config.get(("codes", 404)) == "nf"
+        assert config.get(("servers", 0, "host")) == "a"
+        # A digit string is not an index, and True is not 1.
+        assert config.get(("servers", "0", "host"), "D") == "D"
+        assert config.get(("servers", True, "host"), "D") == "D"
+
+    def test_exact_tuple_key_outranks_traversal(self):
+        config = _load({("a", "b"): "exact", "a": {"b": "traversed"}})
+        assert config.get(("a", "b")) == "exact"
+
+    def test_empty_tuple_and_dig_false_return_default(self):
+        config = _load({"a": {"b": 1}})
+        assert config.get(("a", "b"), "D", dig=False) == "D"
+        assert config.get((), "D") == "D"
+
+    def test_dotted_string_does_not_match_nested_dotted_keys(self):
+        # Documented limitation: exact-key precedence is top level only, so the
+        # tuple form is the way to reach a nested key containing a dot.
+        config = _load({"metadata": {"labels": {"app.kubernetes.io/name": "web"}}})
+        assert config.get("metadata.labels.app.kubernetes.io/name", "M") == "M"

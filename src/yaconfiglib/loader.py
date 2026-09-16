@@ -1043,26 +1043,105 @@ class DotAccessibleDict(dict):
     def __setattr__(self, name: str, value: object) -> None:
         self[name] = value
 
-    def get(self, key: str, default: object = None, dig: bool = True) -> object:
-        """Support dot-notation traversal, e.g., get("database.credentials.user", dig=True).
+    def get(
+        self, key: typing.Hashable, default: object = None, dig: bool = True
+    ) -> object:
+        """Look up *key*, optionally as a path into nested containers.
+
+        The order is: an **exact** key wins; then, when *dig* is true, a
+        dotted-string or tuple path is traversed; otherwise *default*.
+
+        A dotted string (``"database.credentials.user"``) walks mappings by
+        segment. A segment of ASCII digits indexes a list or tuple
+        (``"servers.0.host"``), but on a mapping it is always the *string* key,
+        so ``"codes.0"`` never means the integer ``0``. Exact-key precedence
+        applies at the top level only, so a nested key that itself contains a
+        dot is unreachable this way — pass a **tuple** path for that
+        (``("metadata", "labels", "app.kubernetes.io/name")``), which also
+        reaches integer keys and uses ints, not digit strings, as indexes.
+
+        A ``None`` (or any non-traversable value) reached with segments still
+        to go yields *default*; the final segment's value is returned as
+        stored, ``None`` included — so an explicit ``null`` stays
+        distinguishable from an absent key.
 
         Never inserts: a miss returns *default* itself, as `dict.get` does.
         """
         if key in self:
             return super().get(key, default)
+        if not dig:
+            return default
 
-        if dig and "." in key:
-            current = self
-            for part in key.split("."):
-                if not isinstance(current, dict):
+        if isinstance(key, str):
+            if "." not in key:
+                return default
+            # Inlined rather than delegated: this is the benchmarked read path,
+            # and a helper call with keyword arguments showed up in it.
+            segments = key.split(".")
+            current: object = self
+            last = len(segments) - 1
+            for index, segment in enumerate(segments):
+                if isinstance(current, dict):
+                    # dict.get, so a defaultdict stored later does not grow a
+                    # key through a read, and __missing__ is never consulted.
+                    current = dict.get(current, segment, _MISSING)
+                    if current is _MISSING:
+                        return default
+                elif current.__class__ is list or current.__class__ is tuple:
+                    # ASCII digits only: a Unicode digit must not reach int(),
+                    # and a negative or non-numeric segment ends the path.
+                    if not (segment.isascii() and segment.isdigit()):
+                        return default
+                    position = int(segment)
+                    if position >= len(current):
+                        return default
+                    current = current[position]
+                else:
+                    # A scalar, a None, or a non-dict Mapping: the path stops.
                     return default
-                # dict.get, so a defaultdict stored later does not grow a key
-                # through a read.
-                current = dict.get(current, part, _MISSING)
-                if current is _MISSING or current is None:
+                if current is None and index != last:
                     return default
             return current
-        return super().get(key, default)
+        if isinstance(key, tuple):
+            if not key:
+                return default
+            return self._dig(key, default)
+        # Any other hashable key: absent is absent. (dict.get's contract; an
+        # unhashable one has already raised TypeError above.)
+        return default
+
+    def _dig(
+        self, segments: typing.Sequence[typing.Hashable], default: object
+    ) -> object:
+        """Walk a **tuple** path, returning *default* the moment it breaks.
+
+        Each segment is used as given: any hashable key on a mapping, and on a
+        list or tuple only a real `int`. The string form is inlined in `get()`.
+        """
+        current: object = self
+        last = len(segments) - 1
+        for index, segment in enumerate(segments):
+            if isinstance(current, dict):
+                # dict.get, so a defaultdict stored later does not grow a key
+                # through a read, and __missing__ is never consulted.
+                current = dict.get(current, segment, _MISSING)
+                if current is _MISSING:
+                    return default
+            elif current.__class__ is list or current.__class__ is tuple:
+                # bool is excluded: True == 1 would index silently.
+                if (
+                    not isinstance(segment, int)
+                    or isinstance(segment, bool)
+                    or not 0 <= segment < len(current)
+                ):
+                    return default
+                current = current[segment]
+            else:
+                # A scalar, a None, or a non-dict Mapping: the path stops here.
+                return default
+            if current is None and index != last:
+                return default
+        return current
 
 
 #: Every keyword :class:`ConfigLoader` itself accepts. The module-level helpers

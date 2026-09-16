@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `DotAccessibleDict.get()` accepts a **tuple** path — `get(("metadata", "labels",
+  "app.kubernetes.io/name"))` — which reaches keys containing dots, integer keys, and
+  list indexes without any string parsing.
 - `yaconfiglib.utils.source.CommandSource`, the `str` subclass `parse_sources` yields
   for a command URI. It exposes `scheme`, `format` and `command`, and answers `name`,
   `stem` and `as_posix()` with the whole text.
@@ -199,6 +202,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `DotAccessibleDict.get()` returns the default for a missing **non-string** key instead
+  of raising `TypeError: argument of type 'int' is not iterable`.
+- A dotted `get()` returns an explicit `null` leaf as `None`, matching top-level `get()`
+  and attribute access; only a `null` or missing **intermediate** yields the default.
+  `get("db.password")` on `password: null` no longer looks like an absent key.
+- Dotted paths index lists and tuples: `get("servers.0.host")`. A digit segment on a
+  *mapping* is still the string key, so `get("codes.0")` is unambiguous, and a negative
+  or out-of-range index returns the default.
 - Reading a configuration no longer modifies it. `config.get("missing", {})` used to
   store that default under the missing key, and every attribute or `get()` read of a
   nested mapping replaced the stored value with a new wrapper — so `config["db"] is

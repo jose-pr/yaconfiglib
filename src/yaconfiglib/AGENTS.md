@@ -152,9 +152,22 @@ All constructor args become instance defaults, overridable per-call. Notable one
 ### `DotAccessibleDict(dict)`
 
 Wraps every dict result. `__getattr__`/`__setattr__` give `config.a.b.c` access;
-`.get(key, default=None, dig=True)` additionally supports a dotted-string key
-(`get("database.credentials.user")`) that traverses nested dicts, short-circuiting to
-`default` on a `None` or missing intermediate.
+`.get(key: Hashable, default=None, dig=True)` additionally takes a **path**. Order:
+exact key wins, then (with `dig`) a path, else `default`.
+- A **dotted string** walks mappings by segment; a segment of ASCII digits indexes a
+  `list`/`tuple` (`get("servers.0.host")`), but on a mapping it is always the *string*
+  key, so `codes.0` never means `0`. Exact-key precedence is **top level only**, so a
+  nested key containing a dot is unreachable this way.
+- A **tuple** path (`get(("metadata", "labels", "app.kubernetes.io/name"))`) uses each
+  segment as given: any hashable mapping key, and on a sequence only a real `int`
+  (`bool` excluded, since `True == 1` would index silently). An empty tuple, or
+  `dig=False`, returns `default`.
+- A `None` or other non-traversable value reached **with segments left** gives `default`;
+  the final segment is returned as stored, `None` included, so an explicit `null` stays
+  distinguishable from an absent key.
+- A missing non-string key returns `default` rather than raising.
+The string walk is inlined in `get()` rather than sharing `_dig` with the tuple form:
+it is the benchmarked read path and a helper call showed up in it.
 
 Nested mappings are converted **once, at construction** (and once per `load()`, via the
 private `_to_dot_access`), never lazily on read. That is what makes item access,
