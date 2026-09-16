@@ -134,6 +134,10 @@ export PATH="$PWD/.venv/3.9-nt-amd64/Scripts:$PATH"
 python -m pytest -q -rs
 ```
 
+Micro-benchmarks live in `benchmarks/`; see
+[`benchmarks/README.md`](benchmarks/README.md) for how to run them, save a
+result file and compare two runs.
+
 Installing only `.[dev]` is supported — the tests that need PyYAML, Jinja2 or a
 TOML parser skip, and `-rs` lists them — but then the suite covers much less.
 

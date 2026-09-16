@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import io
+import json
 import logging
 import os
+import platform
+import re
 import statistics
+import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 from collections.abc import Callable
@@ -26,7 +32,42 @@ from yaconfiglib.utils.source import has_glob_pattern, parse_sources
 BenchmarkRows = list[tuple[str, object]]
 
 
-def _measure(operation: Callable[[], object], *, repeat: int = 5, warmup: bool = True) -> float:
+class Timing:
+    """One measurement: every sample, and how many calls a sample covers.
+
+    The samples time a whole loop, which is what the printed tables show. The
+    JSON reports per-call figures, so *calls* has to travel with them.
+    """
+
+    __slots__ = ("samples", "calls")
+
+    def __init__(self, samples: "list[float]", calls: int) -> None:
+        self.samples = samples
+        self.calls = calls
+
+    @property
+    def median(self) -> float:
+        return statistics.median(self.samples)
+
+    def per_call_ms(self) -> "dict[str, object]":
+        divisor = self.calls or 1
+        per_call = sorted(sample / divisor * 1000 for sample in self.samples)
+        return {
+            "min_ms": per_call[0],
+            "median_ms": statistics.median(per_call),
+            "max_ms": per_call[-1],
+            "calls": self.calls,
+            "samples": len(per_call),
+        }
+
+
+def _measure(
+    operation: Callable[[], object],
+    *,
+    calls: int = 1,
+    repeat: int = 5,
+    warmup: bool = True,
+) -> Timing:
     if warmup:
         operation()
     samples = []
@@ -34,22 +75,12 @@ def _measure(operation: Callable[[], object], *, repeat: int = 5, warmup: bool =
         start = time.perf_counter()
         operation()
         samples.append(time.perf_counter() - start)
-    return statistics.median(samples)
-
-
-def _measure_status(
-    operation: Callable[[], object],
-    *,
-    repeat: int = 3,
-    warmup: bool = True,
-) -> float | str:
-    try:
-        return _measure(operation, repeat=repeat, warmup=warmup)
-    except Exception as error:
-        return f"{type(error).__name__}: {error}"
+    return Timing(samples, calls)
 
 
 def _fmt_metric(value: object) -> str:
+    if isinstance(value, Timing):
+        value = value.median
     if isinstance(value, float):
         if value < 0.001:
             return f"{value * 1_000_000:.2f}us"
@@ -96,6 +127,7 @@ def benchmark_sources() -> BenchmarkRows:
                         list(parse_sources(mixed_sources, base_dir=root))
                         for _ in range(500)
                     ],
+                    calls=500,
                     repeat=5,
                 ),
             )
@@ -108,6 +140,7 @@ def benchmark_sources() -> BenchmarkRows:
                         list(parse_sources(["*.yaml"], base_dir=root))
                         for _ in range(200)
                     ],
+                    calls=200,
                     repeat=5,
                 ),
             )
@@ -130,6 +163,7 @@ def benchmark_sources() -> BenchmarkRows:
                     (has_glob_pattern(normal), has_glob_pattern(globbed))
                     for _ in range(20_000)
                 ],
+                calls=20000,
                 repeat=5,
             ),
         )
@@ -178,9 +212,9 @@ def benchmark_merge() -> BenchmarkRows:
             loader.load(*docs)
 
     return [
-        ("deep merge, append list dicts (1k)", _measure(lambda: deep_merge_many(False), repeat=5)),
-        ("deep merge, positional list dicts (1k)", _measure(lambda: deep_merge_many(True), repeat=5)),
-        ("loader deep merge_options mergelists (200)", _measure(load_merge_options_many, repeat=5)),
+        ("deep merge, append list dicts (1k)", _measure(lambda: deep_merge_many(False), calls=1000, repeat=5)),
+        ("deep merge, positional list dicts (1k)", _measure(lambda: deep_merge_many(True), calls=1000, repeat=5)),
+        ("loader deep merge_options mergelists (200)", _measure(load_merge_options_many, calls=200, repeat=5)),
         ("positional merge correctness", result),
     ]
 
@@ -216,10 +250,14 @@ def benchmark_jinja() -> BenchmarkRows:
             jinja2.interpolate(data, globals=context, environment=env)
 
     return [
-        ("interpolate nested structure (100)", _measure(interpolate_many, repeat=5)),
+        ("interpolate nested structure (100)", _measure(interpolate_many, calls=100, repeat=5)),
         (
             "load_all inline docs with interpolate (5 x 50 docs)",
-            _measure(lambda: [list(loader.load_all(docs)) for _ in range(5)], repeat=3),
+            _measure(
+                lambda: [list(loader.load_all(docs)) for _ in range(5)],
+                calls=5,
+                repeat=3,
+            ),
         ),
     ]
 
@@ -245,9 +283,9 @@ def benchmark_dot_access() -> BenchmarkRows:
             data.get("database.credentials.missing", "fallback")
 
     return [
-        ("dotted hit (50k)", _measure(dotted_hit, repeat=5)),
-        ("exact dotted-key hit (50k)", _measure(exact_hit, repeat=5)),
-        ("dotted miss (50k)", _measure(miss, repeat=5)),
+        ("dotted hit (50k)", _measure(dotted_hit, calls=50000, repeat=5)),
+        ("exact dotted-key hit (50k)", _measure(exact_hit, calls=50000, repeat=5)),
+        ("dotted miss (50k)", _measure(miss, calls=50000, repeat=5)),
         ("exact key outranks traversal", data.get("database.credentials.literal")),
     ]
 
@@ -276,6 +314,7 @@ def benchmark_env() -> BenchmarkRows:
                 "flat env scan (200)",
                 _measure(
                     lambda: [loader.load(loader=flat_backend) for _ in range(200)],
+                    calls=200,
                     repeat=5,
                 ),
             )
@@ -285,6 +324,7 @@ def benchmark_env() -> BenchmarkRows:
                 "nested/coerced env scan (200)",
                 _measure(
                     lambda: [loader.load(loader=nested_backend) for _ in range(200)],
+                    calls=200,
                     repeat=5,
                 ),
             )
@@ -304,6 +344,88 @@ def benchmark_env() -> BenchmarkRows:
         os.environ.clear()
         os.environ.update(original)
     return rows
+
+
+def _metric_key(suite: str, label: str) -> str:
+    """A stable `<suite>.<snake_case>` key for a row label."""
+    cleaned = re.sub(r"[^0-9a-z]+", "_", label.lower()).strip("_")
+    return f"{suite}.{cleaned}"
+
+
+def _default_result_path(version: str) -> StdlibPath:
+    """benchmarks/results/<version>-<impl><major.minor>-<os>-<arch>.json"""
+    impl = platform.python_implementation().lower()
+    major_minor = ".".join(platform.python_version_tuple()[:2])
+    arch = sysconfig.get_platform().split("-")[-1]
+    name = f"{version}-{impl}{major_minor}-{os.name}-{arch}.json"
+    return StdlibPath(__file__).parent / "results" / name
+
+
+def _benchmarked_version() -> str:
+    """Read the version from the pyproject.toml beside the benchmarked src/.
+
+    Deliberately not importlib.metadata: that reports whatever is installed,
+    while this harness benchmarks the tree it sits in.
+    """
+    pyproject = StdlibPath(__file__).parent.parent / "pyproject.toml"
+    match = re.search(
+        r'^version\s*=\s*"([^"]+)"', pyproject.read_text(encoding="utf-8"), re.M
+    )
+    return match.group(1) if match else "unknown"
+
+
+def _benchmarked_commit() -> "str | None":
+    """Short HEAD of the benchmarked tree, or None (e.g. a git archive export)."""
+    try:
+        done = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=StdlibPath(__file__).parent.parent,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return done.stdout.strip() or None
+
+
+def save_results(
+    suites: "list[tuple[str, BenchmarkRows]]", path: "StdlibPath | None"
+) -> StdlibPath:
+    """Write one result file. Nothing machine-identifying goes in it."""
+    version = _benchmarked_version()
+    target = StdlibPath(path) if path else _default_result_path(version)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    metrics: "dict[str, object]" = {}
+    checks: "dict[str, object]" = {}
+    for suite, rows in suites:
+        for label, metric in rows:
+            key = _metric_key(suite, label)
+            if isinstance(metric, Timing):
+                metrics[key] = metric.per_call_ms()
+            else:
+                checks[key] = metric
+
+    payload = {
+        "name": target.stem,
+        "version": version,
+        "commit": _benchmarked_commit(),
+        "python": platform.python_version(),
+        "implementation": platform.python_implementation(),
+        # platform.processor()/platform.platform(), never platform.node(): these
+        # files are committed, so no machine or user name may appear.
+        "processor": platform.processor(),
+        "platform": platform.platform(),
+        "source": "ci" if os.environ.get("CI") else "local",
+        "created": datetime.datetime.now(datetime.timezone.utc).isoformat(
+            timespec="seconds"
+        ),
+        "metrics": metrics,
+        "checks": checks,
+    }
+    target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return target
 
 
 def collect_rows(command: str) -> list[tuple[str, BenchmarkRows]]:
@@ -330,10 +452,22 @@ def cli(argv: list[str] | None = None) -> None:
         help="benchmark suite to run",
     )
     parser.add_argument("--markdown", action="store_true", help="print markdown tables")
+    parser.add_argument(
+        "--save",
+        nargs="?",
+        const="",
+        metavar="PATH",
+        help="also write the results as JSON (default: benchmarks/results/<name>.json)",
+    )
     args = parser.parse_args(argv)
 
-    for title, rows in collect_rows(args.command):
+    suites = collect_rows(args.command)
+    for title, rows in suites:
         _print_rows(title, rows, markdown=args.markdown)
+
+    if args.save is not None:
+        target = save_results(suites, StdlibPath(args.save) if args.save else None)
+        print(f"\nsaved {target}")
 
 
 if __name__ == "__main__":
