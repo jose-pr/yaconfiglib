@@ -90,9 +90,17 @@ All constructor args become instance defaults, overridable per-call. Notable one
   as a string it's a `Path` attribute name, or `"%<jinja-expr>"` for a template.
 - `merge` — a `ConfigLoaderMergeMethod` (or any `Merge`-compatible callable) applied
   between successive sources, left-to-right.
-- `ignore_error` — `bool` (ignore/re-raise every load error uniformly) or a predicate
-  `(error, **context) -> bool` deciding per-error whether to skip and continue. Errors
-  are always handed to the predicate and logged, never silently swallowed.
+- `ignore_error` — `bool` (ignore/re-raise every failure uniformly) or a predicate
+  `(error, *, phase, path, loader, **extra) -> bool`. **Every offer passes those three
+  keywords**, so one predicate works in every phase: `phase` is `"load"`, `"include"`,
+  `"merge"` or `"interpolate"`; `path` is the source or `None`; extras are `result=`
+  (interpolate) and `value=` (`load_all`). A failure inside an include is offered **once
+  per level** — the included file as `"load"`, then each including file as `"include"`,
+  the same exception object each time. Every offer logs at DEBUG; a skip under the **bool**
+  form also logs at WARNING naming source, phase and error **type** (never the message
+  text, which can quote config), while a predicate-approved skip stays at DEBUG with the
+  traceback. A missing-Jinja2 `ImportError` is raised before the source loop and never
+  offered (see below).
 - `allow_commands=False` — a command source anywhere in the load, including through a
   nested `!include`, raises `CommandsDisabledError` instead of executing. Set this when
   loading configuration you don't fully trust. A per-call value reaches nested includes

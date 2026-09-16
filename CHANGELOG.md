@@ -71,6 +71,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- An `ignore_error` predicate now always receives `phase=`, `path=` and `loader=` by
+  keyword, in every phase. `phase` is `"load"`, `"include"`, `"merge"` or
+  `"interpolate"`; `load()`'s interpolation offer adds `result=` and `load_all()` adds
+  `value=`. The three call sites used to pass different keywords, so a predicate written
+  with explicit parameters raised `TypeError` in whichever phase it had not been written
+  for. Predicates that accept `**context` are unaffected.
+- A failure skipped by `ignore_error=True` is logged at WARNING, naming the source, the
+  phase and the error's type. It was logged only at DEBUG, so a blanket
+  `ignore_error=True` made failures invisible in a default logging configuration. The
+  line never includes the error's message text, which can quote a configuration line;
+  pass a predicate instead of `True` to keep chosen skips at DEBUG.
 - A malformed `!include`/`!load` mapping with no `pathname`, or an empty `!include []`,
   raises `yaml.constructor.ConstructorError` naming the file and line. They raised a bare
   `KeyError: 'pathname'` and an unpacking `ValueError`, neither of which said where.
