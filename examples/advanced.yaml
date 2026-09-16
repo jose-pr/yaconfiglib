@@ -25,6 +25,7 @@ dynamic_includes: !include {
   key_factory: "%pathname.as_posix()"
 }
 
-# 5. Using environment variables (if injected during load)
-# Requires env to be passed or auto-injected (see v2 roadmap)
+# 5. Using environment variables
+# ConfigLoader(inject_env=True) puts a read-only snapshot of os.environ in
+# scope as `env`, so a value can refer to it. See docs/guide/templating.md.
 # system_user: "{{ env.USER }}"

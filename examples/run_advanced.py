@@ -1,24 +1,34 @@
-import yaml
-from yaconfiglib.loader import ConfigLoader
-from yaconfiglib.loader import ConfigLoaderMergeMethod as MergeMethod
+"""Load examples/advanced.yaml, which shows the `!include` forms.
 
-# Initialize the loader. !include / !load are registered automatically on the
-# first YAML load; no manual yaml.add_constructor call is needed.
-loader = ConfigLoader()
+    python examples/run_advanced.py
+
+Paths resolve against this file's own directory, so the working directory
+does not matter.
+"""
+
+import json
+import logging
+from pathlib import Path
+
+from yaconfiglib import ConfigLoader, ConfigLoaderMergeMethod
+
+HERE = Path(__file__).resolve().parent
+
+logging.basicConfig(level=logging.INFO)
+
 
 def main():
-    print("=== Loading Advanced YAML with Interpolation & !include ===")
-    
-    # Load the advanced configuration file, enabling Jinja interpolation 
-    # and deep merging of any nested includes.
+    loader = ConfigLoader(base_dir=HERE)
+
     config = loader.load(
-        "examples/advanced.yaml",
+        "advanced.yaml",
         interpolate=True,
-        merge=MergeMethod.Deep
+        merge=ConfigLoaderMergeMethod.Deep,
     )
-    
-    # Print the resolved configuration
-    print(yaml.dump(config, indent=2))
+
+    print("=== advanced.yaml, includes resolved and interpolated ===")
+    print(json.dumps(config, indent=2, default=str))
+
 
 if __name__ == "__main__":
     main()

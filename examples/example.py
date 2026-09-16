@@ -1,70 +1,84 @@
+"""Three things yaconfiglib does, runnable from any directory.
+
+    python examples/example.py
+
+Every path is resolved against this file's own directory, so the working
+directory does not matter.
+"""
+
+import json
 import logging
-import sys
 from dataclasses import dataclass
+from pathlib import Path
 
-import yaml
+from yaconfiglib import ConfigLoader, ConfigLoaderMergeMethod, typed_merge
 
-from yaconfiglib.loader import ConfigLoader
-from yaconfiglib.loader import ConfigLoaderMergeMethod as MergeMethod
-from yaconfiglib.utils.log import LogLevel
-from yaconfiglib.utils.merge import typed_merge
+HERE = Path(__file__).resolve().parent
+
+logging.basicConfig(level=logging.INFO)
+
+
+def show(title, value):
+    print(f"\n=== {title} ===")
+    print(json.dumps(value, indent=2, default=str))
+
+
+def layered_load(loader):
+    """Several sources, deep-merged, then interpolated once as a whole.
+
+    `layered.yaml` pulls in a JSON and an INI document with `!load`, and
+    `hiera.yaml` contributes Jinja expressions. With `interpolate=True` the
+    expressions are rendered against the *merged* document, so a value in one
+    file can refer to a key that came from another.
+    """
+    return loader.load(
+        "layered.yaml",
+        "hiera.yaml",
+        interpolate=True,
+        merge=ConfigLoaderMergeMethod.Deep,
+    )
+
+
+def templated_source(loader):
+    """A `.j2` source is rendered first, then parsed as the format it names.
+
+    `jinja.yaml.j2` renders to YAML, so it is parsed as YAML.
+    """
+    return loader.load("jinja.yaml.j2")
 
 
 @dataclass
-class Test:
-    field_1: str
-    field_2: int
-    field_3: str
-
-    def __init__(self, **kwargs):
-        for arg in kwargs:
-            setattr(self, arg, kwargs[arg])
-        self.field_4 = f"{self.field_1}_{self.field_2}"
+class ServerConfig:
+    host: str
+    port: int
+    scheme: str = "https"
 
 
-merged = typed_merge(
-    Test,
-    Test(field_1=11, field_2=22, field_3=33),
-    dict(field_1=1, field_2=2),
-    init=True,
-)
+def typed_merge_demo():
+    """Merge several objects into one instance of a type, guided by its hints.
+
+    The dict's `port` arrives as a string and is coerced to `int`, because
+    that is what the field is annotated as. A `None` is skipped rather than
+    overriding an earlier value.
+    """
+    return typed_merge(
+        ServerConfig,
+        ServerConfig(host="localhost", port=8080),
+        {"host": "example.com", "port": "443"},
+        {"scheme": None},
+    )
 
 
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+def main():
+    loader = ConfigLoader(base_dir=HERE)
+
+    show("Layered load with interpolation", layered_load(loader))
+    show("Jinja2-templated source", templated_source(loader))
+
+    merged = typed_merge_demo()
+    show("typed_merge into a dataclass", vars(merged))
+    print(f"port is {merged.port!r}, coerced to {type(merged.port).__name__}")
 
 
-configloader = ConfigLoader()
-
-hieraconf = configloader.load(
-    """#!test.yaml
-pathname:
-  stem: root
-vscode_settings: !load examples/settings.json
-iniconfig: !load examples/test.ini
-""",
-    "examples/hiera.yaml",
-    interpolate=True,
-    merge=MergeMethod.Deep,
-)
-print(yaml.dump(hieraconf, indent=2))
-
-config = configloader.load(
-    "#!inline.yaml\ntest: !load {pathname: examples/includeme.yaml, transform: '{ pathname.name: value.include }', key_factory: '%pathname.as_posix()' }"
-)
-print(yaml.dump(config, indent=2))
-
-
-jinjaconfig = configloader.load("examples/jinja.yaml.j2")
-print(yaml.dump(jinjaconfig, indent=2))
-
-pyproject = configloader.load("pyproject.toml")
-print(yaml.dump(pyproject, indent=2))
-
-
-a = MergeMethod(1)
-c = MergeMethod("SIMPLE")
-
-l = LogLevel("critical")
-
-
-pass
+if __name__ == "__main__":
+    main()

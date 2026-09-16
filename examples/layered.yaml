@@ -1,0 +1,13 @@
+# The base layer of the layered demo in example.py.
+#
+# `!load` pulls a whole document in as a value, whatever its format, and the
+# paths are relative to THIS file — so the demo runs from any directory.
+pathname:
+  stem: root
+
+# A JSON document as a value.
+vscode_settings: !load settings.json
+
+# An INI document as a value. Its `interpolate` key refers to a key defined
+# above, which is resolved when the merged result is interpolated.
+iniconfig: !load test.ini
