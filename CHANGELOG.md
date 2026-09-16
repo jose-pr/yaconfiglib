@@ -106,6 +106,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `Deep` list extension no longer treats `True`/`False` as duplicates of `1`/`0`, or
+  `1.0` as a duplicate of `1`: an item is already present only if an existing one has the
+  same type and compares equal. It also keeps the new source's order when that source
+  mixes mappings with other items; mappings used to be moved to the end of the list.
 - `Simple`, the default strategy, replaces a list with the later list when two top-level
   list documents (or two lists passed directly) merge, as the strategy table, the module
   docstring and the API header all said. It used to replace positionally and keep the

@@ -33,9 +33,12 @@ containing `{"server": {"port": 443}}`, a `Deep` merge produces
 - **`Substitute`** — like `Simple`, but nested dicts are merged
   recursively instead of only at the top level; lists still replace.
 - **`Deep`** — fully recursive dict merging. Lists are extended with
-  unique non-mapping items from the new source; pass `mergelists=True`
-  via `merge_options` to also merge dict elements positionally within a
-  list.
+  unique non-mapping items from the new source, appended in that source's
+  order. An item counts as already present only when an existing item has
+  the **same type** and compares equal, so `True` is not a duplicate of
+  `1`. Mapping items are always appended; pass `mergelists=True` via
+  `merge_options` to instead merge them positionally with the mapping at
+  the same index, when the two share a key.
 - **`Last`** — each new source simply replaces the previous result
   outright, ignoring its structure.
 - **`List`** — instead of merging, collect every source's result into a

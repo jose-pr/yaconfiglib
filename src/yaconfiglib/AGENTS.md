@@ -168,7 +168,10 @@ a shape change (mapping ↔ leaf, string → list, list → mapping) replaces to
 raises for a type combination any more. The exception: a mapping overridden by a
 **non-empty list of mappings** folds them in, in order; any other list, `[]` included,
 replaces the mapping. `Deep` list extension keeps unique **non-mapping** items whatever
-their type.
+their type, appended in the new source's order; an item is a duplicate only when an
+existing one has the **same type** and compares equal (so `True` is not a duplicate of
+`1`). Mapping items are always appended, or merged with the mapping at the same index
+when `mergelists=True` and the two share a key.
 
 Strategies are copy-on-write: they **never modify their inputs**, so a document whose
 keys share one mapping (a YAML anchor or a `<<:` merge key) can be overridden without

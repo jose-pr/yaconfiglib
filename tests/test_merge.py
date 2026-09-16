@@ -209,6 +209,22 @@ class TestDeepMerge:
         result = self.m([{"k": 1}], [{"z": 9}], mergelists=True)
         assert result == [{"k": 1}, {"z": 9}]
 
+    def test_dedupe_is_type_aware(self):
+        # 1 == True == 1.0, but they are different configuration values, so an
+        # override must not be swallowed as a duplicate.
+        result = self.m([1, 0], [True, False, 1.0])
+
+        assert [type(item) for item in result] == [int, int, bool, bool, float]
+
+    @pytest.mark.parametrize("mergelists", [False, True], ids=["plain", "mergelists"])
+    def test_extension_keeps_source_order(self, mergelists):
+        result = self.m([], [1, {"a": 1}, 2], mergelists=mergelists)
+
+        assert result == [1, {"a": 1}, 2]
+
+    def test_unhashable_items_still_deduplicated(self):
+        assert self.m([[1]], [[1], [2]]) == [[1], [2]]
+
     def test_mergelists_true_mixed_overlap_and_nonoverlap(self):
         # First position overlaps (merges in place), second does not (appends).
         a = [{"k": 1}, {"p": 1}]

@@ -107,6 +107,42 @@ def _memo_key(a: object, b: object) -> tuple:
     return (id(a), id(b))
 
 
+class _SeenValues:
+    """Membership tracker for Deep list extension, aware of the value's type.
+
+    ``True``, ``1`` and ``1.0`` compare equal but are different configuration
+    values, so an override of ``[1]`` with ``[True]`` must keep both. Hashable
+    items are tracked in a set keyed by ``(type, value)``; anything unhashable
+    falls back to a scan of the unhashable ones.
+    """
+
+    def __init__(self, items: typing.Iterable = ()):
+        self._hashed = set()
+        self._unhashable = []
+        for item in items:
+            self.add(item)
+
+    def add(self, item: object) -> bool:
+        """Record *item*; return True when it was not already present."""
+        try:
+            key = (type(item), item)
+        except TypeError:  # pragma: no cover - type() never raises in practice
+            key = None
+        if key is not None:
+            try:
+                if key in self._hashed:
+                    return False
+                self._hashed.add(key)
+                return True
+            except TypeError:
+                pass  # unhashable value: fall through to the linear scan
+        for known in self._unhashable:
+            if type(known) is type(item) and known == item:
+                return False
+        self._unhashable.append(item)
+        return True
+
+
 @typing.runtime_checkable
 class Merge(typing.Protocol):
     """Protocol for any callable that merges two objects."""
@@ -341,47 +377,35 @@ class MergeMethod(IntEnum):
             return memo[key][2]
         result = list(a)
 
+        merged_indices = set()
         if mergelists:
-            # Collect dict elements from b for potential positional merge.
-            b_dicts: dict[int, typing.Mapping] = {
-                i: item for i, item in enumerate(b) if isinstance(item, typing.Mapping)
-            }
+            # Merge mapping elements that sit at the same index in both lists and
+            # share at least one key. Only those indices are consumed; every other
+            # item of b is appended below, in b's own order.
+            for index in range(min(len(result), len(b))):
+                a_item = result[index]
+                b_item = b[index]
+                if not isinstance(a_item, typing.Mapping) or not isinstance(
+                    b_item, typing.Mapping
+                ):
+                    continue
+                if any(k in a_item for k in b_item):
+                    merged_indices.add(index)
+                    result[index] = self._deep(
+                        a_item, b_item, memo=memo, mergelists=mergelists, **options
+                    )
 
-            # Extend with unique non-mapping items from b.
-            for item in b:
-                if not isinstance(item, typing.Mapping) and item not in result:
-                    result.append(item)
-
-            # Merge dict elements by position if requested.
-            for i, a_item in enumerate(result):
-                if isinstance(a_item, typing.Mapping) and i in b_dicts:
-                    # PEEK, do not pop: only a dict that actually merges leaves
-                    # b_dicts here. Popping before the overlap check dropped a
-                    # non-overlapping positional dict entirely — it was neither
-                    # merged nor left for the append loop below (silent data
-                    # loss, e.g. Deep([{"k":1}], [{"z":9}], mergelists=True)
-                    # returned [{'k': 1}]).
-                    b_item = b_dicts[i]
-                    # Only merge when at least one key overlaps.
-                    if any(k in a_item for k in b_item):
-                        del b_dicts[i]
-                        result[i] = self._deep(
-                            a_item, b_item, memo=memo, mergelists=mergelists, **options
-                        )
-
-            # Append any remaining b dict entries that were not merged.
-            for v in b_dicts.values():
-                result.append(v)
-        else:
-            # Fast path: extend unique non-mapping items, then append mapping
-            # items to preserve exact behavior
-            for item in b:
-                if not isinstance(item, typing.Mapping):
-                    if item not in result:
-                        result.append(item)
-            for item in b:
-                if isinstance(item, typing.Mapping):
-                    result.append(item)
+        seen = _SeenValues(
+            item for item in result if not isinstance(item, typing.Mapping)
+        )
+        for index, item in enumerate(b):
+            if index in merged_indices:
+                continue
+            if isinstance(item, typing.Mapping):
+                # Mappings are never de-duplicated.
+                result.append(item)
+            elif seen.add(item):
+                result.append(item)
 
         merged = _sequence_with(a, result)
         memo[key] = (a, b, merged)
