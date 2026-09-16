@@ -77,7 +77,7 @@ print(db_settings.host)
 
 In your `config.yaml`:
 ```yaml
-# Recursively include other files
+# Recursively include other files (paths resolve next to this file)
 database: !include "db_settings.toml"
 
 # Dynamically execute commands to retrieve parameters (e.g. secrets)

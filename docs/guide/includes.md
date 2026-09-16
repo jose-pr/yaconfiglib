@@ -35,13 +35,31 @@ loaded through a `ConfigLoader`.
     does it automatically on the first load. A manual registration on your
     own loader class is left alone; yaconfiglib parses with its own subclass.
 
+## How include paths resolve
+
+- A **relative path in a YAML file** resolves against **that file's**
+  directory, at every depth. A file included from a subdirectory writes its
+  own includes relative to itself, so a config tree can be moved as a whole.
+- **Absolute paths** and **command URIs** (`cmd://`, `exec://`, `sh://`) are
+  used as they are written.
+- **Globs** expand next to the including file (`!include "parts/*.yaml"`).
+- **Documents that are not files** — `loads()`, `#!`-marked strings, streams
+  and command output — have no directory of their own, so their includes
+  resolve against `base_dir` (default: the working directory).
+- A **`.j2`/`.jinja2` template's** includes resolve next to the template, not
+  next to the rendered copy.
+- An included source's `pathname` (what `transform` and `key_factory` see) is
+  absolute.
+
+`base_dir` still applies to the sources you pass to `load()` yourself.
+
 ## Passing extra arguments
 
-The tag accepts a sequence node to forward positional args, or a mapping
-node for keyword args, to the nested `load()` call:
+The tag accepts a sequence node of sources, or a mapping node of keyword
+arguments, for the nested `load()` call:
 
 ```yaml
-# Sequence form: [pathname, *args]
+# Sequence form: [pathname, ...] — every item is a source, merged in order
 overlay: !include ["overrides.yaml"]
 
 # Mapping form: keyword args, must include `pathname`
@@ -57,6 +75,32 @@ example `"%pathname.as_posix()"`). Any other key is ignored and logged at
 `WARNING`, so a document cannot change trust settings such as
 `allow_commands` or `sandbox` for the files it includes. See
 [Security](security.md).
+
+The sequence items are **sources merged in order**, not positional
+arguments, and the mapping form's `pathname` may itself be a list of
+sources.
+
+## Include encoding
+
+An include that does not name an `encoding` — or sets it to `null` — is read
+with the encoding of the `load()` call: the per-call `encoding=`, else the
+loader's. That applies at every depth, and to files, globs, `.j2` templates,
+command output, and includes inside included command output.
+
+```yaml
+# read with the call's encoding
+plain: !include "sub.yaml"
+
+# read as UTF-16; what *it* includes still uses the call's encoding
+special: !include {pathname: "utf16.yaml", encoding: "utf-16"}
+```
+
+A mapping-form `encoding:` applies to that target only. An include whose
+real encoding differs from the call's therefore needs its own `encoding:`.
+
+!!! note "Known limitation"
+    Includes inside the output of a **top-level** command source are read as
+    UTF-8, regardless of the call's encoding.
 
 ## Including command output
 
