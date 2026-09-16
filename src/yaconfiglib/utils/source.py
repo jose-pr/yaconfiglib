@@ -205,6 +205,196 @@ def _ordered_file_matches(matches) -> "list[Path]":
     return files
 
 
+def _dedup_key(path) -> str:
+    """The key that answers "have we already loaded this file?".
+
+    Lexical and I/O-free: it collapses ``./``, ``..``, separator style and, on
+    Windows, case — so ``conf/app.json``, ``./conf/app.json`` and
+    ``conf/App.json`` are one file. Deliberately NOT ``resolve()``: that would
+    stat every source, and it would merge two symlinked names a caller may have
+    meant to keep distinct.
+    """
+    if isinstance(path, _stdlib_pathlib.PurePath):
+        return _os.path.normcase(_os.path.abspath(_os.fspath(path)))
+    # MemPath, remote paths: no filesystem to normalize against.
+    return str(path)
+
+
+def _flatten_sources(sources, encoding):
+    """Yield each source once, recursing into nested iterables.
+
+    Streams and in-memory documents are passed through untouched — they are
+    materialized later, when the yield loop reaches them, so ordering and
+    single-read semantics are preserved.
+    """
+    for source in sources:
+        if not source:
+            continue
+
+        # An os.PathLike that is NOT a pathlib-next path (a pathlib.Path, a
+        # PurePath, anything else with __fspath__) becomes the string it spells,
+        # so it gets the same command check, path_factory, base_dir join, memo
+        # and glob handling a caller would get by passing that string.
+        # pathlib-next paths keep their own branch on purpose: MemPath is an
+        # os.PathLike whose __fspath__ raises NotImplementedError.
+        # os.fsdecode, not encoding=: path bytes use the filesystem encoding,
+        # while encoding= describes file *content*.
+        if isinstance(source, _os.PathLike) and not isinstance(
+            source, (str, bytes, Path)
+        ):
+            source = _os.fsdecode(_os.fspath(source))
+
+        if isinstance(source, (_io.IOBase, str, bytes, Path)):
+            yield source
+        elif isinstance(source, _ty.Iterable):
+            yield from _flatten_sources(source, encoding)
+        else:
+            # Raised while classifying, so an unsupported source fails before
+            # any source loads rather than after the earlier ones.
+            raise ValueError(
+                "unable to handle arg %s of type %s"
+                % (
+                    source,
+                    type(source),
+                )
+            )
+
+
+def _classify_source(source, base_dir, encoding, path_factory, recursive):
+    """Decide what a source *is*, without reading or expanding anything.
+
+    Returns ``(kind, payload)`` where kind is:
+
+    * ``"inline"`` — a stream or a ``#!`` document, materialized on yield;
+    * ``"command"`` — a command URI, passed through untouched;
+    * ``"literal"`` — one concrete path;
+    * ``"pattern"`` — a glob, expanded on yield.
+    """
+    path_marker = "#!"
+    if isinstance(source, bytes):
+        path_marker = path_marker.encode(encoding or "utf-8")
+
+    if isinstance(source, _io.IOBase):
+        return "inline", (source, None)
+    if isinstance(source, (str, bytes)) and source.startswith(path_marker):
+        return "inline", (source, path_marker)
+
+    glob_base = None
+    if isinstance(source, Path):
+        is_cmd = bool(_CMD_REGEX.match(str(source)))
+        path = source
+        if base_dir and not is_cmd:
+            was_relative = _is_relative_source(source)
+            try:
+                path = base_dir / source
+                if was_relative:
+                    glob_base = base_dir
+            except TypeError:
+                # base_dir type is incompatible with this source path type — use
+                # source as-is.
+                logger.debug(
+                    "Cannot join base_dir %r with path %r; using path as-is",
+                    base_dir,
+                    source,
+                )
+    else:
+        is_cmd = isinstance(source, str) and bool(_CMD_REGEX.match(source))
+        path = path_factory(source)
+        if base_dir and not is_cmd:
+            was_relative = _is_relative_source(path)
+            try:
+                path = base_dir / source
+                if was_relative:
+                    glob_base = base_dir
+            except (TypeError, ValueError):
+                logger.debug(
+                    "Cannot join base_dir %r with %r; using path_factory result",
+                    base_dir,
+                    source,
+                )
+
+    if is_cmd:
+        return "command", (path,)
+
+    # Classified on the SOURCE, not the joined path: only what the caller wrote
+    # can be pattern text. A base_dir named "proj [v2]" would otherwise turn
+    # every source under it into a pattern.
+    if has_glob_pattern(source) and not path.exists():
+        return "pattern", (path, glob_base, source)
+
+    # Either a plain path, or pattern text naming a real file: a file really
+    # named "z[1].json" is what the caller meant, and it wins its own position
+    # over any glob match, like every other explicit name.
+    return "literal", (path,)
+
+
+def _expand_pattern(path, glob_base, source, recursive):
+    """Ask pathlib-next (or the stdlib fallback) to expand one pattern."""
+    if HAS_PATHLIB_NEXT and isinstance(path, Path):
+        # The test is isinstance, not hasattr("glob"): a STDLIB path has .glob
+        # too, but no `recursive` keyword, and base_dir may be one.
+        if glob_base is not None:
+            # Expand from the literal base, passing the caller's own pattern
+            # text. Multi-segment patterns and `**` are pathlib-next's job.
+            # Only a RELATIVE source can go this way: glob() rejects a
+            # non-relative pattern, which is what an absolute include source is
+            # after rebasing.
+            return glob_base.glob(str(source), recursive=recursive)
+        # No base to expand from (an absolute pattern, or no base_dir):
+        # glob(None) expands the pattern the path itself carries, splitting at
+        # the first wildcard. Added in pathlib-next 0.9.6, which is why the
+        # floor is >=0.9.6 — 0.9.4 removed the glob("") spelling for pathlib
+        # parity, and on 0.9.0-0.9.3 glob(None) returns silently partial
+        # matches.
+        return path.glob(None, recursive=recursive)
+    # Fallback path traversal: stdlib glob takes the pattern as an argument, so
+    # separate it from its directory.
+    return path.parent.glob(path.name)
+
+
+def _materialize_inline(source, path_marker, encoding):
+    """Turn a stream or a ``#!`` document into a loadable path."""
+    if path_marker is None:
+        content = source.read()
+        if MemPath is not None:
+            # Unique name + default .yaml suffix so backend auto-detection
+            # works for an anonymous stream (YAML is yaconfiglib's default).
+            path = MemPath(f"stream-{next(_SOURCE_COUNTER)}.yaml")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(content, str):
+                path.write_text(content, encoding=encoding)
+            else:
+                path.write_bytes(content)
+            return path
+        # Fallback to temp file if MemPath is not available
+        return _materialize_temp(content, encoding, ".yaml")
+
+    newline = "\n"
+    if isinstance(source, bytes):
+        newline = newline.encode(encoding or "utf-8")
+    filename, content = source.split(newline, maxsplit=1)
+    logger.debug("loading config doc from memory ...")
+    filename = filename.removeprefix(path_marker)
+    if isinstance(filename, bytes):
+        filename = filename.decode(encoding or "utf-8")
+    if not filename:
+        # Unnamed in-memory docs each get a unique virtual name so two of them
+        # never share (and overwrite) one MemPath. The ``.yaml`` suffix keeps
+        # backend auto-detection working for a bare ``loads("...")`` (YAML is
+        # yaconfiglib's default).
+        filename = f"mem-{next(_SOURCE_COUNTER)}.yaml"
+    if MemPath is not None:
+        path = MemPath(filename)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, bytes):
+            path.write_bytes(content)
+        else:
+            path.write_text(content, encoding=encoding)
+        return path
+    # Fallback to temp file if MemPath is not available
+    return _materialize_temp(content, encoding, filename)
+
+
 def parse_sources(
     sources: _ty.Iterable[SourceLike | _ty.Iterable[SourceLike]],
     base_dir: Path = None,
@@ -226,201 +416,90 @@ def parse_sources(
       :class:`~yaconfiglib.backends.command.CommandBackend` can run it.
     * An in-memory document: a string/bytes value whose first line starts
       with ``#!``. The rest of that line is a virtual filename
-      (``"#!app.yaml\\n<content>"``); when it is empty (``"#!\\n<content>"``)
-      the document is auto-named ``mem-N.yaml``. The
-      content is materialized to a ``MemPath`` (or a real temp file as a
-      fallback) so downstream backends can read it like any other file.
-    * An open stream (:class:`io.IOBase`) — read fully and materialized
-      the same way as an in-memory document.
-    * A nested iterable of any of the above — flattened recursively.
+      (``"#!app.yaml\nkey: value"``); ``"#!\n..."`` gets a unique
+      ``mem-N.yaml`` name. Backend selection uses that name.
+    * An open stream — read once and materialized under a unique
+      ``stream-N.yaml`` name.
+    * A nested iterable of any of the above, flattened.
+
+    Glob expansion belongs to the path type (pathlib-next, or the stdlib
+    fallback). What this function adds: a pattern is recognized by the
+    *caller's own* components, so glob characters in *base_dir* or in a
+    Windows extended-length anchor are literal; a pattern that names an
+    existing path is loaded as that path; directory matches are dropped, since
+    no backend reads a directory; and matches are sorted by path component, so
+    a layered set of files merges in the same order everywhere.
+
+    Duplicates are dropped by a lexical key (absolute, normalized, case-folded
+    on Windows), so the same file named two ways loads once. A file named
+    explicitly anywhere in the call wins over a glob match for it, whichever
+    comes first, and keeps its own position.
 
     Args:
-        sources: The sources to resolve, as passed to ``ConfigLoader.load()``.
-        base_dir: Directory relative file paths are joined against.
-        encoding: Text encoding used when decoding bytes markers/content.
-        memo: Optional set of already-seen path strings, used to detect
-            and skip duplicate sources across recursive calls; mutated in
-            place. Any iterable is accepted and normalized to a set (O(1)
-            membership; the previous list made duplicate detection O(n²)).
-        path_factory: Constructor used to build a ``Path`` from a bare
-            string source.
+        sources: Items to resolve, in order.
+        base_dir: Directory relative sources resolve against.
+        encoding: Text encoding for in-memory documents and streams.
+        memo: Keys already seen; updated in place. Accepts a set or any
+            iterable.
+        path_factory: Callable building a path from a string source.
         recursive: Whether glob expansion should recurse into
-            subdirectories.
+            subdirectories (``**``).
 
     Yields:
-        Resolved :class:`Path`-like objects, one per concrete source
+        One path per resolved source, in order
         (glob patterns may yield zero or many).
 
     Raises:
-        ValueError: If an item in *sources* is not a recognized source type.
+        ValueError: If a source is of an unsupported type. Raised while
+            classifying, so it fires before any source loads.
     """
     path_factory = path_factory or Path
-    recursive = False if recursive is None else bool(recursive)
     if memo is None:
         memo = set()
     elif not isinstance(memo, set):
         memo = set(memo)
-    for source in sources:
-        if not source:
+
+    # Classify everything first: a glob match must lose to a file named
+    # explicitly ANYWHERE in the call, including later on, so that both layering
+    # idioms work -- load("base.yaml", "*.yaml") and load("*.yaml", "local.yaml").
+    items = [
+        _classify_source(source, base_dir, encoding, path_factory, recursive)
+        for source in _flatten_sources(sources, encoding)
+    ]
+    literal_keys = {
+        _dedup_key(payload[0]) for kind, payload in items if kind == "literal"
+    }
+
+    for kind, payload in items:
+        if kind == "inline":
+            yield _materialize_inline(payload[0], payload[1], encoding)
             continue
 
-        # An os.PathLike that is NOT a pathlib-next path (a pathlib.Path, a
-        # PurePath, anything else with __fspath__) becomes the string it spells,
-        # so the str branch below gives it the same command check, path_factory,
-        # base_dir join, memo and glob handling a caller would get by passing
-        # that string. This runs before the stream and Iterable checks, or such
-        # an object would fall through to the Iterable branch.
-        # pathlib-next paths keep their own branch on purpose: MemPath is an
-        # os.PathLike whose __fspath__ raises NotImplementedError.
-        # os.fsdecode, not encoding=: path bytes use the filesystem encoding,
-        # while encoding= describes file *content*.
-        if isinstance(source, _os.PathLike) and not isinstance(
-            source, (str, bytes, Path)
-        ):
-            source = _os.fsdecode(_os.fspath(source))
-
-        path_marker = "#!"
-        newline = "\n"
-        # Set when the source was joined onto base_dir: expansion then runs from
-        # that base, which is literal by construction, so glob characters IN the
-        # base ("proj [v2]") are never pattern text.
-        glob_base = None
-
-        if isinstance(source, bytes):
-            path_marker = path_marker.encode(encoding or "utf-8")
-            newline = newline.encode(encoding or "utf-8")
-
-        # Handle file streams (in-memory or real)
-        if isinstance(source, _io.IOBase):
-            content = source.read()
-            if MemPath is not None:
-                # Unique name + default .yaml suffix so backend auto-detection
-                # works for an anonymous stream (YAML is yaconfiglib's default).
-                path = MemPath(f"stream-{next(_SOURCE_COUNTER)}.yaml")
-                path.parent.mkdir(parents=True, exist_ok=True)
-                if isinstance(content, str):
-                    path.write_text(content, encoding=encoding)
-                else:
-                    path.write_bytes(content)
-                yield path
-            else:
-                # Fallback to temp file if MemPath is not available
-                yield _materialize_temp(content, encoding, ".yaml")
+        if kind == "command":
+            # Passed through unresolved: CommandBackend runs the URI itself, and
+            # a command is never deduplicated.
+            yield payload[0]
             continue
 
-        elif isinstance(source, (str, Path, bytes)):
-            if isinstance(source, (str, bytes)) and source.startswith(path_marker):
-                filename, source = source.split(newline, maxsplit=1)
-                logger.debug("loading config doc from memory ...")
-                filename = filename.removeprefix(path_marker)
-                if isinstance(filename, bytes):
-                    filename = filename.decode(encoding or "utf-8")
-                if not filename:
-                    # Unnamed in-memory docs each get a unique virtual name so
-                    # two of them never share (and overwrite) one MemPath. The
-                    # ``.yaml`` suffix keeps backend auto-detection working for
-                    # a bare ``loads("...")`` (YAML is yaconfiglib's default).
-                    filename = f"mem-{next(_SOURCE_COUNTER)}.yaml"
-                if MemPath is not None:
-                    path = MemPath(filename)
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    if isinstance(source, bytes):
-                        path.write_bytes(source)
-                    else:
-                        path.write_text(source, encoding=encoding)
-                    yield path
-                else:
-                    # Fallback to temp file if MemPath is not available
-                    yield _materialize_temp(source, encoding, filename)
+        if kind == "literal":
+            path = payload[0]
+            key = _dedup_key(path)
+            if key in memo:
+                logger.warning("ignoring duplicated file %s", path)
                 continue
-            elif isinstance(source, Path):
-                is_cmd = bool(_CMD_REGEX.match(str(source)))
-                path = source
-                if base_dir and not is_cmd:
-                    was_relative = _is_relative_source(source)
-                    try:
-                        path = base_dir / source
-                        if was_relative:
-                            glob_base = base_dir
-                    except TypeError:
-                        # base_dir type is incompatible with this source path type — use source as-is.
-                        logger.debug(
-                            "Cannot join base_dir %r with path %r; using path as-is",
-                            base_dir,
-                            source,
-                        )
-            else:
-                is_cmd = isinstance(source, str) and bool(_CMD_REGEX.match(source))
-                path = path_factory(source)
-                if base_dir and not is_cmd:
-                    was_relative = _is_relative_source(path)
-                    try:
-                        path = base_dir / source
-                        if was_relative:
-                            glob_base = base_dir
-                    except (TypeError, ValueError):
-                        logger.debug(
-                            "Cannot join base_dir %r with %r; using path_factory result",
-                            base_dir,
-                            source,
-                        )
-            if not is_cmd:
-                memo_key = str(path)
-                if memo_key in memo:
-                    logger.warning("ignoring duplicated file %s" % path)
-                    continue
-                memo.add(memo_key)
-            # Classified on the SOURCE, not the joined path: only what the
-            # caller wrote can be pattern text. A base_dir named "proj [v2]"
-            # would otherwise turn every source under it into a pattern.
-            if not is_cmd and has_glob_pattern(source):
-                if path.exists():
-                    # A real file really named "z[1].json" is what the caller
-                    # meant; glob.escape output never exists literally.
-                    logger.debug("treating %s as a literal path", path)
-                    yield path
-                    continue
-                if HAS_PATHLIB_NEXT and isinstance(path, Path):
-                    # The test is isinstance, not hasattr("glob"): a STDLIB path
-                    # has .glob too, but no `recursive` keyword, and base_dir may
-                    # be one.
-                    if glob_base is not None:
-                        # Expand from the literal base, passing the caller's own
-                        # pattern text. Multi-segment patterns and `**` are
-                        # handled by pathlib-next. Only a RELATIVE source can go
-                        # this way: glob() rejects a non-relative pattern, which
-                        # is what an absolute include source is after rebasing.
-                        matches = glob_base.glob(str(source), recursive=recursive)
-                    else:
-                        # No base to expand from (an absolute pattern, or no
-                        # base_dir): glob(None) expands the pattern the path
-                        # itself carries, splitting at the first wildcard. Added
-                        # in pathlib-next 0.9.6, which is why the floor is
-                        # >=0.9.6 -- 0.9.4 removed the glob("") spelling for
-                        # pathlib parity, and on 0.9.0-0.9.3 glob(None) returns
-                        # silently partial matches.
-                        matches = path.glob(None, recursive=recursive)
-                else:
-                    # Fallback path traversal: stdlib glob takes the pattern as
-                    # an argument, so separate it from its directory.
-                    matches = path.parent.glob(path.name)
-                yield from _ordered_file_matches(matches)
-            else:
-                yield path
-        elif isinstance(source, _ty.Iterable):
-            yield from parse_sources(
-                source,
-                memo=memo,
-                base_dir=base_dir,
-                path_factory=path_factory,
-                encoding=encoding,
-                recursive=recursive,
-            )
-        else:
-            raise ValueError(
-                "unable to handle arg %s of type %s"
-                % (
-                    source,
-                    type(source),
-                )
-            )
+            memo.add(key)
+            yield path
+            continue
+
+        path, glob_base, source = payload
+        matches = _expand_pattern(path, glob_base, source, recursive)
+        for match in _ordered_file_matches(matches):
+            key = _dedup_key(match)
+            if key in literal_keys:
+                logger.debug("%s is also named explicitly; skipping the match", match)
+                continue
+            if key in memo:
+                logger.debug("skipping duplicate glob match %s", match)
+                continue
+            memo.add(key)
+            yield match

@@ -53,6 +53,13 @@ ConfigLoader(base_dir="conf", recursive=True).load("**/*.yaml")
   `OSError` before yaconfiglib sees it. A glob is therefore not a way to assert
   that a layer of configuration was read; name such files explicitly if their
   absence must be an error.
+- **The same file loads once**, however it was named: `conf/app.yaml`,
+  `./conf/app.yaml`, `conf/../conf/app.yaml` and (on Windows) `conf/App.yaml`
+  are one file. The key is lexical — no symlink resolution — so two symlinked
+  names stay distinct on purpose.
+- **An explicitly named file beats a glob match for it**, wherever the two
+  appear, and keeps its own position. That is what makes both layering idioms
+  work: `load("base.yaml", "*.yaml")` and `load("*.yaml", "local.yaml")`.
 - On Windows, a `**` source that crosses a **junction** can repeat files; that
   is an upstream `pathlib-next` limitation, not a yaconfiglib rule.
 

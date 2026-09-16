@@ -295,6 +295,13 @@ distinguish merge branches.
   streams materialize to a `pathlib_next` `MemPath` when available, else a tracked temp
   file (best-effort cleaned at interpreter exit). `memo` dedupes repeat sources across
   recursive calls (mutated in place; logs and skips a duplicate rather than erroring).
+  Its keys are **lexical**: `os.path.normcase(os.path.abspath(...))` for a
+  `pathlib.PurePath` (so `./x`, `x/../x` and, on Windows, `X` are one file),
+  `str(path)` for a `MemPath` or remote path. Never `resolve()` — that would stat
+  every source and merge two symlinked names a caller may have meant to keep apart.
+  Sources are **classified before any of them loads** (so an unsupported type raises
+  up front), which is also what lets a file named explicitly anywhere in the call
+  beat a glob match for it while keeping its own position.
   **Glob expansion is pathlib-next's**, not reimplemented here: a relative pattern is
   expanded by `base_dir.glob(pattern, recursive=...)` so the base stays literal (a
   `proj [v2]` base_dir needs no escaping), and an absolute one by `path.glob(None, ...)`

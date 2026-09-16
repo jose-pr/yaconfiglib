@@ -1,6 +1,7 @@
 """Source resolution: which objects can be a source, and how globs expand."""
 
 import json
+import os
 import pathlib
 import sys
 
@@ -195,3 +196,59 @@ class TestGlobExpansion:
             (root / name).write_text("{}", encoding="utf-8")
         got = [str(p) for p in parse_sources([root / "*.json"])]
         assert got == ["memdir/a.json", "memdir/b.json"]
+
+
+class TestConcretePathDedup:
+    """One file loads once, however it was named."""
+
+    def _layered(self, tmp_path):
+        _write(tmp_path / "conf" / "app.json", {"n": 1})
+        _write(tmp_path / "conf" / "local.json", {"n": 2})
+        return ConfigLoader(base_dir=str(tmp_path), merge=ConfigLoaderMergeMethod.List)
+
+    def test_same_file_two_spellings_loads_once(self, tmp_path):
+        loader = self._layered(tmp_path)
+        assert loader.load("conf/app.json", "./conf/app.json") == [{"n": 1}]
+
+    def test_dot_dot_spelling_loads_once(self, tmp_path):
+        loader = self._layered(tmp_path)
+        assert loader.load("conf/app.json", "conf/../conf/app.json") == [{"n": 1}]
+
+    @pytest.mark.skipif(
+        os.path.normcase("A") != "a", reason="case-insensitive filesystem only"
+    )
+    def test_case_variant_loads_once(self, tmp_path):
+        loader = self._layered(tmp_path)
+        assert loader.load("conf/app.json", "conf/App.json") == [{"n": 1}]
+
+    def test_explicit_name_after_a_glob_wins_its_own_position(self, tmp_path):
+        loader = self._layered(tmp_path)
+        # local.json is named explicitly, so the glob must not also yield it.
+        assert loader.load("conf/*.json", "conf/local.json") == [{"n": 1}, {"n": 2}]
+
+    def test_explicit_name_before_a_glob_keeps_its_position(self, tmp_path):
+        loader = self._layered(tmp_path)
+        assert loader.load("conf/app.json", "conf/*.json") == [{"n": 1}, {"n": 2}]
+
+    def test_overlapping_globs_yield_each_file_once(self, tmp_path):
+        loader = self._layered(tmp_path)
+        assert loader.load("conf/*.json", "conf/a*.json") == [{"n": 1}, {"n": 2}]
+
+    def test_unsupported_source_raises_before_anything_loads(self, tmp_path):
+        loaded = []
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        _write(tmp_path / "app.json", {"n": 1})
+
+        with pytest.raises(ValueError, match="unable to handle arg"):
+            for path in parse_sources(["app.json", object()], base_dir=loader.base_dir):
+                loaded.append(path)
+        assert loaded == []
+
+    def test_caller_memo_still_dedupes_across_calls(self, tmp_path):
+        _write(tmp_path / "app.json", {"n": 1})
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        memo = set()
+        first = list(parse_sources(["app.json"], base_dir=loader.base_dir, memo=memo))
+        second = list(parse_sources(["*.json"], base_dir=loader.base_dir, memo=memo))
+        assert len(first) == 1
+        assert second == []

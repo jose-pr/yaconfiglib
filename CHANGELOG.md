@@ -53,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- A source of an unsupported type raises `ValueError` before any source loads, rather
+  than after the earlier ones have been read.
 - A directory that cannot be listed during glob expansion (a permission error, say) is
   now skipped silently instead of raising: the expansion machinery in `pathlib-next`
   0.9.4+ swallows the error, so it never reaches `ignore_error` either. Name a file
@@ -178,6 +180,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- The same file named two ways now loads once: `conf/app.yaml`, `./conf/app.yaml`,
+  `conf/../conf/app.yaml` and, on a case-insensitive filesystem, `conf/App.yaml` are one
+  source. Duplicate detection compares normalized absolute paths instead of the string
+  each source was spelled with.
+- A file named explicitly no longer loads twice when a glob in the same call also matches
+  it. The explicit name wins and keeps its position, so both
+  `load("base.yaml", "*.yaml")` and `load("*.yaml", "local.yaml")` layer as intended, and
+  two overlapping globs yield each file once.
 - Glob characters in `base_dir`, in an existing file's name, or in a Windows
   extended-length (`\\?\`) prefix no longer turn a path into a pattern. A `base_dir`
   called `proj [v2]` works, a file really named `z[1].json` loads as itself, and
