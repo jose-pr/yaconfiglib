@@ -36,6 +36,7 @@ nav:
       - Overview: api/reference.md
       - Loader: api/loader.md
       - Backends: api/backends.md
+      - Errors: api/errors.md
       - Utilities: api/utils.md
   - Changelog: changelog.md
 

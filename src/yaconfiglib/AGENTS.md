@@ -57,12 +57,14 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 - **`ConfigLoader`** — the main orchestrator; see below.
 - **`ConfigLoaderMergeMethod`** — `MergeMethod` extended with `Last`/`List`/`Hash`; see
   "Merge strategies".
-- **`CommandsDisabledError(ValueError)`** — defined in `utils.trust`, re-exported from
-  `loader` and the package root. Raised when a command source (`cmd://`, `exec://`,
+- **`CommandsDisabledError(ConfigError, ValueError)`** — defined in `errors`,
+  re-exported from `utils.trust`, `loader` and the package root (the same class through
+  every path). Raised when a command source (`cmd://`, `exec://`,
   `sh://`, a `+fmt` variant, or a script-extension file) is reached while
   `allow_commands=False` is in effect, including via a nested `!include` (raised by
   `ConfigLoader._load()`, with a backstop in `CommandBackend.load()` during a load).
 - **`ConfigBackend`** — the pluggable-backend protocol; see `backends/base.py` below.
+- **`ConfigError`** and subclasses, **`load_error_types()`** — see "Errors" below.
 - **`MergeMethod`**, **`typed_merge`**, **`OpaqueMerge`**, **`opaque`**,
   **`TypedNamespace`** — re-exported from `utils.merge` / `utils.typing_merge`; see
   "Merge strategies" / "Typed merge".
@@ -407,6 +409,45 @@ distinguish merge branches.
   repeat files.
 - **`has_glob_pattern(path) -> bool`** — whether *path* contains glob magic characters.
 
+## Errors (`errors.py`)
+
+A leaf module (stdlib imports only, like `utils.trust`), so backends import it without a
+cycle. **Nothing wraps a parser's error**: a bad YAML file still raises `yaml.YAMLError`
+and a missing file still raises `FileNotFoundError` — that is what makes `ignore_error`
+predicates and `except` clauses on those types work. Each class below is a `ConfigError`
+**and** the builtin exception the same condition raised before, so existing
+`except ValueError`/`except NotImplementedError` code keeps matching.
+
+- **`ConfigError(Exception)`** — base for every condition the library itself reports.
+- **`ConfigValueError(ConfigError, ValueError)`** — a value or structure it cannot accept:
+  an include cycle, a strict interpolation reference cycle, a dotenv strict parse failure,
+  an env scalar/nested collision.
+- **`ConfigTypeError(ConfigError, TypeError)`** — a value whose type the operation cannot
+  use: a `flatten=True` member that is not a mapping/sequence, an unsupported YAML node in
+  an `!include` tag.
+- **`UnsupportedFormatError(ConfigError, NotImplementedError)`** — no registered backend
+  reads this source (`ConfigBackend.get_class_by_path`), or a `.j2` name with no inner
+  format extension. Message: `No backend reads <path>`, plus the missing-extra hint, plus
+  `; pass loader=<name> (registered: ...)`.
+- **`UnknownLoaderError(ConfigError, ValueError)`** — `loader=` named an unregistered
+  backend. Message keeps the `Unknown configuration format/loader: <name>` prefix, then
+  the hint, then `; registered: ...`.
+- **`CommandsDisabledError(ConfigError, ValueError)`** — a command source under
+  `allow_commands=False`.
+- **`load_error_types() -> Tuple[Type[BaseException], ...]`** — one tuple for
+  `except yaconfiglib.load_error_types() as error:`. Always `ConfigError`, `OSError`,
+  `UnicodeError`, `json.JSONDecodeError`, `configparser.Error`,
+  `subprocess.SubprocessError`; adds `yaml.YAMLError`,
+  `jinja2.exceptions.TemplateError` and `tomllib`/`tomli` `TOMLDecodeError` for each
+  module **already in `sys.modules`** (a parser that was never imported cannot have
+  raised, so nothing is imported to find out). Evaluated per call, never frozen at import.
+  Bare `ValueError`/`TypeError`/`KeyError` are deliberately excluded, so a library bug
+  still crashes.
+- Raises left as plain builtins on purpose: a wrong **argument** (`load(None)`,
+  `loads(42)`, an unsupported source type, an invalid `ini_interpolation`) and a missing
+  dependency (`ImportError` naming `yaconfiglib[jinja2]`) are neither configuration
+  content nor a source.
+
 ## Backends (`backends/`)
 
 - **`ConfigBackend`** (`base.py`, `typing.Protocol`) — the pluggable-backend contract.
@@ -416,6 +457,8 @@ distinguish merge branches.
   - Override **`load(self, path, **options) -> object`** (required). Unrecognized
     `**options` should generally be ignored, not raise — `ConfigLoader` forwards a
     shared option set to every backend it calls.
+  - For content it cannot accept, raise the parser's own error or a `ConfigError`
+    subclass, so `load_error_types()` covers it.
   - Optional **`load_all(self, path, **options) -> Iterable[object]`** (default: yields
     one `load()` result), **`dumps(self, data, **options) -> str`** (default: raises
     `NotImplementedError`). Call a backend instance's `dumps()` for a non-YAML

@@ -32,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `yaconfiglib.ConfigError` and the subclasses `ConfigValueError`, `ConfigTypeError`,
+  `UnsupportedFormatError`, `UnknownLoaderError` and `CommandsDisabledError`. Each is also
+  an instance of the builtin exception the same condition raised before, so existing
+  `except ValueError` / `except NotImplementedError` clauses keep working; a parser's own
+  errors are still raised unwrapped.
+- `yaconfiglib.load_error_types()` returns the exception types a load can raise for a
+  configuration or I/O reason, for a single `except yaconfiglib.load_error_types():`
+  clause. It includes PyYAML's, Jinja2's and TOML's base errors only for parsers already
+  imported, so it needs no optional extra.
 - `DotAccessibleDict` is importable from `yaconfiglib` (and listed in `__all__`), so the
   type `load()` returns can be named in annotations and `isinstance` checks.
 - `del config.key` removes that key, mirroring `config.key = value`.
@@ -62,6 +71,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- The unknown-format and unknown-loader errors now list the loader names `loader=`
+  accepts, and the format error reads `No backend reads <path>` instead of
+  `Not reader for <path>`. Code matching the old text should catch
+  `yaconfiglib.UnsupportedFormatError` (still a `NotImplementedError`) or
+  `yaconfiglib.UnknownLoaderError` (still a `ValueError`) instead.
 - `yaconfiglib.dumps()` and `dump()` keep mapping keys in their original order and write
   non-ASCII characters as-is; they sorted keys and escaped every non-ASCII character, so a
   written configuration no longer resembled the one that was read. Pass `sort_keys=True`
@@ -262,7 +276,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it used the locale codec (cp1252 on Windows), so a document with non-Latin-1 characters
   failed to load there and could not load at all.
 - An in-memory document whose `#!name` line ends in `\r\n` now loads; it raised
-  `Not reader for name`.
+  `No backend reads name` (then worded `Not reader for name`).
 - `ConfigLoader.load()` of a bytes document in a BOM or UTF-16/UTF-32 `encoding=` now
   loads; it raised `ValueError: not enough values to unpack`.
 - A missing attribute on a loaded configuration raises `AttributeError` naming the real
@@ -328,7 +342,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   called `proj [v2]` works, a file really named `z[1].json` loads as itself, and
   `has_glob_pattern()` looks only outside a path's anchor.
 - A glob that matches a directory skips it instead of failing with
-  `NotImplementedError: Not reader for <directory>`, so `envs/*` loads the files under
+  `NotImplementedError` for the directory, so `envs/*` loads the files under
   `envs/`.
 - Sources given as a `pathlib.Path` (or any other `os.PathLike`, including a `PurePath`
   or an object that just defines `__fspath__`) now load instead of raising
@@ -363,7 +377,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing there.
 - A variable equal to the prefix (`APP_` with `prefix="APP_"`) no longer produces an
   empty-string key.
-- When a format's optional dependency is missing, the "Not reader for ..." and "Unknown
+- When a format's optional dependency is missing, the "No backend reads ..." and "Unknown
   configuration format/loader" errors name the extra to install and the underlying import
   error, instead of only reporting an unknown format.
 - `.cfg` files are detected as INI, which the API reference already stated. A `.cfg`

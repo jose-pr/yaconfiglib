@@ -283,6 +283,11 @@ object when you want file-relative includes.
 
 ## Writing a custom backend
 
+For content it cannot accept, a custom backend should raise its parser's own
+error or a `yaconfiglib.ConfigError` subclass (`ConfigValueError`,
+`ConfigTypeError`), so callers can catch it with everything else through
+`yaconfiglib.load_error_types()`.
+
 Subclass `ConfigBackend` and override `load()` (and optionally `dumps()`,
 which you call on the backend instance — `yaconfiglib.dump()`/`dumps()`
 always write YAML):
