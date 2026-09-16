@@ -655,9 +655,11 @@ class ConfigLoader(ConfigBackend):
 
         Args:
             *pathname: One or more sources — file paths, glob patterns,
-                command URIs (``cmd://...``), in-memory content, open
-                streams, or nested iterables of any of these. If omitted
-                entirely, loads a single empty in-memory document.
+                command URIs (``cmd://...``), in-memory content, open file
+                objects (anything with ``read()``, parsed by the backend
+                their file name selects), or nested iterables of any of
+                these. If omitted entirely, loads a single empty in-memory
+                document.
             recursive: Overrides the instance's *recursive* for glob
                 expansion during this call.
             encoding: Overrides the instance's *encoding* for this call,
@@ -1243,7 +1245,12 @@ def _split_loader_kwargs(kwargs: dict) -> "tuple[dict, dict]":
 
 
 def load(fp: typing.Any, **kwargs) -> object:
-    """Load configuration from a file pointer or file path.
+    """Load configuration from a file path or an open file object.
+
+    An open file object is anything with ``read()``, and it is parsed by the
+    backend its file name selects — so ``load(open("settings.toml"))`` reads
+    TOML. A name no backend recognizes (``<stdin>``, ``x.yaml.gz``, a stream
+    with no name) is parsed as YAML; pass ``loader=`` to choose explicitly.
 
     Keyword arguments :class:`ConfigLoader` accepts configure the loader (and so
     also apply to nested ``!include`` targets); every other keyword is passed to

@@ -8,8 +8,10 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 ## Top-level (`import yaconfiglib`)
 
 - **`load(fp, **kwargs) -> object`** / **`loads(s: str | bytes, **kwargs) -> object`** —
-  one-shot load from a file path/pointer or an in-memory string/bytes; constructs a fresh
-  `ConfigLoader` per call. Routing rule: a keyword named in `ConfigLoader.__init__`
+  one-shot load from a file path, an open file object (anything with `read()` — parsed by
+  the backend its file **name** selects, so `load(open("settings.toml"))` reads TOML; an
+  unrecognized name such as `<stdin>` or `x.yaml.gz` is YAML, and `loader=` overrides), or
+  an in-memory string/bytes; constructs a fresh `ConfigLoader` per call. Routing rule: a keyword named in `ConfigLoader.__init__`
   (`base_dir`, `encoding`, `recursive`, `key_factory`, `interpolate`, `merge`,
   `merge_options`, `allow_commands`, `sandbox`, ...) configures that loader, so it also
   governs nested `!include` targets and command-output parses; **every other** keyword
@@ -107,7 +109,8 @@ All constructor args become instance defaults, overridable per-call. Notable one
   default=None, key_factory=None, flatten=False, interpolate=None, merge=None,
   merge_options=None, allow_commands=None, sandbox=None, **reader_args) -> object`** —
   resolve `*pathname` via `parse_sources` (globs, nested lists, in-memory `#!`-marked
-  strings, streams, command URIs), parse each with its backend, and merge in order.
+  strings, open file objects — anything with `read()`, parsed by the backend their file
+  name selects — command URIs), parse each with its backend, and merge in order.
   `pathname` empty → loads one empty in-memory document. `flatten=True` flattens the
   final mapping-of-mappings or sequence-of-sequences by one level (error if the result
   is neither); an empty (`None`) member is skipped, and any other non-mergeable member
@@ -333,8 +336,18 @@ distinguish merge branches.
   and trailing slashes on POSIX), with `scheme`/`format`/`command` properties and
   `name`/`stem`/`as_posix()` all answering the full text; only a **string** source can
   be a command; in-memory `"#!<name>\n<content>"` strings (`"#!\n<content>"` for an
-  unnamed document, auto-named `mem-N.yaml`), open streams, or nested
-  iterables) into concrete `Path`-like objects. Command URIs (`exec://`, `cmd://`,
+  unnamed document, auto-named `mem-N.yaml`), open file objects, or nested
+  iterables) into concrete `Path`-like objects.
+  **A file object is anything with a callable `read`** — not just an `io` class, so
+  `codecs.open()`, a pre-3.11 `SpooledTemporaryFile` and a custom reader qualify (they
+  used to be *iterated*, one source per line). It is read once, and its backend follows
+  the basename of its `name` when a backend other than `CommandBackend` claims that name;
+  otherwise YAML. It materializes to `stream-<n>/<basename>` (so `.name`/`.stem` match a
+  by-path load, and so does a `merge="hash"` key) or `stream-<n>.yaml` when unnamed. Its
+  content is data: never a list of source paths, never a script however the file is named,
+  and a leading `#!` line is content, not a marker. `read()` must return `str` or `bytes`
+  (anything else raises `TypeError` naming `read()`). Being materialized, an `!include`
+  inside it resolves against `base_dir`. Command URIs (`exec://`, `cmd://`,
   `sh://`, `+fmt` variants) pass through unresolved/unexpanded. In-memory content and
   streams materialize to a `pathlib_next` `MemPath` when available, else a tracked temp
   file (best-effort cleaned at interpreter exit). `memo` dedupes repeat sources across

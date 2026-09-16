@@ -234,6 +234,27 @@ Append `.j2`/`.jinja2` to any filename to render it as a Jinja2 template
 first, then parse the rendered output with the backend matching the
 underlying extension — see [Templating](templating.md).
 
+## Open files, strings and bytes
+
+An open file object is parsed by the backend its **file name** selects, so a
+file object behaves like the file it was opened on:
+
+```python
+with open("settings.toml", "rb") as fh:
+    config = yaconfiglib.load(fh)
+```
+
+Anything with a `read()` method counts — `codecs.open()`, a
+`tempfile.SpooledTemporaryFile`, your own reader — and it is read once. A name
+no backend recognizes (`sys.stdin`, whose name is `<stdin>`, or a `.gz` file)
+is parsed as YAML; pass `loader=` to choose. A file object's content is always
+data: a file named `deploy.sh` is parsed, never run.
+
+An `!include` inside an open file resolves against the loader's `base_dir`,
+not the file's own directory, because there is no directory to resolve
+against once the content has been read — pass the path instead of the file
+object when you want file-relative includes.
+
 ## Writing a custom backend
 
 Subclass `ConfigBackend` and override `load()` (and optionally `dumps()`,

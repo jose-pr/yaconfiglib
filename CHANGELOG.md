@@ -62,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- With `merge="hash"`, an open file's key is its file stem (`settings` for
+  `settings.toml`) instead of `stream-<n>`. An open `.j2` file is rendered as a template,
+  like the same file loaded by path.
 - Assigning or deleting an attribute whose name the class defines (`items`, `get`,
   `copy`, `keys`, ...) now raises `AttributeError` instead of silently storing a key that
   attribute reads could never return — reads of those names resolve to the method, as they
@@ -210,6 +213,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `yaconfiglib.load(open("settings.toml"))`, binary `"rb"` files, and `.env`, `.ini` and
+  `.json` file objects now parse with the backend matching the file's name. Every open
+  file was parsed as YAML, so a TOML or `.env` file came back as one string and JSON
+  exponents as strings. A file whose name no backend recognizes (`<stdin>`, `.gz`) still
+  parses as YAML; pass `loader=` to choose.
+- File-like objects that are not `io` classes — `codecs.open()`,
+  `tempfile.SpooledTemporaryFile` on Python 3.9/3.10, custom readers — are read as
+  streams. They were iterated line by line, and each line was loaded as a file path,
+  glob or command, so a file listing other file names loaded those files instead of
+  itself.
 - YAML strings and text streams holding Windows line endings (`\r\n`) no longer gain a
   blank line per line break on Windows. Block (`|`), folded (`>`) and multi-line quoted
   values now load exactly as they do from a file.
