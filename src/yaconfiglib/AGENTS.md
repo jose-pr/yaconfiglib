@@ -455,6 +455,12 @@ marker, and would add a BOM there.
   promised body runs rather than a same-named file on disk. `.load(..., timeout=None)`: an opt-in number of seconds (reachable per call,
   e.g. `loader.load("cmd://...", timeout=30)`) after which the command and its child
   processes are killed and `subprocess.TimeoutExpired` is raised; no timeout by default.
+  Stdout is captured as **bytes** and decoded with `encoding=` (default `utf-8`)
+  **strictly**: an undecodable byte raises `ValueError` naming `encoding=`, instead of
+  substituting U+FFFD (`Popen(errors="replace")` would swallow it before this layer
+  could object). CR/CRLF are then normalized. A **non-zero exit wins**: its output is
+  decoded with `errors="replace"` and attached to `CalledProcessError`, since that text
+  is a diagnostic rather than configuration.
   With no `format=`/`+fmt`/shebang it **sniffs**: json (any value), yaml **only for a
   mapping or list**, toml, dotenv **strict** (every non-comment line an assignment), ini,
   else the raw stdout string. The yaml and dotenv restrictions are what make the later

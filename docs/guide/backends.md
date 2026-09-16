@@ -179,6 +179,19 @@ keeps its `./`, and `print(10/4)` still divides. Only a *string* source can be
 a command: a path object is always a file, so a data file named
 `sh:hosts.json` loads by its extension instead of being run.
 
+Command stdout is decoded with `encoding=` (default `utf-8`), and a byte that
+does not decode **raises** rather than being silently replaced with `U+FFFD` —
+a corrupted secret should not reach your configuration unnoticed. On Windows,
+`cmd`, `.bat` and PowerShell usually write the OEM code page, so pass
+`encoding="oem"`; a native Python child writes its own code page. Per include:
+
+```yaml
+secrets: !include {pathname: 'cmd+json://get-secrets', encoding: oem}
+```
+
+A command that exits non-zero still raises `CalledProcessError` with its
+output attached, whether or not that output decodes.
+
 Format resolution order: an explicit `format=` argument, the `+fmt`
 suffix on the scheme (`cmd+yaml://...`), a `#!fmt` shebang line in the
 command's own output, then sniffing.

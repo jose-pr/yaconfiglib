@@ -1655,3 +1655,52 @@ class TestScriptLaunch:
         path = tmp_path / "gen.sh"
         path.write_text("echo '{\"ok\": true}'\n", encoding="utf-8")
         assert ConfigLoader().load(str(path)) == {"ok": True}
+
+
+class TestCommandOutputDecoding:
+    """Command output is decoded strictly, so corruption is not silent."""
+
+    @staticmethod
+    def _emit(tmp_path, body):
+        script = tmp_path / "emit.py"
+        script.write_text(body, encoding="utf-8")
+        return f'cmd://"{sys.executable}" "{script}"'
+
+    def test_invalid_utf8_output_raises(self, tmp_path):
+        source = self._emit(
+            tmp_path,
+            "import sys\nsys.stdout.buffer.write(bytes([99, 97, 102, 233]))\n",
+        )
+        with pytest.raises(ValueError, match="encoding="):
+            CommandBackend().load(source)
+
+    def test_explicit_encoding_decodes(self, tmp_path):
+        source = self._emit(
+            tmp_path,
+            "import sys\nsys.stdout.buffer.write(bytes([99, 97, 102, 233]))\n",
+        )
+        assert CommandBackend().load(source, encoding="latin-1") == "caf\xe9"
+
+    def test_crlf_output_normalized(self, tmp_path):
+        pytest.importorskip("yaml")
+        # The child writes real CRLFs, assembled here so no escape survives a
+        # round trip through the file it writes.
+        crlf = "chr(13) + chr(10)"
+        body = (
+            "import sys\n"
+            f"nl = {crlf}\n"
+            "out = nl.join(['#!yaml', 'x: |', '  l1', '  l2', 'y: 2', ''])\n"
+            "sys.stdout.buffer.write(out.encode('utf-8'))\n"
+        )
+        source = self._emit(tmp_path, body)
+        assert CommandBackend().load(source) == {"x": "l1\nl2\n", "y": 2}
+
+    def test_failed_command_status_wins_over_decode(self, tmp_path):
+        source = self._emit(
+            tmp_path,
+            "import sys\nsys.stdout.buffer.write(bytes([233]))\nsys.exit(3)\n",
+        )
+        with pytest.raises(subprocess.CalledProcessError) as excinfo:
+            CommandBackend().load(source)
+        assert excinfo.value.returncode == 3
+        assert isinstance(excinfo.value.stderr, str)

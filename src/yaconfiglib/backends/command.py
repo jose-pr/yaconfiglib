@@ -113,13 +113,23 @@ def _script_command(path_str: str) -> "typing.Union[str, list[str]]":
     return [path_str]
 
 
+def _decode(raw: bytes, codec: str, *, strict: bool) -> str:
+    """Decode command output, then apply universal newlines.
+
+    `strict=False` replaces undecodable bytes; it is used for the output of a
+    command that already failed, where the text is only a diagnostic.
+    """
+    text = raw.decode(codec, errors="strict" if strict else "replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _run_command(
     command: "typing.Union[str, list[str]]",
     encoding: str,
     timeout: typing.Optional[float],
     shell: bool = True,
-) -> str:
-    """Run *command* with stdin closed; return its stdout.
+) -> bytes:
+    """Run *command* with stdin closed; return its stdout as raw bytes.
 
     *shell* is True for a command URI or a bare command string (the documented
     behaviour) and False for a script file, whose launch line is built by
@@ -134,11 +144,9 @@ def _run_command(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        # Decode explicitly: the locale codec (cp1252 on Windows) mangles UTF-8
-        # output from tools like secret managers. errors="replace" keeps the
-        # format-sniffing path total instead of raising mid-decode.
-        encoding=encoding,
-        errors="replace",
+        # Binary: decoding happens in the caller, which needs a real
+        # UnicodeDecodeError to catch. Popen(encoding=..., errors="replace")
+        # would substitute U+FFFD before anything here could object.
         start_new_session=(os.name != "nt"),
     ) as process:
         try:
@@ -153,8 +161,13 @@ def _run_command(
             process.kill()
             raise
     if process.returncode:
+        # A failing command's status wins over any decode complaint, and its
+        # output is a diagnostic rather than configuration, so replace freely.
         raise subprocess.CalledProcessError(
-            process.returncode, command, output=stdout, stderr=stderr
+            process.returncode,
+            command,
+            output=_decode(stdout, encoding, strict=False),
+            stderr=_decode(stderr, encoding, strict=False),
         )
     return stdout
 
@@ -271,9 +284,10 @@ class CommandBackend(ConfigBackend):
 
         # 2. Execute (stdin closed, so a command can neither hang the load
         # waiting for input nor consume the parent's stdin).
+        codec = encoding or "utf-8"
         if source is not None or isinstance(path, str):
             # A command URI, or a bare command string: shell, as documented.
-            stdout = _run_command(command, encoding or "utf-8", timeout)
+            raw = _run_command(command, codec, timeout)
         elif _source._is_materialized_source(path):
             # An in-memory document or a rendered template: run ITS body, not
             # whatever file happens to bear that virtual name on disk.
@@ -286,17 +300,24 @@ class CommandBackend(ConfigBackend):
                 )
             directory, script = _source._materialize_script(path.read_bytes(), suffix)
             try:
-                stdout = _run_command(
-                    _script_command(script), encoding or "utf-8", timeout, shell=False
-                )
+                raw = _run_command(_script_command(script), codec, timeout, shell=False)
             finally:
                 shutil.rmtree(directory, ignore_errors=True)
         else:
             # A script file on disk: launched through its interpreter with
             # shell=False, so its own name is never shell syntax.
-            stdout = _run_command(
-                _script_command(path_str), encoding or "utf-8", timeout, shell=False
-            )
+            raw = _run_command(_script_command(path_str), codec, timeout, shell=False)
+
+        # Strict on success: silently replacing bytes turns a non-ASCII secret
+        # into U+FFFD and the failure only surfaces wherever that value is used.
+        try:
+            stdout = _decode(raw, codec, strict=True)
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                f"output of command source {path_str!r} is not valid {codec}; "
+                "pass encoding= (for example 'oem' on Windows for cmd/.bat/"
+                "PowerShell output, or the child's own code page)"
+            ) from exc
         output = stdout.strip()
 
         # 3. Parse shebang from output if present

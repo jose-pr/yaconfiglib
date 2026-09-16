@@ -195,6 +195,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Command output that does not decode with the requested codec (default `utf-8`) raises
+  a clear error naming `encoding=`, instead of silently replacing bytes with `U+FFFD`. A
+  non-ASCII secret from a tool writing another code page used to arrive corrupted, and the
+  failure surfaced only wherever that value was later used. Pass `encoding=` — for
+  example `oem` on Windows for `cmd`, `.bat` or PowerShell output. A command that exits
+  non-zero still raises `CalledProcessError` with its output attached, decoded leniently.
 - Script files run through the right interpreter on each platform: a `.ps1` runs
   PowerShell instead of whatever the file association opens, a POSIX `.sh` needs no
   execute bit (it falls back to `/bin/sh`), and a script path containing a space, `&`,
