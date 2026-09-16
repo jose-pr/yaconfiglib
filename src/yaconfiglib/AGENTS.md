@@ -337,8 +337,13 @@ distinguish merge branches.
   package (`yaconfiglib[toml]`).
 - **`JsonConfig`** (`.json`).
 - **`IniConfig`** (`.ini`/`.cfg`).
-- **`DotenvBackend`** (`NAME="dotenv"`, `.env`) — strips inline `#` comments outside
-  quoted values; preserves `#` inside quotes.
+- **`DotenvBackend`** (`NAME="dotenv"`, `.env`, `*.env`, `.env.<stage>[.<more>]`) —
+  strips inline `#` comments outside quoted values; preserves `#` inside quotes. It gives
+  way when the name's final suffix belongs to another format (`app.env.yaml` → YAML,
+  `.env.j2` → rendered) or when any other backend, including a custom one, claims the
+  name: the regex excludes the known suffixes AND `can_load_path` defers to every
+  non-dotenv backend, because neither test alone covers a custom format or a missing
+  optional dependency. `loader="dotenv"` forces it.
 - **`EnvVarBackend`** (`NAME="env"`, not file-based) —
   `EnvVarBackend(prefix="", lowercase=True, nested_delimiter=None, coerce=False)`;
   `.load(path=None, prefix=None, lowercase=None, nested_delimiter=None, coerce=None,

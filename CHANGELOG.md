@@ -128,6 +128,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Files whose name ends in another format's suffix after `.env` are parsed by that
+  format's backend: `app.env.yaml` as YAML, `settings.env.json` as JSON, `x.env.toml` as
+  TOML, `x.env.ini` as INI, and `.env.j2` or `config.env.yaml.j2` rendered as a template
+  first. They previously loaded as dotenv, which meant an empty or flattened result.
+  `.env`, `*.env` and staged names such as `.env.local` and `.env.development.local` are
+  still dotenv, and `loader="dotenv"` reads any name as dotenv.
 - `typed_merge` builds a mapping target positionally, so **non-string keys** no longer
   fail with "keywords must be strings", an abstract `Mapping[...]` hint no longer raises
   "Can't instantiate abstract class", and a `defaultdict` target keeps its

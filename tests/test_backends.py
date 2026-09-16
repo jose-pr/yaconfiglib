@@ -839,3 +839,67 @@ class TestJinja2TemplateNaming:
         with pytest.raises(NotImplementedError, match=r"config\.j2") as exc_info:
             ConfigLoader(base_dir=tmp_path).load("config.j2")
         assert "config.yaml.j2" in str(exc_info.value)
+
+
+class TestDotenvDispatch:
+    @pytest.mark.parametrize(
+        "name, expected",
+        [
+            ("app.env.yaml", "YamlConfig"),
+            (".env.yaml", "YamlConfig"),
+            ("x.env.json", "JsonConfig"),
+            ("x.env.toml", "TomlConfig"),
+            ("x.env.ini", "IniConfig"),
+            (".env.j2", "Jinja2ConfigLoader"),
+            ("config.env.yaml.j2", "Jinja2ConfigLoader"),
+            (".env", "DotenvBackend"),
+            (".env.local", "DotenvBackend"),
+            (".env.development.local", "DotenvBackend"),
+            ("secrets.env", "DotenvBackend"),
+        ],
+    )
+    def test_dispatch(self, name, expected):
+        import pathlib
+
+        assert ConfigBackend.get_class_by_path(pathlib.Path(name)).__name__ == expected
+
+    def test_custom_backend_beats_dotenv(self):
+        import pathlib
+        import re
+
+        class ZzzEnvFmt(ConfigBackend):
+            PATHNAME_REGEX = re.compile(r".*\.zzzenvfmt$")
+            NAME = "zzzenvfmt"
+
+            def load(self, path, **options):
+                return {}
+
+        assert (
+            ConfigBackend.get_class_by_path(pathlib.Path("x.env.zzzenvfmt"))
+            is ZzzEnvFmt
+        )
+
+    def test_env_yaml_file_loads_as_yaml(self, tmp_path):
+        (tmp_path / "app.env.yaml").write_text("db:\n  host: h\n  port: 5432\n")
+        result = ConfigLoader(base_dir=tmp_path).load("app.env.yaml")
+        assert result == {"db": {"host": "h", "port": 5432}}
+
+    def test_env_j2_renders(self, tmp_path):
+        (tmp_path / ".env.j2").write_text("KEY={{ 1 + 1 }}\n")
+        result = ConfigLoader(base_dir=tmp_path).load(".env.j2")
+        assert result == {"key": "2"}
+
+    def test_include_of_env_yaml_file(self, tmp_path):
+        (tmp_path / "app.env.yaml").write_text("host: h\n")
+        (tmp_path / "main.yaml").write_text("inc: !include app.env.yaml\n")
+        result = ConfigLoader(base_dir=tmp_path).load("main.yaml")
+        assert result == {"inc": {"host": "h"}}
+
+    def test_unregistered_format_suffix_is_not_claimed(self, monkeypatch):
+        import pathlib
+
+        from yaconfiglib.backends.yaml import YamlConfig
+
+        monkeypatch.setattr(YamlConfig, "PATHNAME_REGEX", None)
+        with pytest.raises(NotImplementedError):
+            ConfigBackend.get_class_by_path(pathlib.Path("app.env.yaml"))

@@ -60,11 +60,35 @@ class DotenvBackend(ConfigBackend):
     * ``#`` comment lines and inline comments (outside quoted values)
     """
 
-    PATHNAME_REGEX = re.compile(r".*\.env(\..+)?$", re.IGNORECASE)
+    # `.env`, `*.env` and staged names like `.env.development.local`, but NOT a
+    # name whose final suffix belongs to another format. The lookahead sits
+    # before the dot so `a.env.b.env.yaml` is rejected too.
+    PATHNAME_REGEX = re.compile(
+        r".*\.env((?!.*\.(ya?ml|json|toml|ini|cfg|j2|jinja2)$)\..+)?$", re.IGNORECASE
+    )
     NAME = "dotenv"
 
     def __init__(self, lowercase: bool = True) -> None:
         self.lowercase = lowercase
+
+    @classmethod
+    def can_load_path(cls, path) -> bool:
+        """Claim *path* only when no other backend also claims it.
+
+        The suffix list in :attr:`PATHNAME_REGEX` cannot know about a custom
+        backend, and it over-claims when an optional dependency is missing and
+        that format's backend was never registered. Giving way to any
+        non-dotenv backend that matches covers both.
+        """
+        if cls.PATHNAME_REGEX is None or cls.PATHNAME_REGEX.match(path.name) is None:
+            return False
+        return not any(
+            scls.can_load_path(path)
+            for scls in ConfigBackend.__subclasses__(recursive=True)
+            # `is not cls` would make a user subclass and this class ask each
+            # other forever.
+            if not issubclass(scls, DotenvBackend)
+        )
 
     def load(
         self,

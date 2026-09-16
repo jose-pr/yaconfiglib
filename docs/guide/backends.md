@@ -54,6 +54,12 @@ config = yaconfiglib.load(".env")
 Supports `KEY=value` and `export KEY=value` syntax, single/double-quoted
 values, and `#` comments (both full-line and inline, outside quotes).
 
+Dotenv claims `.env`, `*.env` and staged names such as `.env.local` and
+`.env.development.local`. A name whose **final** suffix belongs to another
+format goes to that format's backend instead: `app.env.yaml` is YAML,
+`settings.env.json` is JSON, and `.env.j2` or `config.env.yaml.j2` is rendered
+as a template first. Pass `loader="dotenv"` to read any name as dotenv.
+
 ## Environment variables
 
 Unlike file-based backends, `EnvVarBackend` reads `os.environ` directly
