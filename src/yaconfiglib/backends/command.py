@@ -208,9 +208,11 @@ class CommandBackend(ConfigBackend):
         # 4. Parse content using yaconfiglib.loads
         from yaconfiglib import loads
 
-        # Strip loader/format argument to avoid infinite recursion
+        # Strip loader/format to avoid infinite recursion, and origin because the
+        # command's output is not a file next to it (ConfigLoader has no such
+        # parameter, so passing it through would raise TypeError).
         loads_options = {
-            k: v for k, v in options.items() if k not in ("loader", "format")
+            k: v for k, v in options.items() if k not in ("loader", "format", "origin")
         }
 
         candidates = []

@@ -147,6 +147,15 @@ class TestExamples:
         result = loader.load("test.ini")
         assert isinstance(result, dict)
 
+    def test_advanced_example_loads_from_any_cwd(self, tmp_path, monkeypatch):
+        """The example's includes are relative to advanced.yaml, not to the CWD."""
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader().load(str(EXAMPLES / "advanced.yaml"))
+
+        assert result["database_config"]["python.testing.pytestEnabled"] is True
+        assert result["dynamic_includes"] == {"includeme.yaml": {"me": True}}
+
     def test_glob_loading(self, tmp_path):
         for name in ("a.yaml", "b.yaml", "c.yaml"):
             (tmp_path / name).write_text(f"file: {name}\n")

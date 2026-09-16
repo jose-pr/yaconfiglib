@@ -81,6 +81,47 @@ def _materialize_temp(content: str | bytes, encoding: str, suffix: str) -> Path:
     return Path(name)
 
 
+def _is_materialized_source(path: object) -> bool:
+    """True for a source that has no meaningful directory of its own.
+
+    In-memory documents (``MemPath``) and the temp files the no-pathlib_next
+    fallback writes are not part of a config tree: ``MemPath``'s parent is ``''``
+    and a temp file's is the system temp directory. Includes inside them keep
+    resolving against ``base_dir``. Module globals are read at call time because
+    tests monkeypatch ``MemPath``.
+    """
+    if MemPath is not None and isinstance(path, MemPath):
+        return True
+    return str(path) in _TEMP_SOURCES
+
+
+def _rebase_include_sources(sources: object, origin: Path | None) -> object:
+    """Resolve include *sources* against the directory of *origin*, keeping their shape.
+
+    Relative paths inside a configuration file are written relative to that file.
+    Returns *sources* unchanged when there is no usable origin, and leaves
+    non-paths alone: in-memory ``#!`` documents, command URIs and non-strings.
+    """
+    if origin is None or _is_materialized_source(origin):
+        return sources
+    return _rebase(sources, origin)
+
+
+def _rebase(source: object, origin: Path) -> object:
+    if isinstance(source, (list, tuple)):
+        return type(source)(_rebase(item, origin) for item in source)
+    if not isinstance(source, str) or not source:
+        return source
+    if source.startswith("#!") or _CMD_REGEX.match(source):
+        return source
+    target = origin.parent / source  # an absolute source wins by join semantics
+    if not target.is_absolute():
+        # parse_sources joins base_dir onto any relative source; make the target
+        # absolute so that join is a no-op instead of a second, wrong prefix.
+        target = target.absolute()
+    return str(target)
+
+
 def has_glob_pattern(path: Path) -> bool:
     """Check if the given Path contains glob pattern characters."""
     if hasattr(path, "has_glob_pattern"):

@@ -255,6 +255,320 @@ class TestYamlIncludeRegistration:
         assert not any("unnecessary" in rec.getMessage() for rec in caplog.records)
 
 
+class TestIncludePathResolution:
+    """A relative !include resolves against the file it is written in."""
+
+    @staticmethod
+    def _tree(tmp_path):
+        """conf/app.yaml + conf/db.toml, with the CWD moved to a sibling directory."""
+        conf = tmp_path / "conf"
+        conf.mkdir()
+        (conf / "db.toml").write_text('host = "from-conf"\n', encoding="utf-8")
+        (conf / "app.yaml").write_text("db: !include db.toml\n", encoding="utf-8")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        return conf, elsewhere
+
+    @pytest.mark.parametrize(
+        "path_factory_name", ["default_path_factory", "stdlib_path_factory"]
+    )
+    def test_sibling_include_from_another_cwd(
+        self, tmp_path, monkeypatch, path_factory_name
+    ):
+        import pathlib
+
+        conf, elsewhere = self._tree(tmp_path)
+        monkeypatch.chdir(elsewhere)
+        kwargs = {"base_dir": tmp_path}
+        if path_factory_name == "stdlib_path_factory":
+            kwargs["path_factory"] = pathlib.Path
+
+        result = ConfigLoader(**kwargs).load(str(conf / "app.yaml"))
+
+        assert result == {"db": {"host": "from-conf"}}
+
+    def test_sibling_include_with_absolute_top_level_path(self, tmp_path, monkeypatch):
+        conf, elsewhere = self._tree(tmp_path)
+        monkeypatch.chdir(elsewhere)
+
+        result = ConfigLoader().load(str(conf / "app.yaml"))
+
+        assert result == {"db": {"host": "from-conf"}}
+
+    def test_nested_include_resolves_against_each_including_file(
+        self, tmp_path, monkeypatch
+    ):
+        conf = tmp_path / "conf"
+        (conf / "sub").mkdir(parents=True)
+        (conf / "leaf.toml").write_text("z = 999\n", encoding="utf-8")  # decoy
+        (conf / "sub" / "leaf.toml").write_text("z = 1\n", encoding="utf-8")
+        (conf / "sub" / "mid.yaml").write_text(
+            "y: !include leaf.toml\n", encoding="utf-8"
+        )
+        (conf / "app.yaml").write_text("x: !include sub/mid.yaml\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader(base_dir=conf).load("app.yaml")
+
+        assert result == {"x": {"y": {"z": 1}}}
+
+    def test_same_relative_name_at_each_depth_is_not_a_cycle(self, tmp_path):
+        conf = tmp_path / "conf"
+        (conf / "x" / "x").mkdir(parents=True)
+        (conf / "a.yaml").write_text("x: !include x/a.yaml\n", encoding="utf-8")
+        (conf / "x" / "a.yaml").write_text("y: !include x/a.yaml\n", encoding="utf-8")
+        (conf / "x" / "x" / "a.yaml").write_text("z: 1\n", encoding="utf-8")
+
+        result = ConfigLoader(base_dir=conf).load("a.yaml")
+
+        assert result == {"x": {"y": {"z": 1}}}
+
+    @pytest.mark.parametrize("form", ["sequence", "mapping"])
+    def test_every_sequence_and_mapping_source_is_rebased(
+        self, tmp_path, monkeypatch, form
+    ):
+        conf = tmp_path / "conf"
+        conf.mkdir()
+        (conf / "one.yaml").write_text("a: 1\n", encoding="utf-8")
+        (conf / "two.yaml").write_text("b: 2\n", encoding="utf-8")
+        include = (
+            'o: !include ["one.yaml", "two.yaml"]\n'
+            if form == "sequence"
+            else 'o: !include {pathname: "one.yaml"}\n'
+        )
+        (conf / "app.yaml").write_text(include, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader(base_dir=tmp_path).load(str(conf / "app.yaml"))
+
+        expected = {"a": 1, "b": 2} if form == "sequence" else {"a": 1}
+        assert result == {"o": expected}
+
+    def test_glob_include_expands_next_to_including_file(self, tmp_path, monkeypatch):
+        conf = tmp_path / "conf"
+        (conf / "parts").mkdir(parents=True)
+        (conf / "parts" / "p1.yaml").write_text("a: 1\n", encoding="utf-8")
+        (conf / "parts" / "p2.yaml").write_text("b: 2\n", encoding="utf-8")
+        (conf / "app.yaml").write_text(
+            'all: !include "parts/*.yaml"\n', encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader(base_dir=tmp_path).load(str(conf / "app.yaml"))
+
+        assert result == {"all": {"a": 1, "b": 2}}
+
+    def test_jinja2_template_include_resolves_next_to_template(
+        self, tmp_path, monkeypatch
+    ):
+        conf = tmp_path / "conf"
+        conf.mkdir()
+        (conf / "db.toml").write_text('host = "from-conf"\n', encoding="utf-8")
+        (conf / "app.yaml.j2").write_text(
+            "db: !include db{{ '.' }}toml\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader(base_dir=tmp_path).load(str(conf / "app.yaml.j2"))
+
+        assert result == {"db": {"host": "from-conf"}}
+
+    def test_command_backend_drops_origin_option(self, tmp_path):
+        assert (
+            CommandBackend().load('cmd+json://python -c "print(1)"', origin=tmp_path)
+            == 1
+        )
+
+    def test_relative_base_dir_is_not_joined_twice(self, tmp_path, monkeypatch):
+        conf, _elsewhere = self._tree(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader(base_dir="conf").load("app.yaml")
+
+        assert result == {"db": {"host": "from-conf"}}
+
+    def test_absolute_include_path_is_unchanged(self, tmp_path, monkeypatch):
+        conf, elsewhere = self._tree(tmp_path)
+        other = tmp_path / "other.toml"
+        other.write_text('host = "from-other"\n', encoding="utf-8")
+        (conf / "app.yaml").write_text(
+            f"db: !include '{other.as_posix()}'\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(elsewhere)
+
+        result = ConfigLoader().load(str(conf / "app.yaml"))
+
+        assert result == {"db": {"host": "from-other"}}
+
+    @pytest.mark.parametrize("materialized_as", ["mempath", "tempfile"])
+    def test_in_memory_document_include_uses_base_dir(
+        self, tmp_path, monkeypatch, materialized_as
+    ):
+        conf, elsewhere = self._tree(tmp_path)
+        monkeypatch.chdir(elsewhere)
+        if materialized_as == "tempfile":
+            from yaconfiglib.utils import source as source_module
+
+            monkeypatch.setattr(source_module, "MemPath", None)
+
+        result = ConfigLoader(base_dir=conf).load("#!mem.yaml\nd: !include db.toml\n")
+
+        assert result == {"d": {"host": "from-conf"}}
+
+    def test_command_output_include_uses_base_dir(self, tmp_path, monkeypatch):
+        conf, elsewhere = self._tree(tmp_path)
+        monkeypatch.chdir(elsewhere)
+
+        result = ConfigLoader(base_dir=conf).load(
+            "cmd+yaml://python -c \"print('d: !include db.toml')\""
+        )
+
+        assert result == {"d": {"host": "from-conf"}}
+
+    def test_file_relative_script_include_still_blocked(self, tmp_path, monkeypatch):
+        from yaconfiglib import CommandsDisabledError
+
+        conf, elsewhere = self._tree(tmp_path)
+        (conf / "gen.sh").write_text("echo 'a: 1'\n", encoding="utf-8")
+        (conf / "app.yaml").write_text("s: !include gen.sh\n", encoding="utf-8")
+        monkeypatch.chdir(elsewhere)
+
+        with pytest.raises(CommandsDisabledError):
+            ConfigLoader(allow_commands=False).load(str(conf / "app.yaml"))
+
+
+class TestIncludeInheritsCallEncoding:
+    """A per-call encoding= applies to every include target, at every depth."""
+
+    CAFE = "café"
+
+    @classmethod
+    def _chain(cls, tmp_path, codec="cp1252"):
+        """main.yaml -> sub.yaml -> leaf.yaml, all written in *codec*."""
+        (tmp_path / "leaf.yaml").write_bytes(f"c: {cls.CAFE}\n".encode(codec))
+        (tmp_path / "sub.yaml").write_bytes("b: !include leaf.yaml\n".encode(codec))
+        (tmp_path / "main.yaml").write_bytes("a: !include sub.yaml\n".encode(codec))
+        return {"a": {"b": {"c": cls.CAFE}}}
+
+    @pytest.mark.parametrize("entry_point", ["loader_call", "module_load", "load_all"])
+    def test_per_call_encoding_reaches_nested_file_includes(
+        self, tmp_path, monkeypatch, entry_point
+    ):
+        import yaconfiglib
+
+        expected = self._chain(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        if entry_point == "loader_call":
+            result = ConfigLoader().load("main.yaml", encoding="cp1252")
+        elif entry_point == "module_load":
+            result = yaconfiglib.load("main.yaml", encoding="cp1252")
+        else:
+            result = list(ConfigLoader().load_all("main.yaml", encoding="cp1252"))[0]
+
+        assert result == expected
+
+    def test_per_call_encoding_overrides_instance_encoding_for_includes(
+        self, tmp_path, monkeypatch
+    ):
+        (tmp_path / "sub.yaml").write_bytes(f"b: {self.CAFE}\n".encode("utf-8"))
+        (tmp_path / "main.yaml").write_bytes("a: !include sub.yaml\n".encode("utf-8"))
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader(encoding="cp1252").load("main.yaml", encoding="utf-8")
+
+        assert result == {"a": {"b": self.CAFE}}
+
+    def test_per_call_encoding_reaches_command_include(self, tmp_path, monkeypatch):
+        # The child writes {"v": "café"} as cp1252 bytes, so the shell text stays ASCII.
+        payload = ", ".join(str(b) for b in '{"v": "café"}'.encode("cp1252"))
+        (tmp_path / "main.yaml").write_bytes(
+            (
+                "p: !include 'cmd+json://python -c \"import sys;"
+                f" sys.stdout.buffer.write(bytes([{payload}]))\"'\n"
+            ).encode("cp1252")
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader().load("main.yaml", encoding="cp1252")
+
+        assert result == {"p": {"v": self.CAFE}}
+
+    def test_mapping_encoding_applies_to_its_target_only(self, tmp_path, monkeypatch):
+        (tmp_path / "leaf.yaml").write_bytes(f"c: {self.CAFE}\n".encode("cp1252"))
+        (tmp_path / "mid.yaml").write_bytes("b: !include leaf.yaml\n".encode("utf-16"))
+        (tmp_path / "main.yaml").write_bytes(
+            "a: !include {pathname: mid.yaml, encoding: utf-16}\n".encode("cp1252")
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader().load("main.yaml", encoding="cp1252")
+
+        assert result == {"a": {"b": {"c": self.CAFE}}}
+
+    def test_null_mapping_encoding_inherits_call_encoding(self, tmp_path, monkeypatch):
+        self._chain(tmp_path)
+        (tmp_path / "main.yaml").write_bytes(
+            "a: !include {pathname: sub.yaml, encoding: null}\n".encode("cp1252")
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader().load("main.yaml", encoding="cp1252")
+
+        assert result == {"a": {"b": {"c": self.CAFE}}}
+
+    def test_encoding_reaches_include_inside_included_command_output(
+        self, tmp_path, monkeypatch
+    ):
+        (tmp_path / "leaf.yaml").write_bytes(f"c: {self.CAFE}\n".encode("cp1252"))
+        (tmp_path / "main.yaml").write_bytes(
+            (
+                "o: !include 'cmd+yaml://python -c \"print(''x: !include leaf.yaml'')\"'\n"
+            ).encode("cp1252")
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader().load("main.yaml", encoding="cp1252")
+
+        assert result == {"o": {"x": {"c": self.CAFE}}}
+
+    @pytest.mark.parametrize("form", ["sequence", "j2_template"])
+    def test_per_call_encoding_reaches_sequence_and_template_includes(
+        self, tmp_path, monkeypatch, form
+    ):
+        if form == "sequence":
+            (tmp_path / "a.yaml").write_bytes(f"x: {self.CAFE}\n".encode("cp1252"))
+            (tmp_path / "b.yaml").write_bytes(f"y: {self.CAFE}\n".encode("cp1252"))
+            (tmp_path / "main.yaml").write_bytes(
+                "s: !include [a.yaml, b.yaml]\n".encode("cp1252")
+            )
+            expected = {"s": {"x": self.CAFE, "y": self.CAFE}}
+        else:
+            (tmp_path / "leaf.yaml").write_bytes(
+                f"inner: {self.CAFE}\n".encode("cp1252")
+            )
+            (tmp_path / "sub.yaml.j2").write_bytes(
+                f"t: {self.CAFE}\nleaf: !include leaf.yaml\n".encode("cp1252")
+            )
+            (tmp_path / "main.yaml").write_bytes(
+                "s: !include sub.yaml.j2\n".encode("cp1252")
+            )
+            expected = {"s": {"t": self.CAFE, "leaf": {"inner": self.CAFE}}}
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader().load("main.yaml", encoding="cp1252")
+
+        assert result == expected
+
+    def test_instance_encoding_still_reaches_includes(self, tmp_path, monkeypatch):
+        expected = self._chain(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        result = ConfigLoader(encoding="cp1252").load("main.yaml")
+
+        assert result == expected
+
+
 class TestPrivateSafeLoader:
     """!include/!load must never be armed on the shared yaml.SafeLoader."""
 

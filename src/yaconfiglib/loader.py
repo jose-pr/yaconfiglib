@@ -198,8 +198,12 @@ class ConfigLoader(ConfigBackend):
         """Configure a reusable loader.
 
         Args:
-            base_dir: Directory relative-path sources are resolved
-                against. Accepts a string or ``Path``.
+            base_dir: Directory the relative-path sources passed to
+                :meth:`load` are resolved against, and the anchor for
+                includes inside documents that are not files (``loads()``,
+                ``#!`` strings, streams, command output). A relative
+                ``!include`` inside a YAML *file* resolves against that
+                file's own directory. Accepts a string or ``Path``.
             encoding: Default text encoding for reading sources.
             path_factory: Callable used to build a ``Path`` from a bare
                 string source. Defaults to :attr:`DEFAULT_PATH_FACTORY`.
@@ -412,7 +416,9 @@ class ConfigLoader(ConfigBackend):
                 entirely, loads a single empty in-memory document.
             recursive: Overrides the instance's *recursive* for glob
                 expansion during this call.
-            encoding: Overrides the instance's *encoding* for this call.
+            encoding: Overrides the instance's *encoding* for this call,
+                including every ``!include``/``!load`` target that does not
+                set its own.
             loader: Backend name, backend instance, or callable selecting
                 the backend for every source loaded in this call,
                 overriding per-source auto-detection.
@@ -627,7 +633,9 @@ class ConfigLoader(ConfigBackend):
 
         Args:
             *pathname: Sources to resolve, same semantics as :meth:`load`.
-            encoding: Overrides the instance's *encoding* for this call.
+            encoding: Overrides the instance's *encoding* for this call,
+                including every ``!include``/``!load`` target that does not
+                set its own.
             interpolate: Overrides the instance's *interpolate* for this
                 call; applied independently to each yielded document.
             sandbox: Overrides the instance's *sandbox* for this call,

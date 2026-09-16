@@ -60,7 +60,10 @@ class Jinja2ConfigLoader(ConfigBackend):
                 the rendered output. Defaults to :attr:`DEFAULT_ENCODING`.
             loader: The parent :class:`~yaconfiglib.loader.ConfigLoader`,
                 forwarded to the resolved backend so nested
-                ``!include``/``!load`` directives keep working.
+                ``!include``/``!load`` directives keep working. The template's
+                own path is passed as the resolved document's ``origin``, so
+                relative includes resolve next to the template rather than
+                next to the rendered copy.
             environment: A :class:`jinja2.Environment` to render with.
                 Defaults to :data:`yaconfiglib.utils.jinja2.DEFAULT_ENV`, or
                 to the shared sandboxed/strict environment when the load's
@@ -133,6 +136,9 @@ class Jinja2ConfigLoader(ConfigBackend):
                 f"from {path.as_posix()!r}: allow_commands=False"
             )
 
+        # The rendered document lives in memory or in a temp file, so relative
+        # includes inside it resolve next to the template they came from.
+        kwargs.setdefault("origin", path)
         rendered = rendered_loader.load(
             target,
             encoding=encoding,

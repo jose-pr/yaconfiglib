@@ -14,6 +14,7 @@ except ImportError:
     Pathname = Path
 
 from yaconfiglib.backends.base import ConfigBackend, _filter_include_kwargs
+from yaconfiglib.utils.source import _rebase_include_sources
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,9 @@ class YamlConfig(ConfigBackend):
     Automatically registers ``!include`` and ``!load`` tag constructors on a
     private, yaconfiglib-owned subclass of the PyYAML loader class, so nested
     configuration files can be pulled in directly from YAML, e.g.
-    ``database: !include "db.toml"``. ``yaml.SafeLoader`` and any
+    ``database: !include "db.toml"``. A relative include path resolves against
+    the directory of the document it is written in (see *origin*), and is read
+    with the encoding of the load call unless it names its own. ``yaml.SafeLoader`` and any
     caller-supplied loader class are never modified. Registration happens once
     per owned class and only when a parent
     :class:`~yaconfiglib.loader.ConfigLoader` is supplied via ``loader=``.
@@ -80,6 +83,7 @@ class YamlConfig(ConfigBackend):
         loader_cls: type[yaml.Loader] = None,
         path_factory: type[Path] = None,
         loader: ConfigBackend = None,
+        origin: Path | str = None,
         **options,
     ) -> object:
         """Parse *path* as YAML and return the resulting object.
@@ -88,9 +92,11 @@ class YamlConfig(ConfigBackend):
             path: File to parse, either a ``Path`` or a string (converted
                 via *path_factory*).
             encoding: Text encoding, defaults to :attr:`DEFAULT_ENCODING`.
+                Also the default for this document's own includes.
             master: An in-progress PyYAML loader instance to inherit
                 anchors/aliases from — used when this call originates from
                 a ``!include``/``!load`` tag within another YAML document.
+                It also carries the load call's include encoding.
             loader_cls: PyYAML loader class to use. Defaults to *master*'s
                 class if given, else :attr:`DEFAULT_LOADER_CLS`. Parsing uses a
                 private subclass of it, so the class itself is never modified.
@@ -99,6 +105,9 @@ class YamlConfig(ConfigBackend):
                 When supplied, ``!include``/``!load`` tags are registered
                 on the owned subclass of *loader_cls* so nested includes
                 resolve through it.
+            origin: The document relative ``!include``/``!load`` paths in
+                *path* resolve against. Defaults to *path* itself; a
+                rendered template passes the template's path.
 
         Returns:
             The parsed YAML document (typically a ``dict``, ``list``, or
@@ -127,6 +136,19 @@ class YamlConfig(ConfigBackend):
         # resolve through THIS loader's settings, not the first one registered.
         if loader is not None:
             loader_instance._yaconfiglib_config_loader = loader
+        # Relative includes in this document resolve against its own directory.
+        # The origin is per-document, like the parser instance; the ConfigLoader
+        # is shared across depths and cannot carry it.
+        if origin is None:
+            origin = path
+        elif isinstance(origin, str):
+            origin = path_factory(origin)
+        loader_instance._yaconfiglib_include_origin = origin
+        # The encoding of the load call that started this parse reaches every
+        # include, at every depth. A mapping-form `encoding:` applies to its own
+        # target only, so the inherited value keeps travelling past it.
+        inherited = getattr(master, "_yaconfiglib_include_encoding", None)
+        loader_instance._yaconfiglib_include_encoding = inherited or encoding
         try:
             if master:
                 loader_instance.anchors = master.anchors
@@ -191,6 +213,12 @@ class YamlConfig(ConfigBackend):
                 raise TypeError(f"Un-supported YAML node {node!r}")
 
             kwargs["master"] = ldr
+            # Absent or null `encoding:` on the include means "whatever this load
+            # call is using"; an explicit one wins for that target.
+            if kwargs.get("encoding") is None and getattr(
+                ldr, "_yaconfiglib_include_encoding", None
+            ):
+                kwargs["encoding"] = ldr._yaconfiglib_include_encoding
             # Route the include through the ConfigLoader driving THIS parse, never
             # one captured at registration time: that leaked the first loader's
             # settings (base_dir, allow_commands, merge, ...) into every later
@@ -204,6 +232,13 @@ class YamlConfig(ConfigBackend):
                     "!include/!load are only available through a yaconfiglib ConfigLoader",
                     node.start_mark,
                 )
+            # Rebase after the allowlist filter and before the loader's cycle
+            # check, so the cycle key is the resolved absolute path: the same
+            # relative name at two depths is two different files.
+            origin = getattr(ldr, "_yaconfiglib_include_origin", None)
+            pathname = _rebase_include_sources(pathname, origin)
+            if args:
+                args = tuple(_rebase_include_sources(arg, origin) for arg in args)
             return active.load(pathname, *args, **kwargs)
 
         for tag in _INCLUDE_TAGS:

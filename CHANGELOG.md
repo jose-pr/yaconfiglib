@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `YamlConfig.load(origin=...)`: the document that relative `!include`/`!load` paths
+  resolve against. Defaults to the file being parsed; a rendered `.j2` template passes
+  its own path.
 - `timeout=` for command sources, e.g. `loader.load("cmd://...", timeout=30)`: after
   that many seconds the command and its child processes are killed and
   `subprocess.TimeoutExpired` is raised. There is still no timeout by default.
@@ -39,6 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- A relative `!include`/`!load` path is now resolved relative to the including file —
+  that file's own directory, at every depth, `.yaml.j2` templates included. Previously it
+  resolved against the loader's `base_dir` (by default the working directory), so a
+  file in a subdirectory could not name its neighbours, and an unrelated file with the
+  same name could be loaded instead. Documents that are not files (`loads()`, `#!`
+  strings, streams, command output) still resolve their includes against `base_dir`,
+  and so do the sources you pass to `load()` yourself. An included source's `pathname`,
+  as seen by `transform` and `key_factory`, is now absolute. Include paths written
+  relative to `base_dir` from a file in a subdirectory must be rewritten relative to
+  that file, or made absolute.
 - The `!include` mapping form accepts only `pathname`, `encoding`, `transform`,
   `key_factory`, `default`, `flatten`, `merge`, `merge_options` and `recursive`;
   other keys are ignored and logged at `WARNING`. `key_factory` there must use the
@@ -59,6 +72,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saw.
 
 ### Fixed
+- An `encoding=` passed to `ConfigLoader.load()`, `ConfigLoader.load_all()` or
+  `yaconfiglib.load()` now applies, at every depth, to the files, templates and
+  commands pulled in with `!include`/`!load` that do not set their own `encoding`.
+  Previously those targets were read with the loader's default, which raised
+  `UnicodeDecodeError` or silently garbled non-ASCII text; the same happened to
+  includes inside an included command's output under `ConfigLoader(encoding=...)`.
+  An include whose real encoding differs from the one passed needs its own
+  `encoding:` in the mapping form.
 - Interpolating YAML that reuses anchors (`&name`/`*name`) no longer slows down
   exponentially with nesting depth: each shared node is interpolated once, and
   every alias refers to the same result. A seven-level document that took about

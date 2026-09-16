@@ -36,7 +36,10 @@ inject_env=False, strict=False, allow_commands=True, sandbox=False)`
 
 All constructor args become instance defaults, overridable per-call. Notable ones:
 
-- `base_dir` — directory relative file-path sources resolve against.
+- `base_dir` — directory the relative file-path sources you pass to `.load()` resolve
+  against; also the anchor for includes inside documents that are not files (`loads()`,
+  `#!` strings, streams, command output). A relative `!include` inside a YAML **file**
+  resolves against that file's own directory instead.
 - `recursive` — whether glob sources (`**/*.yaml`) recurse into subdirectories.
   Default `False`. Forwarded to `parse_sources` by both `.load()` (which also honors a
   per-call `recursive=`) and `.load_all()` (instance setting only — it has no per-call
@@ -80,7 +83,9 @@ All constructor args become instance defaults, overridable per-call. Notable one
   final mapping-of-mappings or sequence-of-sequences by one level (error if the result
   is neither). `transform` is a Jinja2 expression evaluated per-document (as `value`)
   before merging; it is evaluated sandboxed when `sandbox=True` or
-  `allow_commands=False` is in effect. Dict results are wrapped in `DotAccessibleDict`. `merge_options` is a
+  `allow_commands=False` is in effect. `encoding` also applies to every
+  `!include`/`!load` target that names none of its own, at every depth. Dict results are
+  wrapped in `DotAccessibleDict`. `merge_options` is a
   **per-call override only** — it is never written back onto `self.merge_options`.
 - **`.load_as(model_cls, *pathname, **kwargs) -> T`** — `.load(...)` then hydrate
   `model_cls`: a Pydantic `BaseModel` (`model_validate`/`parse_obj`, if pydantic is
@@ -93,7 +98,14 @@ All constructor args become instance defaults, overridable per-call. Notable one
   instead of merging them — for a directory of unrelated config files rather than
   layered ones. `sandbox`/`allow_commands` override the instance settings for this call,
   including nested `!include` targets; the policy is not held while the consumer's loop
-  body runs.
+  body runs. `encoding` also applies to every `!include`/`!load` target that names none
+  of its own, at every depth.
+- **Include resolution** — a relative `!include`/`!load` path inside a YAML *file*
+  resolves against that file's directory, at every depth; absolute paths and command
+  URIs are used as written; globs expand next to the including file; a `.j2` template's
+  includes resolve next to the template; includes inside non-file documents (`loads()`,
+  `#!` strings, streams, command output) resolve against `base_dir`. An included
+  source's `pathname` is absolute.
 - **Include cycles** — a source that (directly or through `!include`) loads itself raises
   `ValueError("include cycle: a -> b -> a")`; with `ignore_error` it goes to the
   predicate like any load error.
@@ -203,12 +215,18 @@ distinguish merge branches.
   `yaml.safe_load` never resolves `!include`, and a parse with no driving `ConfigLoader`
   raises `yaml.constructor.ConstructorError` on the tags. Manual registration is
   unnecessary. `.load(path, encoding=None, master=None,
-  loader_cls=None, path_factory=None, loader=None, **options)`; `master` inherits
-  anchors/aliases from an in-progress parse (used by the tag constructors themselves).
+  loader_cls=None, path_factory=None, loader=None, origin=None, **options)`; `master`
+  inherits anchors/aliases from an in-progress parse (used by the tag constructors
+  themselves) and carries the call's include encoding. `origin` is the document that
+  relative `!include`/`!load` paths resolve against (default: *path* itself; a rendered
+  `.j2` passes its template's path).
   **Gotcha**: nested `!include`/`!load` route through the driving `ConfigLoader` stashed
   on the loader instance as `_yaconfiglib_config_loader` — not the loader captured when
-  the tag was first registered — so each loader's own `base_dir`/`allow_commands`/`merge`
-  apply to its own nested includes.
+  the tag was first registered — so each loader's own `allow_commands`/`merge` apply to
+  its own nested includes, and `base_dir` applies to includes in non-file documents. The
+  resolution anchor (`_yaconfiglib_include_origin`) and the call's encoding
+  (`_yaconfiglib_include_encoding`, inherited through `master`) ride on the same
+  instance.
 - **`TomlConfig`** (`.toml`) — uses stdlib `tomllib` if available, else the `toml`
   package (`yaconfiglib[toml]`).
 - **`JsonConfig`** (`.json`).
