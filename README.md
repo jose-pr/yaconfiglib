@@ -134,6 +134,9 @@ export PATH="$PWD/.venv/3.9-nt-amd64/Scripts:$PATH"
 python -m pytest -q -rs
 ```
 
+[`AGENTS.md`](AGENTS.md) is the orientation file for a checkout: layout,
+environments, CI and the release procedure.
+
 Micro-benchmarks live in `benchmarks/`; see
 [`benchmarks/README.md`](benchmarks/README.md) for how to run them, save a
 result file and compare two runs.
