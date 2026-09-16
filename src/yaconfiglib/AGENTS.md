@@ -295,6 +295,16 @@ distinguish merge branches.
   streams materialize to a `pathlib_next` `MemPath` when available, else a tracked temp
   file (best-effort cleaned at interpreter exit). `memo` dedupes repeat sources across
   recursive calls (mutated in place; logs and skips a duplicate rather than erroring).
+  **Glob expansion is pathlib-next's**, not reimplemented here: a relative pattern is
+  expanded by `base_dir.glob(pattern, recursive=...)` so the base stays literal (a
+  `proj [v2]` base_dir needs no escaping), and an absolute one by `path.glob(None, ...)`
+  (0.9.6+). What this package adds on top: a source is classified as a pattern by its
+  **own** components only (anchor excluded, so `\\?\C:\...` is a literal path); a
+  pattern that names an **existing** path loads literally; **directory** matches are
+  dropped (no backend reads a directory); and matches are **sorted** by component, since
+  `load()` merges in the order it receives and glob promises no order. Dotfiles are
+  matched, per pathlib. Known upstream limit: a `**` crossing a Windows junction can
+  repeat files.
 - **`has_glob_pattern(path) -> bool`** — whether *path* contains glob magic characters.
 
 ## Backends (`backends/`)

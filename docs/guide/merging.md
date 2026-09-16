@@ -17,6 +17,39 @@ Later sources take precedence. With `base.yaml` containing
 containing `{"server": {"port": 443}}`, a `Deep` merge produces
 `{"server": {"host": "0.0.0.0", "port": 443}}`.
 
+## Glob sources
+
+A source containing `*`, `?` or `[` is expanded, and the matches are merged in
+a **fixed order**: path components compared by code point, so the same tree
+layers the same way on every machine and filesystem. Sources keep the order you
+passed them.
+
+```python
+# 00-base.yaml, then 10-env/prod.yaml, then 99-local.yaml — whatever the
+# directory listing happens to return.
+ConfigLoader(base_dir="conf", recursive=True).load("**/*.yaml")
+```
+
+- **`recursive=True`** enables `**`. Write `**/*` (or `**/*.yaml`) to select
+  every file at every depth: a bare `**` follows the running interpreter, as
+  `pathlib` does — it selects files too from Python 3.13, and directories only
+  before, which means it loads nothing on 3.9-3.12 once directories are
+  skipped.
+- **Directory matches are skipped**, so `envs/*` loads the files directly under
+  `envs/` and ignores its subdirectories. A source that *names* a directory
+  outright still fails, as it should.
+- **Dotfiles are matched** by wildcards, as `pathlib` does.
+- **A missing directory matches nothing** rather than raising, and a pattern
+  that matches nothing contributes nothing.
+- **`base_dir` is never pattern text.** A base directory called `proj [v2]`
+  works without escaping, because expansion runs relative to it.
+- **A path that exists is loaded literally.** If a file really is named
+  `z[1].yaml`, that is what loads. For an *absolute* pattern under a directory
+  whose name contains `[`, `*` or `?`, pass that directory as `base_dir` (or
+  `glob.escape` it), since there is no literal base to expand from.
+- On Windows, a `**` source that crosses a **junction** can repeat files; that
+  is an upstream `pathlib-next` limitation, not a yaconfiglib rule.
+
 ## Strategies
 
 | Strategy | Dicts | Lists | Scalars |

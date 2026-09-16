@@ -53,6 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- Glob matches now merge in a fixed order — path components compared by code point — on
+  every operating system and filesystem, where the order used to be whatever the
+  directory listing returned. A layered set of globbed files that relied on listing order
+  may resolve differently; give such files sortable prefixes (`00-base.yaml`,
+  `99-local.yaml`).
+- Wildcards match dotfiles, following `pathlib`.
 - The `yaml` extra now requires PyYAML `>=6.0,<7`, and the `jinja2` and `transform`
   extras Jinja2 `>=3.0,<4`. An environment pinned to Jinja2 2.x or to PyYAML below 6.0
   no longer resolves: Jinja2 2.x cannot import beside MarkupSafe 2.1 or later, and
@@ -168,6 +174,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Glob characters in `base_dir`, in an existing file's name, or in a Windows
+  extended-length (`\\?\`) prefix no longer turn a path into a pattern. A `base_dir`
+  called `proj [v2]` works, a file really named `z[1].json` loads as itself, and
+  `has_glob_pattern()` looks only outside a path's anchor.
+- A glob that matches a directory skips it instead of failing with
+  `NotImplementedError: Not reader for <directory>`, so `envs/*` loads the files under
+  `envs/`.
 - Sources given as a `pathlib.Path` (or any other `os.PathLike`, including a `PurePath`
   or an object that just defines `__fspath__`) now load instead of raising
   `ValueError: unable to handle arg ... of type <class 'pathlib.WindowsPath'>`. They get

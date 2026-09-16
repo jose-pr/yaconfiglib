@@ -13,6 +13,7 @@ import io as _io
 import itertools as _itertools
 import logging
 import os as _os
+import pathlib as _stdlib_pathlib
 import typing as _ty
 import glob as _glob
 import tempfile as _tempfile
@@ -122,12 +123,86 @@ def _rebase(source: object, origin: Path) -> object:
     return str(target)
 
 
+def _caller_components(path) -> "list[str]":
+    r"""The components of *path* that may hold pattern text: the anchor excluded.
+
+    An anchor is path syntax, never a pattern: the ``?`` in an extended-length
+    ``\\?\C:\...`` prefix does not make that path a glob.
+    """
+    segments = getattr(path, "segments", None)
+    if segments is None:
+        if not isinstance(path, _stdlib_pathlib.PurePath):
+            # str, bytes, or any os.PathLike without segments/parts.
+            path = _stdlib_pathlib.PurePath(_os.fsdecode(_os.fspath(path)))
+        components = [str(part) for part in path.parts]
+    else:
+        components = [str(segment) for segment in segments]
+    anchor = str(getattr(path, "anchor", "") or "")
+    if anchor and components and components[0] == anchor:
+        del components[0]
+    return components
+
+
 def has_glob_pattern(path: Path) -> bool:
-    """Check if the given Path contains glob pattern characters."""
-    if hasattr(path, "has_glob_pattern"):
-        return path.has_glob_pattern()
-    # Fallback checking path string representation directly (faster than path.parts)
-    return _glob.has_magic(str(path))
+    """Check whether *path* holds glob pattern characters outside its anchor.
+
+    Accepts a ``str``, a pathlib-next path, or any other ``os.PathLike``.
+
+    The check is done here for every path type rather than delegated to
+    pathlib-next's own ``has_glob_pattern()``, because that one scans the anchor
+    too and so calls every extended-length path a pattern (reported upstream).
+    Delegate again once that is fixed.
+    """
+    # Two regex scans at most, and one for the common literal source: no magic
+    # anywhere means no magic outside the anchor either. Splitting into
+    # components here cost ~3x on the has_glob_pattern benchmark.
+    text = str(path)
+    if not _glob.has_magic(text):
+        return False
+    anchor = getattr(path, "anchor", None)
+    if anchor is None:
+        # A str, bytes or plain os.PathLike: read the anchor once, only now that
+        # magic is known to be present.
+        anchor = _stdlib_pathlib.PurePath(_os.fsdecode(_os.fspath(path))).anchor
+    anchor = str(anchor or "")
+    if anchor and text.startswith(anchor):
+        text = text[len(anchor) :]
+    return _glob.has_magic(text)
+
+
+def _is_relative_source(path) -> bool:
+    """Can this source be expanded as a pattern relative to a base?"""
+    if hasattr(path, "is_absolute"):
+        return not path.is_absolute()
+    return not str(getattr(path, "anchor", "") or "")
+
+
+def _component_key(path) -> "tuple[str, ...]":
+    """Sort key: the path's own components, compared by code point."""
+    return tuple(_caller_components(path))
+
+
+def _ordered_file_matches(matches) -> "list[Path]":
+    """Drop directory matches, then order the rest deterministically.
+
+    Ordering is yaconfiglib's contract, not glob's: ``load()`` merges in the
+    order it receives, so the same tree must layer the same way on every
+    filesystem. Directories are dropped because no backend can read one, while
+    glob is right to return them for a pattern like ``envs/*``.
+    """
+    files = []
+    for match in matches:
+        try:
+            if match.is_dir():
+                logger.debug("skipping directory match %s", match)
+                continue
+        except OSError:
+            # Unreadable or vanished between listing and stat: let the backend
+            # report it, the way a named source would.
+            pass
+        files.append(match)
+    files.sort(key=_component_key)
+    return files
 
 
 def parse_sources(
@@ -206,6 +281,10 @@ def parse_sources(
 
         path_marker = "#!"
         newline = "\n"
+        # Set when the source was joined onto base_dir: expansion then runs from
+        # that base, which is literal by construction, so glob characters IN the
+        # base ("proj [v2]") are never pattern text.
+        glob_base = None
 
         if isinstance(source, bytes):
             path_marker = path_marker.encode(encoding or "utf-8")
@@ -258,8 +337,11 @@ def parse_sources(
                 is_cmd = bool(_CMD_REGEX.match(str(source)))
                 path = source
                 if base_dir and not is_cmd:
+                    was_relative = _is_relative_source(source)
                     try:
                         path = base_dir / source
+                        if was_relative:
+                            glob_base = base_dir
                     except TypeError:
                         # base_dir type is incompatible with this source path type — use source as-is.
                         logger.debug(
@@ -271,8 +353,11 @@ def parse_sources(
                 is_cmd = isinstance(source, str) and bool(_CMD_REGEX.match(source))
                 path = path_factory(source)
                 if base_dir and not is_cmd:
+                    was_relative = _is_relative_source(path)
                     try:
                         path = base_dir / source
+                        if was_relative:
+                            glob_base = base_dir
                     except (TypeError, ValueError):
                         logger.debug(
                             "Cannot join base_dir %r with %r; using path_factory result",
@@ -285,26 +370,41 @@ def parse_sources(
                     logger.warning("ignoring duplicated file %s" % path)
                     continue
                 memo.add(memo_key)
-            if not is_cmd and has_glob_pattern(path):
-                # stdlib glob pattern fallback uses glob.glob on string paths
-                # The test is isinstance, not hasattr("glob"): a STDLIB path has
-                # .glob too, but no `recursive` keyword, and base_dir may be one.
+            # Classified on the SOURCE, not the joined path: only what the
+            # caller wrote can be pattern text. A base_dir named "proj [v2]"
+            # would otherwise turn every source under it into a pattern.
+            if not is_cmd and has_glob_pattern(source):
+                if path.exists():
+                    # A real file really named "z[1].json" is what the caller
+                    # meant; glob.escape output never exists literally.
+                    logger.debug("treating %s as a literal path", path)
+                    yield path
+                    continue
                 if HAS_PATHLIB_NEXT and isinstance(path, Path):
-                    # glob(None) expands the pattern the path itself carries,
-                    # splitting at the first wildcard — so a pattern spanning
-                    # several segments ("envs/*/db.yaml") works, and nothing here
-                    # has to know where the wildcards are. Added in
-                    # pathlib-next 0.9.6, which is why the floor is >=0.9.6:
-                    # 0.9.4 removed the glob("") spelling for pathlib parity, and
-                    # on 0.9.0-0.9.3 glob(None) returns silently partial matches.
-                    yield from path.glob(None, recursive=recursive)
+                    # The test is isinstance, not hasattr("glob"): a STDLIB path
+                    # has .glob too, but no `recursive` keyword, and base_dir may
+                    # be one.
+                    if glob_base is not None:
+                        # Expand from the literal base, passing the caller's own
+                        # pattern text. Multi-segment patterns and `**` are
+                        # handled by pathlib-next. Only a RELATIVE source can go
+                        # this way: glob() rejects a non-relative pattern, which
+                        # is what an absolute include source is after rebasing.
+                        matches = glob_base.glob(str(source), recursive=recursive)
+                    else:
+                        # No base to expand from (an absolute pattern, or no
+                        # base_dir): glob(None) expands the pattern the path
+                        # itself carries, splitting at the first wildcard. Added
+                        # in pathlib-next 0.9.6, which is why the floor is
+                        # >=0.9.6 -- 0.9.4 removed the glob("") spelling for
+                        # pathlib parity, and on 0.9.0-0.9.3 glob(None) returns
+                        # silently partial matches.
+                        matches = path.glob(None, recursive=recursive)
                 else:
-                    # Fallback path traversal
-                    # If it's a standard Path, glob is supported: path.glob(pattern)
-                    # We need to separate directory from the pattern
-                    pattern = path.name
-                    parent_dir = path.parent
-                    yield from parent_dir.glob(pattern)
+                    # Fallback path traversal: stdlib glob takes the pattern as
+                    # an argument, so separate it from its directory.
+                    matches = path.parent.glob(path.name)
+                yield from _ordered_file_matches(matches)
             else:
                 yield path
         elif isinstance(source, _ty.Iterable):

@@ -1,5 +1,8 @@
 # Includes
 
+A glob in an `!include`/`!load` expands next to the including file, and
+follows the rules in [Merging → Glob sources](merging.md#glob-sources).
+
 YAML sources can pull in other configuration files — or the output of
 commands — inline, using `!include`/`!load` tags. This is how
 yaconfiglib supports hiera-like recursive composition from within a
