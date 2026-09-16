@@ -169,6 +169,15 @@ exact key wins, then (with `dig`) a path, else `default`.
 The string walk is inlined in `get()` rather than sharing `_dig` with the tuple form:
 it is the benchmarked read path and a helper call showed up in it.
 
+`__setattr__`/`__delattr__` **refuse** a name the class defines (`items`, `get`,
+`copy`, ...): attribute *reads* of such a name find the method, so allowing the write
+would let reads and writes disagree. Use `cfg[name]` for the key, and
+`object.__setattr__` for a real instance attribute in a subclass. A missing attribute
+raises `AttributeError` naming the actual class, `from None`. `copy()`, `|` and `|=`
+keep the class (values stored as given — conversion is construction-only), `|`/`|=`
+return `NotImplemented` for a non-dict operand, and `dict(cfg)` gives a plain dict.
+`DotAccessibleDict` is exported from `yaconfiglib` and `yaconfiglib.loader`.
+
 Nested mappings are converted **once, at construction** (and once per `load()`, via the
 private `_to_dot_access`), never lazily on read. That is what makes item access,
 attribute access and object identity agree regardless of read order: `cfg["db"] is

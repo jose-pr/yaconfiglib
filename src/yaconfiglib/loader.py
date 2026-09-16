@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextvars
+import copy as _copy
 import dataclasses
 import inspect
 import logging
@@ -44,6 +45,7 @@ __all__ = [
     "ConfigLoader",
     "ConfigLoaderMergeMethod",
     "CommandsDisabledError",
+    "DotAccessibleDict",
     "load",
     "loads",
     "load_as",
@@ -1020,6 +1022,14 @@ class DotAccessibleDict(dict):
 
     Values assigned after construction are stored exactly as given — a plain
     dict written with ``cfg["x"] = {...}`` stays a plain dict.
+
+    A key that collides with something the class defines (``items``, ``get``,
+    ``copy``, ...) is reachable only through item access: attribute *reads*
+    find the method, so attribute writes and deletes of such a name raise
+    `AttributeError` rather than letting the two disagree. A subclass that
+    needs a real instance attribute uses ``object.__setattr__``.
+
+    ``dict(cfg)`` is the way to get a plain `dict` back.
     """
 
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
@@ -1037,11 +1047,58 @@ class DotAccessibleDict(dict):
             return self[name]
         except KeyError:
             raise AttributeError(
-                f"'DotAccessibleDict' object has no attribute '{name}'"
-            )
+                f"{type(self).__name__!r} object has no attribute {name!r}"
+            ) from None
 
     def __setattr__(self, name: str, value: object) -> None:
+        # A dict subclass cannot expose "items", "keys", "get" and friends as
+        # attributes, so refusing the write is the only way attribute reads and
+        # writes cannot disagree about such a name. Use cfg[name] for the key;
+        # object.__setattr__ for a real instance attribute in a subclass.
+        if hasattr(type(self), name):
+            raise AttributeError(
+                f"{name!r} is read-only on {type(self).__name__!r} because the class "
+                f"defines it; use cfg[{name!r}] to set that key"
+            )
         self[name] = value
+
+    def __delattr__(self, name: str) -> None:
+        if hasattr(type(self), name):
+            raise AttributeError(
+                f"{name!r} is read-only on {type(self).__name__!r} because the class "
+                f"defines it; use del cfg[{name!r}] to remove that key"
+            )
+        try:
+            del self[name]
+        except KeyError:
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute {name!r}"
+            ) from None
+
+    def copy(self) -> "DotAccessibleDict":
+        """A shallow copy of the same class — like `dict.copy`, but typed."""
+        return _copy.copy(self)
+
+    def __or__(self, other: typing.Any) -> typing.Any:
+        if not isinstance(other, dict):
+            return NotImplemented
+        merged = type(self)()
+        # Built like dict's own operator: key order of the left operand, then
+        # the right's, right wins. Values are stored as given -- conversion
+        # happens at construction only.
+        for mapping in (self, other):
+            for key, value in mapping.items():
+                dict.__setitem__(merged, key, value)
+        return merged
+
+    def __ror__(self, other: typing.Any) -> typing.Any:
+        if not isinstance(other, dict):
+            return NotImplemented
+        merged = type(self)()
+        for mapping in (other, self):
+            for key, value in mapping.items():
+                dict.__setitem__(merged, key, value)
+        return merged
 
     def get(
         self, key: typing.Hashable, default: object = None, dig: bool = True

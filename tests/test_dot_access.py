@@ -201,3 +201,71 @@ class TestGetPaths:
         # tuple form is the way to reach a nested key containing a dot.
         config = _load({"metadata": {"labels": {"app.kubernetes.io/name": "web"}}})
         assert config.get("metadata.labels.app.kubernetes.io/name", "M") == "M"
+
+
+class TestAttributeProtocol:
+    """Attribute access mirrors item access, except where the class wins."""
+
+    def test_missing_attribute_names_the_real_class(self):
+        config = _load({"a": 1})
+        with pytest.raises(AttributeError, match="DotAccessibleDict"):
+            config.nope
+
+    def test_key_shadowed_by_a_method_is_reachable_by_item_access(self):
+        config = _load({"items": [1, 2], "get": "g", "copy": "c"})
+        assert config["items"] == [1, 2]
+        assert config["get"] == "g"
+        # The attribute still resolves to the method, as it must for a dict.
+        assert callable(config.items)
+
+    @pytest.mark.parametrize("name", ["items", "get", "copy", "keys"])
+    def test_writing_a_shadowed_name_is_refused(self, name):
+        config = _load({"a": 1})
+        with pytest.raises(AttributeError, match="read-only"):
+            setattr(config, name, "x")
+        with pytest.raises(AttributeError, match="read-only"):
+            delattr(config, name)
+
+    def test_subclass_can_still_set_real_instance_attributes(self):
+        class Tagged(DotAccessibleDict):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                object.__setattr__(self, "tag", "t")
+
+        tagged = Tagged({"a": 1})
+        assert tagged.tag == "t"
+        assert "tag" not in tagged
+
+    def test_delattr_removes_a_key(self):
+        config = _load({"a": 1, "b": 2})
+        del config.a
+        assert list(config) == ["b"]
+        with pytest.raises(AttributeError, match="has no attribute"):
+            del config.nope
+
+    def test_copy_keeps_the_class_and_shares_values(self):
+        config = _load({"db": {"host": "h"}})
+        duplicate = config.copy()
+        assert type(duplicate) is DotAccessibleDict
+        assert duplicate["db"] is config["db"]
+
+    def test_or_operators_keep_the_class(self):
+        config = _load({"a": 1})
+        assert type(config | {"b": 2}) is DotAccessibleDict
+        assert (config | {"a": 9})["a"] == 9
+        assert type({"b": 2} | config) is DotAccessibleDict
+        assert ({"a": 9} | config)["a"] == 1
+        assert config.__or__(3) is NotImplemented
+        assert config.__ror__(3) is NotImplemented
+
+    def test_ior_keeps_the_class(self):
+        config = _load({"a": 1})
+        config |= {"b": 2}
+        assert type(config) is DotAccessibleDict
+        assert config["b"] == 2
+
+    def test_exported_from_the_package_root(self):
+        import yaconfiglib
+
+        assert yaconfiglib.DotAccessibleDict is DotAccessibleDict
+        assert "DotAccessibleDict" in yaconfiglib.__all__

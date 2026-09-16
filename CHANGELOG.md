@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `DotAccessibleDict` is importable from `yaconfiglib` (and listed in `__all__`), so the
+  type `load()` returns can be named in annotations and `isinstance` checks.
+- `del config.key` removes that key, mirroring `config.key = value`.
 - `DotAccessibleDict.get()` accepts a **tuple** path — `get(("metadata", "labels",
   "app.kubernetes.io/name"))` — which reaches keys containing dots, integer keys, and
   list indexes without any string parsing.
@@ -59,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- Assigning or deleting an attribute whose name the class defines (`items`, `get`,
+  `copy`, `keys`, ...) now raises `AttributeError` instead of silently storing a key that
+  attribute reads could never return — reads of those names resolve to the method, as they
+  must for a `dict` subclass. Use `config["items"] = ...` for the key, or
+  `object.__setattr__` for a real attribute in a subclass.
 - Values assigned to a loaded configuration after it is built are stored exactly as
   given: `config["x"] = {...}` keeps a plain dict, rather than that dict becoming
   dot-accessible on the next read. Wrap it yourself (`DotAccessibleDict({...})`) if dot
@@ -202,6 +210,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- A missing attribute on a loaded configuration raises `AttributeError` naming the real
+  class, with no chained `KeyError` behind it.
+- `copy()`, `|` and `|=` on a loaded configuration keep returning a dot-accessible
+  mapping instead of a plain `dict`, and `|` defers to the other operand
+  (`NotImplemented`) when it is not a mapping.
 - `DotAccessibleDict.get()` returns the default for a missing **non-string** key instead
   of raising `TypeError: argument of type 'int' is not iterable`.
 - A dotted `get()` returns an explicit `null` leaf as `None`, matching top-level `get()`
