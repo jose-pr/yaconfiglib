@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import types
+import typing as _ty
 
 from jinja2 import Environment
 from jinja2.sandbox import SandboxedEnvironment
@@ -46,16 +47,18 @@ class Jinja2ConfigLoader(ConfigBackend):
 
     def load(
         self,
-        path: Path,
-        encoding: str = None,
+        path: "_ty.Union[Path, str]",
+        encoding: "_ty.Optional[str]" = None,
         loader: ConfigBackend = None,
         environment: Environment = None,
+        path_factory: "_ty.Optional[_ty.Callable[[str], Path]]" = None,
         **kwargs,
     ) -> None:
         """Render *path* as a Jinja2 template, then load the result with the matching backend.
 
         Args:
-            path: Path to the ``.j2``/``.jinja2`` template file.
+            path: Path to the ``.j2``/``.jinja2`` template file, either a
+                ``Path`` or a string (converted via *path_factory*).
             encoding: Text encoding for reading the template and writing
                 the rendered output. Defaults to :attr:`DEFAULT_ENCODING`.
             loader: The parent :class:`~yaconfiglib.loader.ConfigLoader`,
@@ -73,6 +76,8 @@ class Jinja2ConfigLoader(ConfigBackend):
                 :class:`jinja2.sandbox.SandboxedEnvironment`. The legacy
                 keyword ``envoriment`` (a historical typo) is still accepted
                 as a fallback — prefer ``environment``.
+            path_factory: Path constructor used when *path* is a string. It is
+                also forwarded to the resolved backend.
 
         Returns:
             The parsed object produced by the backend matching the
@@ -86,6 +91,9 @@ class Jinja2ConfigLoader(ConfigBackend):
                 source while ``allow_commands=False`` is in effect.
         """
         encoding = encoding or self.DEFAULT_ENCODING
+        # Coerce before anything reads the path or derives a name from it, so
+        # `origin` below is never a bare string either.
+        path = self._coerce_path(path, path_factory)
         # A .j2 body is template code, so it follows the load's effective trust
         # policy: sandboxed whenever commands are disabled or the sandbox is on,
         # and strict whenever strict is in effect.
@@ -116,7 +124,7 @@ class Jinja2ConfigLoader(ConfigBackend):
                 "extension it renders to, as in config.yaml.j2"
             ) from None
         template = jinja2.load_template(
-            path.read_text(encoding=encoding),
+            self._read_text(path, encoding),
             environment=environment,
         )
         context = {"pathname": PosixPathname(path.as_posix())}
@@ -155,6 +163,7 @@ class Jinja2ConfigLoader(ConfigBackend):
             target,
             encoding=encoding,
             loader=parent_loader,
+            path_factory=path_factory,
             **kwargs,
         )
         return rendered

@@ -6,6 +6,9 @@ or you can request one explicitly with `loader="name"`. Every backend
 implements the same [`ConfigBackend`](../api/backends.md) contract, so
 custom backends work identically to the built-in ones.
 
+Files saved with a UTF-8 byte-order mark load normally — the mark is
+ignored rather than becoming part of the first key.
+
 ## YAML
 
 ```python

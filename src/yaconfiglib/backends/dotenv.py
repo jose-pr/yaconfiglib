@@ -112,15 +112,11 @@ class DotenvBackend(ConfigBackend):
             not coerced to other types — quoting is stripped but the
             result stays all-string, matching dotenv conventions.
         """
-        encoding = encoding or self.DEFAULT_ENCODING
         lowercase = self.lowercase if lowercase is None else lowercase
-        if path_factory and not isinstance(path, _Path):
-            path = path_factory(path)
-        elif isinstance(path, str):
-            path = (path_factory or self.DEFAULT_PATH_FACTORY)(path)
+        path = self._coerce_path(path, path_factory)
 
         result: dict[str, str] = {}
-        for line in path.read_text(encoding=encoding).splitlines():
+        for line in self._read_text(path, encoding).splitlines():
             # Skip blanks and comments
             if not line.strip() or _COMMENT_RE.match(line):
                 continue

@@ -1,5 +1,6 @@
 import json
 import re
+import typing as _ty
 
 try:
     from pathlib_next import Path
@@ -18,23 +19,26 @@ class JsonConfig(ConfigBackend):
 
     def load(
         self,
-        path: Path,
-        encoding: str = None,
+        path: "_ty.Union[Path, str]",
+        encoding: "_ty.Optional[str]" = None,
         json_decoder_options: dict = None,
+        path_factory: "_ty.Optional[_ty.Callable[[str], Path]]" = None,
         **options,
     ) -> object:
         """Parse *path* as JSON and return the resulting object.
 
         Args:
-            path: File to parse.
+            path: File to parse, either a ``Path`` or a string (converted
+                via *path_factory*).
             encoding: Text encoding, defaults to :attr:`DEFAULT_ENCODING`.
             json_decoder_options: Extra keyword arguments forwarded to
                 :func:`json.loads` (e.g. ``object_hook``, ``parse_float``).
+            path_factory: Path constructor used when *path* is a string.
         """
-        encoding = encoding or self.DEFAULT_ENCODING
+        path = self._coerce_path(path, path_factory)
 
         return json.loads(
-            path.read_text(encoding=encoding), **(json_decoder_options or {})
+            self._read_text(path, encoding), **(json_decoder_options or {})
         )
 
     def dumps(self, data: object, **options) -> str:

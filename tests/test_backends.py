@@ -903,3 +903,54 @@ class TestDotenvDispatch:
         monkeypatch.setattr(YamlConfig, "PATHNAME_REGEX", None)
         with pytest.raises(NotImplementedError):
             ConfigBackend.get_class_by_path(pathlib.Path("app.env.yaml"))
+
+
+class TestBackendIOContract:
+    @pytest.mark.parametrize(
+        "backend_name, name, body, expected",
+        [
+            ("json", "c.json", '{"a": 1}', {"a": 1}),
+            ("ini", "c.ini", "[s]\na = 1\n", {"s": {"a": "1"}}),
+            ("toml", "c.toml", "a = 1\n", {"a": 1}),
+            ("jinja2", "c.yaml.j2", "a: {{ 1 }}\n", {"a": 1}),
+        ],
+    )
+    def test_str_path_accepted(self, tmp_path, backend_name, name, body, expected):
+        (tmp_path / name).write_text(body)
+        backend = ConfigBackend.get_class_by_name(backend_name)()
+        assert backend.load(str(tmp_path / name)) == expected
+
+    @pytest.mark.parametrize(
+        "tag, backend_name, name, body, expected",
+        [
+            ("!toml", "toml", "c.toml", "a = 1\n", {"a": 1}),
+            ("!json", "json", "c.json", '{"a": 1}', {"a": 1}),
+            ("!ini", "ini", "c.ini", "[s]\na = 1\n", {"s": {"a": "1"}}),
+        ],
+    )
+    def test_backend_as_yaml_tag_constructor(
+        self, tmp_path, tag, backend_name, name, body, expected
+    ):
+        import yaml
+
+        (tmp_path / name).write_text(body)
+
+        class _L(yaml.SafeLoader):
+            pass
+
+        _L.add_constructor(tag, ConfigBackend.get_class_by_name(backend_name)())
+        posix = (tmp_path / name).as_posix()
+        assert yaml.load(f"x: {tag} '{posix}'", Loader=_L) == {"x": expected}
+
+    @pytest.mark.parametrize(
+        "name, body, check",
+        [
+            (".env", "DB_HOST=h\nDB_PORT=5432\n", {"db_host": "h", "db_port": "5432"}),
+            ("c.json", '{"k": 1}', {"k": 1}),
+            ("c.toml", "k = 1\n", {"k": 1}),
+            ("c.ini", "[s]\nk = 1\n", {"s": {"k": "1"}}),
+        ],
+    )
+    def test_utf8_bom_ignored(self, tmp_path, name, body, check):
+        (tmp_path / name).write_bytes(b"\xef\xbb\xbf" + body.encode("utf-8"))
+        assert ConfigLoader(base_dir=tmp_path).load(name) == check

@@ -333,10 +333,23 @@ distinguish merge branches.
   resolution anchor (`_yaconfiglib_include_origin`) and the call's encoding
   (`_yaconfiglib_include_encoding`, inherited through `master`) ride on the same
   instance.
+Every file backend accepts a `str` as well as a `Path` (converted through
+`path_factory=` or `DEFAULT_PATH_FACTORY`), takes `encoding=None` to mean
+`DEFAULT_ENCODING`, and ignores one leading UTF-8 byte-order mark. That is what makes a
+backend instance usable directly as a PyYAML tag constructor, which hands `load()` a
+bare string and no encoding. Both rules live in one place — the protected
+`ConfigBackend._coerce_path()` and `ConfigBackend._read_text()`; a new file backend
+should call them rather than `path.read_text()`. `DEFAULT_ENCODING` stays `utf-8` and
+must not become `utf-8-sig`: it is also used to *write* an in-memory source's `#!`
+marker, and would add a BOM there.
+
 - **`TomlConfig`** (`.toml`) — uses stdlib `tomllib` if available, else the `toml`
   package (`yaconfiglib[toml]`).
-- **`JsonConfig`** (`.json`).
-- **`IniConfig`** (`.ini`/`.cfg`).
+  `.load(path, encoding=None, path_factory=None, **options)`.
+- **`JsonConfig`** (`.json`) —
+  `.load(path, encoding=None, json_decoder_options=None, path_factory=None, **options)`.
+- **`IniConfig`** (`.ini`/`.cfg`) —
+  `.load(path, encoding=None, path_factory=None, **options)`.
 - **`DotenvBackend`** (`NAME="dotenv"`, `.env`, `*.env`, `.env.<stage>[.<more>]`) —
   strips inline `#` comments outside quoted values; preserves `#` inside quotes. It gives
   way when the name's final suffix belongs to another format (`app.env.yaml` → YAML,

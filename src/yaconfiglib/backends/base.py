@@ -105,6 +105,34 @@ class ConfigBackend(_ty.Protocol):
     DEFAULT_ENCODING = "utf-8"
     DEFAULT_PATH_FACTORY = _LocalPath
 
+    def _coerce_path(
+        self,
+        path: _ty.Union[_Path, str],
+        path_factory: _ty.Optional[_ty.Callable[[str], _Path]] = None,
+    ) -> _Path:
+        """Turn a string *path* into a path object, one rule for every backend.
+
+        A backend that reads files must accept a ``str``: a PyYAML tag
+        constructor hands one over, and so does any direct call.
+        """
+        if path_factory and not isinstance(path, _Path):
+            return path_factory(path)
+        if isinstance(path, str):
+            return (path_factory or self.DEFAULT_PATH_FACTORY)(path)
+        return path
+
+    def _read_text(self, path: _Path, encoding: _ty.Optional[str] = None) -> str:
+        """Read *path* as text, dropping a leading byte-order mark.
+
+        A U+FEFF left at the start of decoded text is always a BOM artifact —
+        the character has no other use there — so one is stripped whatever the
+        encoding. Decoding with ``utf-8-sig`` instead is not an option:
+        :attr:`DEFAULT_ENCODING` is also used to *write* the ``#!`` marker of
+        an in-memory source, and ``utf-8-sig`` would add a BOM there.
+        """
+        text = path.read_text(encoding=encoding or self.DEFAULT_ENCODING)
+        return text[1:] if text.startswith("\ufeff") else text
+
     def __call__(self, *args, **kwds):
         """Dispatch to :meth:`_yaml_tag_constructor` when used as a PyYAML tag constructor.
 

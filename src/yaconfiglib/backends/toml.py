@@ -1,4 +1,5 @@
 import re
+import typing as _ty
 
 try:
     import tomllib as toml
@@ -24,6 +25,20 @@ class TomlConfig(ConfigBackend):
 
     PATHNAME_REGEX = re.compile(r".*\.toml$", re.IGNORECASE)
 
-    def load(self, path: Path, encoding: str, **kwargs):
-        """Parse *path* as TOML and return the resulting dict."""
-        return toml.loads(path.read_text(encoding=encoding or self.DEFAULT_ENCODING))
+    def load(
+        self,
+        path: "_ty.Union[Path, str]",
+        encoding: "_ty.Optional[str]" = None,
+        path_factory: "_ty.Optional[_ty.Callable[[str], Path]]" = None,
+        **options,
+    ):
+        """Parse *path* as TOML and return the resulting dict.
+
+        Args:
+            path: File to parse, either a ``Path`` or a string (converted
+                via *path_factory*).
+            encoding: Text encoding, defaults to :attr:`DEFAULT_ENCODING`.
+            path_factory: Path constructor used when *path* is a string.
+        """
+        path = self._coerce_path(path, path_factory)
+        return toml.loads(self._read_text(path, encoding))

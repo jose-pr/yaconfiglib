@@ -1,4 +1,5 @@
 import re
+import typing as _ty
 from configparser import ConfigParser
 
 try:
@@ -25,20 +26,23 @@ class IniConfig(ConfigBackend):
 
     def load(
         self,
-        path: Path,
-        encoding: str = None,
+        path: "_ty.Union[Path, str]",
+        encoding: "_ty.Optional[str]" = None,
+        path_factory: "_ty.Optional[_ty.Callable[[str], Path]]" = None,
         **options: object,
     ) -> object:
         """Parse *path* as INI and return a ``{section: {key: value}}`` dict.
 
         Args:
-            path: File to parse.
+            path: File to parse, either a ``Path`` or a string (converted
+                via *path_factory*).
             encoding: Text encoding, defaults to :attr:`DEFAULT_ENCODING`.
+            path_factory: Path constructor used when *path* is a string.
             **options: Accepts ``ini_default_section`` — the section name
                 used for :class:`~configparser.ConfigParser`'s
                 ``default_section``, defaults to :attr:`DEFAULT_SECTION`.
         """
-        encoding = encoding or self.DEFAULT_ENCODING
+        path = self._coerce_path(path, path_factory)
 
         parser_args = dict(
             default_section=options.setdefault(
@@ -47,7 +51,7 @@ class IniConfig(ConfigBackend):
         )
 
         parser = ConfigParser(**parser_args)
-        parser.read_string(path.read_text(encoding=encoding), path.name)
+        parser.read_string(self._read_text(path, encoding), path.name)
         result = {}
         for section in parser.sections():
             d = result[section] = {}

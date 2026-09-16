@@ -128,6 +128,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- JSON, TOML, INI and `.env` files saved with a UTF-8 byte-order mark now load. The
+  mark previously dropped the first `.env` variable, prefixed the first TOML key with an
+  invisible character, and made JSON and INI raise.
+- `TomlConfig`, `JsonConfig`, `IniConfig` and `Jinja2ConfigLoader` accept a `str` path
+  and an omitted `encoding`, so a backend instance can be registered directly as a
+  PyYAML tag constructor (`!toml`, `!json`, `!ini`), which is how the documentation says
+  to use them. They also accept `path_factory=`, like the other file backends.
 - Files whose name ends in another format's suffix after `.env` are parsed by that
   format's backend: `app.env.yaml` as YAML, `settings.env.json` as JSON, `x.env.toml` as
   TOML, `x.env.ini` as INI, and `.env.j2` or `config.env.yaml.j2` rendered as a template
