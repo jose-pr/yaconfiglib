@@ -1311,3 +1311,19 @@ class TestEnvVarCollisions:
         monkeypatch.setattr(env_module, "_ENV_KEYS_CASE_INSENSITIVE", False)
         monkeypatch.setenv("ZZENV7_LOWER", "x")
         assert EnvVarBackend().load(prefix="zzenv7_") == {}
+
+
+class TestPythonBackendDocs:
+    def test_documented_layering_example(self, tmp_path):
+        from yaconfiglib import ConfigLoaderMergeMethod
+        from yaconfiglib.backends.python_backend import PythonBackend
+
+        (tmp_path / "base.yaml").write_text("base_key: from_base\noverride_key: base\n")
+        loader = ConfigLoader(base_dir=tmp_path)
+        base = loader.load("base.yaml")
+        override = loader.load(loader=PythonBackend({"override_key": "override_value"}))
+        config = ConfigLoaderMergeMethod.Deep(base, override)
+        assert config == {
+            "base_key": "from_base",
+            "override_key": "override_value",
+        }

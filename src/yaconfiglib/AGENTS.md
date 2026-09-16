@@ -421,7 +421,11 @@ marker, and would add a BOM there.
   Explicit `format=`, `+fmt` and shebang routes keep lenient dotenv and propagate a
   single candidate's parse error.
 - **`PythonBackend`** (`NAME="python"`) — passes an in-memory Python object straight
-  through as the parsed document.
+  through as the parsed document. Use it **on its own** —
+  `loader.load(loader=PythonBackend(data))`, no pathname — and merge the result with the
+  file loads afterwards. A backend instance is not a valid *source*, and `loader=` applies
+  to every source in a call, so pairing it with a file either raises or silently discards
+  the file.
 - **`Jinja2ConfigLoader`** (`NAME="jinja2"`, `.j2`/`.jinja2`) — renders the file as a
   Jinja2 template, then parses the result with the backend matching the name minus the
   suffix (`settings.yaml.j2` → YAML). `.load(path, encoding=None, loader=None,

@@ -158,6 +158,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Corrected the `PythonBackend` examples in the backends guide and the class docstring.
+  Passing the backend positionally raised `ValueError`, and `loader=PythonBackend(...)`
+  alongside a file silently ignored the file. Load the in-memory object on its own and
+  merge it with the file result, as the documentation now shows.
 - A lowercase `prefix` now matches on Windows, where environment names are
   case-insensitive and `os.environ` upper-cases them; `prefix="app_"` used to find
   nothing there.

@@ -176,14 +176,23 @@ string. Use `cmd+yaml://` to force a YAML scalar.
 
 ## In-memory Python objects
 
-`PythonBackend` wraps an already-parsed object so it can be spliced into a
-loader chain without writing a file:
+`PythonBackend` wraps an already-parsed object so it can be layered over
+files without writing one:
 
 ```python
+from yaconfiglib import ConfigLoader, ConfigLoaderMergeMethod
 from yaconfiglib.backends.python_backend import PythonBackend
 
-loader.load("base.yaml", loader=PythonBackend({"override_key": "override_value"}))
+loader = ConfigLoader()
+base = loader.load("base.yaml")
+override = loader.load(loader=PythonBackend({"override_key": "override_value"}))
+config = ConfigLoaderMergeMethod.Deep(base, override)
+# {"base_key": "from_base", "override_key": "override_value"}
 ```
+
+`loader=` selects the backend for **every** source in a call, so do not
+combine `loader=PythonBackend(...)` with file sources — the files would be
+handed to this backend, which ignores them.
 
 ## Jinja2-templated sources
 

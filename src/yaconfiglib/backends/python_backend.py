@@ -17,13 +17,21 @@ __all__ = ["PythonBackend"]
 class PythonBackend(ConfigBackend):
     """Wraps a plain Python object (dict, list, etc.) as a config source.
 
-    Useful for injecting computed or in-memory configuration into a loader
-    chain without writing a file::
+    Useful for layering computed or in-memory configuration over files
+    without writing one. ``loader=`` selects the backend for *every* source
+    in a call, so load the object on its own and merge the results::
 
-        loader.load(
-            "base.yaml",
-            PythonBackend({"override_key": "override_value"}),
+        from yaconfiglib import ConfigLoader, ConfigLoaderMergeMethod
+
+        loader = ConfigLoader()
+        base = loader.load("base.yaml")
+        override = loader.load(
+            loader=PythonBackend({"override_key": "override_value"})
         )
+        config = ConfigLoaderMergeMethod.Deep(base, override)
+
+    Do not combine ``loader=PythonBackend(...)`` with file sources in one
+    call: the files would be read by this backend, which ignores them.
     """
 
     PATHNAME_REGEX = None
@@ -41,8 +49,7 @@ class PythonBackend(ConfigBackend):
 
         If constructed with ``data=...``, that object is always returned.
         Otherwise *path* itself is returned as-is, letting this backend
-        double as a passthrough for already-parsed data injected into a
-        loader chain.
+        double as a passthrough for already-parsed data.
         """
         # If called as a YAML tag constructor path will be a string/Path;
         # otherwise callers pass the data object directly via __init__.
