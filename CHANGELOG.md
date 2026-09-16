@@ -164,6 +164,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- The security guide now states that `!include` can read any local file the
+  process can (absolute paths and `..` are not confined to `base_dir`), even with
+  `allow_commands=False` and `sandbox=True`: those controls stop code execution and
+  template injection, not file disclosure. Do not return or log an untrusted
+  config verbatim.
+- The security guide no longer claims the `python` backend executes Python; it
+  passes a caller-supplied object through unchanged.
 - Corrected the `PythonBackend` examples in the backends guide and the class docstring.
   Passing the backend positionally raised `ValueError`, and `loader=PythonBackend(...)`
   alongside a file silently ignored the file. Load the in-memory object on its own and
@@ -341,14 +348,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RecursionError`, or with `ignore_error=True` returned a deeply nested partial
   result.
 
-### Documentation
-- The security guide now states that `!include` can read any local file the
-  process can (absolute paths and `..` are not confined to `base_dir`), even with
-  `allow_commands=False` and `sandbox=True`: those controls stop code execution and
-  template injection, not file disclosure. Do not return or log an untrusted
-  config verbatim.
-- The security guide no longer claims the `python` backend executes Python; it
-  passes a caller-supplied object through unchanged.
 
 ## [0.11.2] - 2026-08-16
 
