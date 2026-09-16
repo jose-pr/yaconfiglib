@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `parse_sources(on_error=...)`: a callback `(error, directory) -> bool` called when glob
+  expansion cannot list a directory. Return `True` to skip that directory and keep
+  expanding; anything falsy lets the `OSError` propagate. It is asked once per directory,
+  and a missing or non-directory parent is not reported at all (it simply matches
+  nothing).
 - `yaconfiglib.ConfigError` and the subclasses `ConfigValueError`, `ConfigTypeError`,
   `UnsupportedFormatError`, `UnknownLoaderError` and `CommandsDisabledError`. Each is also
   an instance of the builtin exception the same condition raised before, so existing
@@ -71,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- The `pathlib-next` floor is now `>=0.9.7,<0.10` (was `>=0.9.6`), because glob expansion
+  now uses its `glob(on_error=)` hook, added in 0.9.7.
 - An `ignore_error` predicate now always receives `phase=`, `path=` and `loader=` by
   keyword, in every phase. `phase` is `"load"`, `"include"`, `"merge"` or
   `"interpolate"`; `load()`'s interpolation offer adds `result=` and `load_all()` adds
@@ -254,6 +261,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- A directory that glob expansion cannot list is no longer skipped in silence: the
+  `OSError` is raised, and `ignore_error` is consulted for it with `phase="glob"` and
+  `path=` that directory. Previously such a directory vanished from the expansion without
+  an error and without reaching `ignore_error`, so a whole layer of configuration could
+  disappear — and a glob could not be used to assert that a layer was read. Skipping one
+  unreadable directory still loads the rest of the pattern.
 - Load errors now name the file that failed. This covers YAML (which reported
   `in "<unicode string>"`, so a failing member of a glob was unidentifiable), JSON, TOML,
   INI (the full path, not just the basename), a file the encoding cannot decode (with a

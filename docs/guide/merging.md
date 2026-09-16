@@ -47,12 +47,13 @@ ConfigLoader(base_dir="conf", recursive=True).load("**/*.yaml")
   `z[1].yaml`, that is what loads. For an *absolute* pattern under a directory
   whose name contains `[`, `*` or `?`, pass that directory as `base_dir` (or
   `glob.escape` it), since there is no literal base to expand from.
-- **A directory that cannot be listed contributes nothing, silently.** If a
-  directory under a glob is unreadable, its files are skipped without an error
-  and without reaching `ignore_error` — the expansion machinery swallows the
-  `OSError` before yaconfiglib sees it. A glob is therefore not a way to assert
-  that a layer of configuration was read; name such files explicitly if their
-  absence must be an error.
+- **A directory that cannot be listed raises.** If a directory under a glob is
+  unreadable (permission denied, say), the `OSError` is raised rather than the
+  files quietly vanishing. `ignore_error` can skip it — the predicate is called
+  with `phase="glob"` and `path=` that directory, once per directory — and the
+  rest of the pattern still loads, so one locked subdirectory does not drop a
+  whole layer. A parent that does not exist, or is not a directory, still just
+  matches nothing.
 - **The same file loads once**, however it was named: `conf/app.yaml`,
   `./conf/app.yaml`, `conf/../conf/app.yaml` and (on Windows) `conf/App.yaml`
   are one file. The key is lexical — no symlink resolution — so two symlinked

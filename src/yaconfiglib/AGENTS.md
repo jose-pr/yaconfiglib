@@ -93,8 +93,10 @@ All constructor args become instance defaults, overridable per-call. Notable one
 - `ignore_error` — `bool` (ignore/re-raise every failure uniformly) or a predicate
   `(error, *, phase, path, loader, **extra) -> bool`. **Every offer passes those three
   keywords**, so one predicate works in every phase: `phase` is `"load"`, `"include"`,
-  `"merge"` or `"interpolate"`; `path` is the source or `None`; extras are `result=`
-  (interpolate) and `value=` (`load_all`). A failure inside an include is offered **once
+  `"merge"`, `"interpolate"` or `"glob"` (a directory that could not be listed while
+  expanding a pattern — `path` is that directory, and skipping it still loads the rest of
+  the pattern); `path` is the source or `None`; extras are `result=` (interpolate) and
+  `value=` (`load_all`). A failure inside an include is offered **once
   per level** — the included file as `"load"`, then each including file as `"include"`,
   the same exception object each time. Every offer logs at DEBUG; a skip under the **bool**
   form also logs at WARNING naming source, phase and error **type** (never the message
@@ -364,7 +366,7 @@ distinguish merge branches.
 ## Source resolution (`utils/source.py`)
 
 - **`parse_sources(sources, base_dir=None, encoding=None, memo=None, path_factory=None,
-  recursive=None) -> Iterator[Path]`** — flattens `sources` (paths — a `str`, a
+  recursive=None, on_error=None) -> Iterator[Path]`** — flattens `sources` (paths — a `str`, a
   pathlib-next path, or any other `os.PathLike` such as `pathlib.Path`; glob patterns,
   command URIs — yielded as a `CommandSource`, a `str` subclass carrying the text
   **verbatim** (a path factory would rewrite `/` on Windows and collapse `//`, `/./`
@@ -408,7 +410,14 @@ distinguish merge branches.
   **Glob expansion is pathlib-next's**, not reimplemented here: a relative pattern is
   expanded by `base_dir.glob(pattern, recursive=...)` so the base stays literal (a
   `proj [v2]` base_dir needs no escaping), and an absolute one by `path.glob(None, ...)`
-  (0.9.6+). What this package adds on top: a source is classified as a pattern by its
+  (0.9.6+). **`on_error(error, directory) -> bool`** is called when a directory cannot be
+  listed: return `True` to skip it (logged at DEBUG) and keep expanding, anything falsy to
+  let the `OSError` propagate. Without it the directory is skipped silently, as pathlib
+  does. It is asked **once per directory** — pathlib-next reports the same one twice for a
+  `**` pattern — and `FileNotFoundError`/`NotADirectoryError` are never offered, since a
+  missing or non-directory parent simply matches nothing. It rides on
+  `glob(on_error=)`, added in pathlib-next **0.9.7**, which is why the floor is `>=0.9.7`;
+  the stdlib fallback has no such hook. What this package adds on top: a source is classified as a pattern by its
   **own** components only (anchor excluded, so `\\?\C:\...` is a literal path); a
   pattern that names an **existing** path loads literally; **directory** matches are
   dropped (no backend reads a directory); and matches are **sorted** by component, since
