@@ -230,8 +230,13 @@ What confinement does **not** cover, by design:
   write into `conf` can still point a configuration elsewhere — see
   [reading local files](#reading-local-files);
 - in-memory `#!` documents and command sources are exempt (a command is
-  governed by `allow_commands`), and a remote URI source is refused rather
-  than checked.
+  governed by `allow_commands`), as is a stream with no file behind it;
+- a `scheme://…` **string** is not a remote path with the default
+  `path_factory` — pathlib-next's URI paths need its URI extras, which this
+  package does not require — so such a source is treated as an ordinary
+  relative filename and checked like any other local path. Only a genuinely
+  non-local path object, which takes a `path_factory` of your own, is refused
+  outright.
 
 Still up to you:
 - Prefer a fixed `loader="yaml"` (or the specific format) over auto-detection so

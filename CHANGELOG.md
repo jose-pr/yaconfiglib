@@ -47,8 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than disabling the control. Containment is decided on the **logical** path
   (absolute, `..`-resolved, case-folded where the platform is): symlinks are deliberately
   not resolved, so a link inside a root may point outside it — the boundary is write
-  access to a root. Command sources and in-memory `#!` documents are exempt; a remote URI
-  source is refused. Off by default, so no existing load changes.
+  access to a root. Command sources and in-memory `#!` documents are exempt. A path object
+  that is not a local filesystem path is refused, being inside no local root — note that a
+  `scheme://…` *string* is not one of those with the default `path_factory`, which builds
+  local paths: it is checked as the relative filename it becomes. Off by default, so no existing load changes.
 - `bound_loops=` on `ConfigLoader` and `parse_sources`: descend any one directory at most
   once per `**`. It bounds a **Windows junction loop** — a junction pointing at one of its
   own ancestors — which otherwise makes a recursive glob walk the loop until the

@@ -359,8 +359,12 @@ def _confinement_kind(path: object) -> str:
     * ``"check"`` — a local filesystem path, which is what every ordinary file
       source resolves to.
     * ``"remote"`` — any other path type, such as a pathlib-next ``sftp://``
-      URI. It is inside no local root by definition, so confinement refuses it
-      rather than leaving a category the caller has to reason about.
+      URI path. It is inside no local root by definition, so confinement
+      refuses it rather than leaving a category the caller has to reason
+      about. Reached only when a *path object* of that kind arrives: with the
+      default ``path_factory`` (``LocalPath``) a ``scheme://…`` **string**
+      becomes an ordinary relative local path and is ``"check"``-ed, because
+      pathlib-next's URI paths need extras this package does not require.
     """
     if isinstance(path, CommandSource):
         return "exempt"
