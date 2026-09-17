@@ -265,6 +265,7 @@ def _interpolate_document(
     environment,
     extra_globals: typing.Mapping,
     strict: bool,
+    on_error: typing.Optional[typing.Callable[[BaseException, tuple], bool]] = None,
 ) -> object:
     """Render every template in *value* once, against the whole document.
 
@@ -276,9 +277,16 @@ def _interpolate_document(
     *extra_globals* (the ``inject_env`` snapshot) wins over a document key of
     the same name. A reference to a key that is still being resolved uses that
     key's current value; a cycle between keys raises when *strict* is set.
+
+    *on_error* is offered every failure, as ``on_error(error, keypath)``, once
+    where it happens: returning True leaves that one value as its template text
+    and rendering continues, so a single bad template no longer costs the rest
+    of the document.
     """
     if not isinstance(value, typing.Mapping):
-        return jinja2.interpolate(value, dict(extra_globals), environment=environment)
+        return jinja2._interpolate(
+            value, dict(extra_globals), environment, {}, on_error=on_error
+        )
 
     memo: dict = {}
     references: dict = {}
@@ -293,10 +301,16 @@ def _interpolate_document(
         if key in resolving:
             if strict:
                 chain = resolving[resolving.index(key) :] + [key]
-                raise ConfigValueError(
+                error = ConfigValueError(
                     "interpolation reference cycle: "
                     + " -> ".join(str(item) for item in chain)
                 )
+                _add_error_context(error, key=(key,))
+                # Offered like any other interpolation failure. A skip leaves
+                # this key's merged, unrendered value and resolution goes on.
+                if on_error is not None and on_error(error, (key,)):
+                    return
+                raise error
             return  # lenient: the reference sees the key's current value
         resolving.append(key)
         try:
@@ -305,7 +319,14 @@ def _interpolate_document(
                     resolve(name)
         finally:
             resolving.pop()
-        result = jinja2._interpolate(value[key], scope, environment, memo)
+        result = jinja2._interpolate(
+            value[key],
+            scope,
+            environment,
+            memo,
+            keypath=(key,),
+            on_error=on_error,
+        )
         rendered[key] = result
         if key not in extra_globals:
             scope[key] = result
@@ -316,7 +337,9 @@ def _interpolate_document(
     # Keys that are themselves templates render last, so they see the document's
     # rendered values; insertion order is preserved.
     return {
-        jinja2._interpolate(key, scope, environment, memo): rendered[key]
+        jinja2._interpolate(
+            key, scope, environment, memo, keypath=(key,), on_error=on_error
+        ): rendered[key]
         for key in value
     }
 
@@ -995,24 +1018,24 @@ class ConfigLoader(ConfigBackend):
                 result = results
 
             if interpolate:
-                try:
-                    result = _interpolate_document(
-                        result,
-                        environment=jinja2.get_environment(
-                            self.strict, effective_sandbox
-                        ),
-                        extra_globals=(
-                            {"env": _environ_snapshot()} if self.inject_env else {}
-                        ),
-                        strict=current_policy()[2],
-                    )
-                except (
-                    Exception
-                ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
-                    if not self._offer_error(
-                        error, phase="interpolate", path=None, result=result
-                    ):
-                        raise
+                # No try around the whole document: each failing value is
+                # offered where it occurs, with its key path, and a skip costs
+                # only that value.
+                result = _interpolate_document(
+                    result,
+                    environment=jinja2.get_environment(self.strict, effective_sandbox),
+                    extra_globals=(
+                        {"env": _environ_snapshot()} if self.inject_env else {}
+                    ),
+                    strict=current_policy()[2],
+                    on_error=lambda error, key: self._offer_error(
+                        error,
+                        phase="interpolate",
+                        path=None,
+                        key=key,
+                        result=result,
+                    ),
+                )
 
             # Make every nested mapping dot-accessible, once, here. This also
             # covers a list or Hash/List result, whose members are mappings.
@@ -1104,6 +1127,26 @@ class ConfigLoader(ConfigBackend):
             text_fallback=True,
         ):
             value = None
+            # Set when an interpolation failure was already offered and
+            # declined, so the handler below re-raises it without asking a
+            # second time. A local flag, not something read off the error: a
+            # load-phase error could one day carry a key path too.
+            declined_interpolation = False
+
+            def _offer_interpolation(error, key, path=path):
+                nonlocal declined_interpolation
+                if self._offer_error(
+                    error,
+                    phase="interpolate",
+                    path=path,
+                    key=key,
+                    value=value,
+                    source=str(path),
+                ):
+                    return True
+                declined_interpolation = True
+                return False
+
             try:
                 # The policy covers this source's load and interpolation only and
                 # is exited before yield: a generator runs in its consumer's
@@ -1130,6 +1173,7 @@ class ConfigLoader(ConfigBackend):
                                 {"env": _environ_snapshot()} if self.inject_env else {}
                             ),
                             strict=current_policy()[2],
+                            on_error=_offer_interpolation,
                         )
                 value = _to_dot_access(value, {})
                 yield value
@@ -1137,6 +1181,8 @@ class ConfigLoader(ConfigBackend):
             except (
                 Exception
             ) as error:  # noqa: BLE001 - feeds the ignore_error predicate
+                if declined_interpolation:
+                    raise
                 if not self._offer_error(
                     error, phase=_error_phase(error), path=path, value=value
                 ):

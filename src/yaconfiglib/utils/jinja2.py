@@ -15,6 +15,8 @@ from collections import OrderedDict as _OrderedDict
 
 from jinja2 import Environment, Template
 
+from .. import errors as _errors
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_ENV = Environment(extensions=["jinja2.ext.do"])
@@ -201,6 +203,23 @@ def eval(
     return lambda **kwargs: _eval(**{**globals, **kwargs})
 
 
+def _dotted(keypath: tuple) -> str:
+    """A key path as ``db.hosts[0].name``, or ``<document>`` when empty."""
+    if not keypath:
+        return "<document>"
+    return _errors._render_key(keypath)
+
+
+def _attribute_render_error(error: BaseException, keypath: tuple) -> None:
+    """Record *keypath* on *error*, unless a deeper one is already there.
+
+    The innermost path wins: a container's own failure is reported at the value
+    that actually failed, not at the ancestor that was walking it.
+    """
+    if getattr(error, "config_key", None) is None and keypath:
+        _errors._add_error_context(error, key=keypath)
+
+
 def interpolate(
     data: object, globals: dict | None = None, environment: Environment | None = None
 ) -> object:
@@ -226,6 +245,13 @@ def interpolate(
     A container reached more than once (YAML anchors/aliases share one object)
     is walked once and every reference gets the same result, so the walk is
     linear in the number of distinct nodes and self-referential data terminates.
+
+    **A raised error never removes an entry.** Each container is rendered into
+    a staging list and written back only once every member succeeded, so a
+    failure leaves that container exactly as it was; containers already
+    finished keep their rendered values. The error carries `config_key`, the
+    path to the value that failed (``("database", "password")``), which is also
+    rendered into its message.
     """
     return _interpolate(data, {} if globals is None else globals, environment, {})
 
@@ -235,7 +261,23 @@ def _interpolate(
     globals: dict,
     environment: Environment | None,
     memo: dict,
+    *,
+    keypath: tuple = (),
+    on_error: "_ty.Optional[_ty.Callable[[BaseException, tuple], bool]]" = None,
 ) -> object:
+    """Render *data*, recording where a failure happened.
+
+    *keypath* is the path of *data* within the document, used to attribute an
+    error and to say which value a DEBUG line is about. It is built eagerly,
+    one tuple per entry: passing the parent path and this value's own segment
+    separately measured 2-3% faster on the interpolation benchmark, and was
+    rejected because forgetting to pass the segment reports the **parent's**
+    path — a wrong key in an error message is the defect this exists to fix.
+
+    *on_error* is called as ``on_error(error, keypath)`` for a value that fails
+    to render: returning True keeps that value's original text and rendering
+    continues, anything else re-raises. Without it every failure propagates.
+    """
     # memo maps id(original container) -> (original, result). Holding the
     # original keeps it alive, so its id() cannot be reused within one pass.
     if isinstance(data, str):
@@ -247,17 +289,30 @@ def _interpolate(
         # Only a trailing newline may surround a bare expression: a YAML `|`/`>`
         # block adds one, while spaces inside a quoted scalar are deliberate text.
         stripped = data.rstrip("\r\n")
-        # Pure Jinja2 expression: {{ expr }} — evaluate to preserve type.
-        if stripped.startswith("{{") and stripped.endswith("}}"):
-            inner = stripped[2:-2].strip()
-            if "{{" not in inner:
-                result = eval(inner, environment=environment)(**globals)
-                logger.debug("interpolated expression %r -> %r", data, result)
-                return result
-        result = compile(data, environment=environment)(**globals)
-        if result != data:
-            logger.debug("interpolated template %r -> %r", data, result)
-        return result
+        try:
+            # Pure Jinja2 expression: {{ expr }} — evaluate to preserve type.
+            if stripped.startswith("{{") and stripped.endswith("}}"):
+                inner = stripped[2:-2].strip()
+                if "{{" not in inner:
+                    result = eval(inner, environment=environment)(**globals)
+                    # The TEMPLATE, never the result: a template holds
+                    # `{{ env.DB_PASSWORD }}`, the result holds the password.
+                    logger.debug(
+                        "interpolated %s from expression %r", _dotted(keypath), data
+                    )
+                    return result
+            result = compile(data, environment=environment)(**globals)
+            if result != data:
+                logger.debug("interpolated %s from template %r", _dotted(keypath), data)
+            return result
+        except Exception as error:  # noqa: BLE001 - feeds the ignore_error predicate
+            # Deliberately every type: an expression can raise any Python
+            # exception (`{{ 1/0 }}` raises ZeroDivisionError, not a Jinja2
+            # error), and the predicate contract covers all of them.
+            _attribute_render_error(error, keypath)
+            if on_error is not None and on_error(error, keypath):
+                return data
+            raise
 
     if isinstance(data, _ty.Mapping):
         seen = memo.get(id(data))
@@ -267,10 +322,32 @@ def _interpolate(
         if not isinstance(data, _ty.MutableMapping):
             data = dict(data)
         memo[id(original)] = (original, data)
-        for key in list(data.keys()):
-            value = data.pop(key)
-            new_key = _interpolate(key, globals, environment, memo)
-            data[new_key] = _interpolate(value, globals, environment, memo)
+        # Staged: render every pair before touching the container. Popping each
+        # key and re-inserting it lost the key outright when the render raised,
+        # and took its whole section down with it at every depth.
+        staged = []
+        for key, value in list(data.items()):
+            # A templated key is attributed under the parent path plus the raw
+            # key, which is the only name it has before it renders.
+            new_key = _interpolate(
+                key,
+                globals,
+                environment,
+                memo,
+                keypath=keypath + (key,),
+                on_error=on_error,
+            )
+            new_value = _interpolate(
+                value,
+                globals,
+                environment,
+                memo,
+                keypath=keypath + (key,),
+                on_error=on_error,
+            )
+            staged.append((new_key, new_value))
+        data.clear()
+        data.update(staged)
         return data
 
     if isinstance(data, _ty.Iterable) and not isinstance(data, (str, bytes)):
@@ -281,8 +358,18 @@ def _interpolate(
         if not isinstance(data, _ty.MutableSequence):
             data = list(data)
         memo[id(original)] = (original, data)
-        for idx, value in enumerate(data):
-            data[idx] = _interpolate(value, globals, environment, memo)
+        staged = [
+            _interpolate(
+                value,
+                globals,
+                environment,
+                memo,
+                keypath=keypath + (idx,),
+                on_error=on_error,
+            )
+            for idx, value in enumerate(data)
+        ]
+        data[:] = staged
         return data
 
     return data

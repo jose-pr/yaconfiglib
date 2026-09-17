@@ -2198,3 +2198,115 @@ class TestIgnoreErrorContract:
             ConfigLoader(base_dir=str(tmp_path), ignore_error=False).load("bad.json")
         # Nothing was skipped, so there is nothing to warn about.
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+#: A document where one value fails to render and the rest is fine.
+_PARTIAL = (
+    "database:\n"
+    "  host: db.internal\n"
+    '  password: "p{% raw"\n'
+    "  port: 5432\n"
+    'log_path: "{{ base }}/logs"\n'
+    "base: /srv\n"
+)
+
+
+@pytest.mark.usefixtures("needs_yaml")
+@pytest.mark.usefixtures("needs_jinja2")
+class TestInterpolationIgnoreError:
+    """`ignore_error` costs one value, not the document around it.
+
+    A single unrenderable template used to take its whole section with it and
+    leave the load reporting success: the walk dropped the key it was
+    rendering, and the loader returned that half-emptied document.
+    """
+
+    def test_ignore_error_true_keeps_section_and_skips_value(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "partial.yaml").write_text(_PARTIAL, encoding="utf-8")
+        loader = ConfigLoader(base_dir=str(tmp_path), ignore_error=True)
+        result = loader.load("partial.yaml", interpolate=True)
+        assert result["database"]["host"] == "db.internal"
+        assert result["database"]["port"] == 5432
+        # The failing value keeps its template text, and everything else still
+        # rendered.
+        assert result["database"]["password"] == "p{% raw"
+        assert result["log_path"] == "/srv/logs"
+
+    def test_predicate_receives_interpolate_phase_and_key(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "partial.yaml").write_text(_PARTIAL, encoding="utf-8")
+        seen = []
+
+        def record(error, **context):
+            seen.append(context)
+            return True
+
+        loader = ConfigLoader(base_dir=str(tmp_path), ignore_error=record)
+        loader.load("partial.yaml", interpolate=True)
+        assert len(seen) == 1
+        assert seen[0]["phase"] == "interpolate"
+        assert seen[0]["path"] is None
+        assert seen[0]["key"] == ("database", "password")
+
+    def test_skipped_key_template_keeps_original_key(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "keys.yaml").write_text(
+            '"{% raw": value\nbase: /srv\nkept: "{{ base }}/x"\n', encoding="utf-8"
+        )
+        loader = ConfigLoader(base_dir=str(tmp_path), ignore_error=True)
+        result = loader.load("keys.yaml", interpolate=True)
+        # A key that cannot render stays as written, with its value — and the
+        # rest of the document still renders, which is what tells this apart
+        # from the whole pass being abandoned.
+        assert result["{% raw"] == "value"
+        assert result["kept"] == "/srv/x"
+
+    def test_strict_cycle_is_offered_and_skip_keeps_values(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "cycle.yaml").write_text(
+            'a: "{{ b }}"\nb: "{{ a }}"\n', encoding="utf-8"
+        )
+        seen = []
+
+        def record(error, **context):
+            seen.append((context["phase"], context["key"]))
+            return True
+
+        loader = ConfigLoader(base_dir=str(tmp_path), ignore_error=record, strict=True)
+        result = loader.load("cycle.yaml", interpolate=True)
+        # The cycle is offered like any other interpolation failure, and a skip
+        # leaves both keys present rather than aborting the load.
+        assert seen and seen[0][0] == "interpolate"
+        assert set(result) == {"a", "b"}
+
+    def test_load_all_interpolation_skip_yields_document(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "partial.yaml").write_text(_PARTIAL, encoding="utf-8")
+        loader = ConfigLoader(base_dir=str(tmp_path), ignore_error=True)
+        documents = list(loader.load_all("partial.yaml", interpolate=True))
+        # The document is yielded with that one value unrendered, where the
+        # whole document used to be dropped.
+        assert len(documents) == 1
+        assert documents[0]["database"]["host"] == "db.internal"
+        assert documents[0]["database"]["password"] == "p{% raw"
+        assert documents[0]["log_path"] == "/srv/logs"
+
+    def test_declined_interpolation_error_raises_original_type(self, tmp_path):
+        import jinja2 as _jinja2
+
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "typo.yaml").write_text('a: "{{ nosuch }}"\n', encoding="utf-8")
+        loader = ConfigLoader(base_dir=str(tmp_path), strict=True)
+        # The pin: nothing is skipped, so the original Jinja2 type reaches the
+        # caller — from load_all too, whose own handler must not re-offer it.
+        with pytest.raises(_jinja2.UndefinedError):
+            loader.load("typo.yaml", interpolate=True)
+        with pytest.raises(_jinja2.UndefinedError):
+            list(loader.load_all("typo.yaml", interpolate=True))

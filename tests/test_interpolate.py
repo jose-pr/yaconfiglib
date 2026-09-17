@@ -271,3 +271,85 @@ class TestTemplateCacheGlobals:
         finally:
             evicted.set()
             worker.join(timeout=5)
+
+
+@pytest.mark.usefixtures("needs_jinja2")
+class TestInterpolationFailures:
+    """A failed render loses nothing and says where it happened.
+
+    The walk used to `pop` each key and re-insert it after rendering, so a
+    raise dropped that key — and, one frame up, its whole section. It also
+    logged the rendered result, which is the secret an `{{ env.X }}` template
+    exists to fetch.
+    """
+
+    def test_raised_error_keeps_every_entry(self):
+        from yaconfiglib.utils.jinja2 import interpolate
+
+        document = {
+            "database": {
+                "host": "db.internal",
+                "password": "p{% raw",
+                "port": 5432,
+            }
+        }
+        with pytest.raises(Exception):
+            interpolate(document)
+        # Every entry of the failing container survives, in its original form.
+        assert set(document["database"]) == {"host", "password", "port"}
+        assert document["database"]["password"] == "p{% raw"
+
+    def test_raised_error_names_key_path(self):
+        from yaconfiglib.utils.jinja2 import interpolate
+
+        document = {"database": {"password": "p{% raw"}}
+        with pytest.raises(Exception) as caught:
+            interpolate(document)
+        assert caught.value.config_key == ("database", "password")
+        assert "database.password" in str(caught.value)
+
+    def test_syntax_error_names_key_and_keeps_type(self):
+        import jinja2 as _jinja2
+
+        from yaconfiglib.utils.jinja2 import interpolate
+
+        with pytest.raises(_jinja2.TemplateSyntaxError) as caught:
+            interpolate({"other": "{{ x"})
+        assert "other" in str(caught.value)
+
+    def test_list_index_in_key_path(self):
+        from yaconfiglib.utils.jinja2 import interpolate
+
+        with pytest.raises(Exception) as caught:
+            interpolate({"servers": [{"host": "{{ x"}]})
+        assert caught.value.config_key == ("servers", 0, "host")
+        assert "servers[0].host" in str(caught.value)
+
+    def test_python_error_in_expression_names_key(self):
+        from yaconfiglib.utils.jinja2 import interpolate
+
+        # An expression raises whatever Python raises, not a Jinja2 type.
+        with pytest.raises(ZeroDivisionError) as caught:
+            interpolate({"ratio": "{{ 1/0 }}"})
+        assert "ratio" in str(caught.value)
+
+    def test_debug_log_omits_rendered_values(self, caplog):
+        import logging
+
+        from yaconfiglib.utils.jinja2 import interpolate
+
+        caplog.set_level(logging.DEBUG, logger="yaconfiglib.utils.jinja2")
+        result = interpolate({"password": "{{ secret }}"}, {"secret": "pa55-secret"})
+        assert result == {"password": "pa55-secret"}
+        for record in caplog.records:
+            assert "pa55-secret" not in record.getMessage()
+
+    def test_debug_log_names_template(self, caplog):
+        import logging
+
+        from yaconfiglib.utils.jinja2 import interpolate
+
+        caplog.set_level(logging.DEBUG, logger="yaconfiglib.utils.jinja2")
+        interpolate({"password": "{{ secret }}"}, {"secret": "pa55-secret"})
+        # The template is what makes a record useful, and it holds no secret.
+        assert any("{{ secret }}" in r.getMessage() for r in caplog.records)
