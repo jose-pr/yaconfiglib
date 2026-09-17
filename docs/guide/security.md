@@ -128,6 +128,22 @@ reference. A deliberately huge document still costs time and memory, and the
 Jinja sandbox does not limit CPU or time. An include cycle
 (`a.yaml` → `b.yaml` → `a.yaml`) raises `ValueError` instead of recursing.
 
+## Logging and secrets
+
+A template such as `{{ env.DB_PASSWORD }}` exists to fetch a secret, so the
+**rendered value** is the secret and the template text is not. yaconfiglib
+never logs a rendered value: its DEBUG records name the key and the template
+(`interpolated database.password from template '{{ env.DB_PASSWORD }}'`).
+
+What DEBUG records *can* contain, if you enable them: source paths, template
+text, and full error messages — and a parser's error message often quotes the
+line that failed, which may be a configuration value. Treat DEBUG logs from
+this library as sensitive as the configuration itself.
+
+The WARNING line that `ignore_error=True` emits for a skipped source carries
+only the source, the phase and the error's type — never the message text — so
+it is safe in a shipped log.
+
 ## Loading third-party configuration — checklist
 
 ```python

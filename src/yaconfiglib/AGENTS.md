@@ -95,8 +95,11 @@ All constructor args become instance defaults, overridable per-call. Notable one
   keywords**, so one predicate works in every phase: `phase` is `"load"`, `"include"`,
   `"merge"`, `"interpolate"` or `"glob"` (a directory that could not be listed while
   expanding a pattern — `path` is that directory, and skipping it still loads the rest of
-  the pattern); `path` is the source or `None`; extras are `result=` (interpolate) and
-  `value=` (`load_all`). A failure inside an include is offered **once
+  the pattern); `path` is the source or `None`; extras are `key=` + `result=`
+  (interpolate in `load`), `key=` + `value=` + `source=` (interpolate in `load_all`) and
+  `value=` (a `load_all` load failure). An **interpolation** failure is offered once per
+  failing value, with `key=` its path, and a skip leaves that one value as its template
+  text — the document around it still renders. A failure inside an include is offered **once
   per level** — the included file as `"load"`, then each including file as `"include"`,
   the same exception object each time. Every offer logs at DEBUG; a skip under the **bool**
   form also logs at WARNING naming source, phase and error **type** (never the message
@@ -680,6 +683,13 @@ marker, and would add a BOM there.
   else renders as a normal Jinja2 template (always a string). A container referenced
   more than once (YAML anchors/aliases) is walked once and every reference shares the
   result.
+  **A raised error removes nothing**: each container is rendered into a staging list and
+  written back only once every member succeeded, so the failing container keeps all its
+  original entries (it used to `pop` each key before rendering, losing that key and, one
+  frame up, its whole section). The error carries `config_key` — the path to the value
+  that failed, innermost wins — which is also rendered into its message. DEBUG records
+  name the key and the **template**, never the rendered value: a template holding
+  `{{ env.DB_PASSWORD }}` is not the secret, its result is.
 - **`references(code, environment=None) -> frozenset[str]`** — the names *code* reads
   from its context (cached like `compile`/`eval`); a template that does not parse yields
   no names. Used to order values by what they refer to.

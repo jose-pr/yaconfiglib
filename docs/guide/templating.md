@@ -85,7 +85,32 @@ config = yaconfiglib.load("config.yaml", interpolate=True, strict=True)
 
 With `strict=True`, referencing an undefined variable raises instead of
 silently rendering as an empty string — useful for catching typos in
-config keys early.
+config keys early. The error names the key it happened at
+(`... [at database.url]`), and list indexes appear as `servers[0].host`.
+
+## Errors during interpolation
+
+A template that cannot render — a syntax error, an undefined name under
+`strict`, or a Python error inside an expression such as `{{ 1/0 }}` — raises
+the parser's or Python's own exception type, with the key path attached (also
+readable as `error.config_key`).
+
+With `ignore_error`, the failure costs **only that value**: it keeps its
+template text as written and the rest of the document still renders.
+
+```python
+# database.password fails to render; host, port and log_path are unaffected.
+config = yaconfiglib.load("app.yaml", interpolate=True, ignore_error=True)
+```
+
+The predicate form is offered each failure once, where it happens, with
+`phase="interpolate"` and `key=` the path — so you can skip a known-bad value
+and still fail on everything else:
+
+```python
+def only_skip_optional_banner(error, *, phase, key=None, **context):
+    return phase == "interpolate" and key == ("ui", "banner")
+```
 
 ## Templated source files (`.j2`)
 

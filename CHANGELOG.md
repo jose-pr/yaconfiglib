@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- Interpolation DEBUG logs no longer include rendered values, which can be secrets a
+  template fetched from the environment. A record now names the key and the template text
+  instead.
 - `!include`/`!load` are no longer registered on the shared `yaml.SafeLoader`.
   Previously, after any yaconfiglib YAML load, every `yaml.safe_load()` call in the
   same process resolved `!include`, so an untrusted document parsed by unrelated
@@ -76,6 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- With `ConfigLoader(ignore_error=...)`, `load_all()` yields a document with the failing
+  value unrendered instead of skipping the document entirely, and an interpolation
+  failure is offered to a predicate once per failing value with `phase="interpolate"` and
+  `key=` its path. To keep failing on template errors, return False from the predicate
+  when `phase == "interpolate"`.
 - The `pathlib-next` floor is now `>=0.9.7,<0.10` (was `>=0.9.6`), because glob expansion
   now uses its `glob(on_error=)` hook, added in 0.9.7.
 - An `ignore_error` predicate now always receives `phase=`, `path=` and `loader=` by
@@ -261,6 +269,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- With `ignore_error`, one failing template no longer deletes the rest of its section.
+  Only that value is left unrendered, with its template text as written, and everything
+  else in the document still renders; previously the failing key and every sibling in its
+  container were dropped, and the load reported success. Interpolation errors also name
+  the key they happened at (`... [at database.password]`, and `servers[0].host` for a
+  list), readable as `error.config_key`.
 - A directory that glob expansion cannot list is no longer skipped in silence: the
   `OSError` is raised, and `ignore_error` is consulted for it with `phase="glob"` and
   `path=` that directory. Previously such a directory vanished from the expansion without
