@@ -28,6 +28,7 @@ __all__ = [
     "UnsupportedFormatError",
     "UnknownLoaderError",
     "CommandsDisabledError",
+    "ConfinementError",
     "CommandError",
     "CommandTimeoutError",
     "ErrorFrame",
@@ -112,6 +113,19 @@ class CommandsDisabledError(ConfigError, ValueError):
 
     Raised for a ``cmd://``/``exec://``/``sh://`` URI, a ``+fmt`` variant, or a
     script-extension file, including one reached through a nested ``!include``.
+    """
+
+
+class ConfinementError(ConfigError, PermissionError):
+    """A file read resolved outside every root ``confine_to=`` allows.
+
+    Also a `PermissionError`, and so an `OSError`: "refused to read this" is
+    what that type means, and a CLI catching `OSError` around a load already
+    handles it. The message names the resolved target and every root it was
+    checked against, because a refusal nobody can diagnose gets switched off.
+
+    Raised before the file is opened, so nothing was read. Like any other
+    load failure it is offered to ``ignore_error`` with ``phase="load"``.
     """
 
 

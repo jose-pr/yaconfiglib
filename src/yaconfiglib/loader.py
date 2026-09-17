@@ -37,6 +37,7 @@ from .errors import (
     ConfigError,
     ConfigTypeError,
     ConfigValueError,
+    ConfinementError,
     ErrorFrame,
     UnknownLoaderError,
     UnsupportedFormatError,
@@ -49,8 +50,11 @@ from .utils.source import (
     CommandSource,
     SourceLike,
     _backend_claims,
+    _confinement_key,
+    _confinement_kind,
     _iter_sources,
     _marker_view,
+    _within_roots,
 )
 from .utils.trust import (
     CommandsDisabledError,
@@ -242,6 +246,66 @@ def _add_encoding_hint(error: BaseException, encoding: typing.Optional[str]) -> 
     marker = f" (read as {encoding or 'utf-8'}; {suggestion})"
     if marker not in reason:
         error.reason = f"{reason}{marker}"
+
+
+#: Where `ConfigLoader(confine_to=None)` looks for roots instead. Read only
+#: when the argument is None: an environment variable that could widen an
+#: explicit in-code allowlist would be a privilege escalation available to
+#: anyone who can set the environment.
+CONFINE_TO_ENV = "YACONFIGLIB_CONFINE_TO"
+
+
+def _resolve_confine_to(
+    confine_to: "typing.Optional[typing.Union[bool, str, typing.Sequence[_PathLike]]]",
+) -> "typing.Union[None, bool, typing.Tuple[str, ...]]":
+    """The roots *confine_to* names, normalised for comparison.
+
+    Returns `None` for "no confinement", `True` for "take ``base_dir`` at
+    check time" (``base_dir`` has a setter, so it can change after
+    construction), and otherwise a tuple of `_confinement_key` strings — which
+    may be **empty**, meaning nothing is allowed.
+
+    Accepted forms, in the order they are tested: `True`/`False`, a `str`
+    (split on `os.pathsep`, like ``PATH``, so one value can come from an
+    environment variable; a `str` without a separator is one root, never a
+    sequence of characters), a single `os.PathLike`, or a sequence of either.
+    A sequence's elements are each one root and are **not** split, since a
+    POSIX filename may legitimately contain ``:``.
+    """
+    if confine_to is None:
+        env = os.environ.get(CONFINE_TO_ENV)
+        if env is None:
+            return None
+        # An unset variable means "no confinement"; an empty one means "an
+        # empty allowlist", which allows nothing. They are deliberately
+        # different, because the second is a decision and the first is silence.
+        confine_to = env
+    if confine_to is False:
+        return None
+    if confine_to is True:
+        return True
+    if isinstance(confine_to, str):
+        parts: "typing.List[_PathLike]" = [
+            part for part in confine_to.split(os.pathsep) if part
+        ]
+    elif isinstance(confine_to, os.PathLike):
+        parts = [confine_to]
+    else:
+        try:
+            parts = list(confine_to)
+        except TypeError:
+            raise ConfigTypeError(
+                "confine_to= takes True, a path, a "
+                f"{os.pathsep!r}-separated string or a sequence of paths, not "
+                f"{type(confine_to).__name__}"
+            ) from None
+        for part in parts:
+            if not isinstance(part, (str, os.PathLike)):
+                raise ConfigTypeError(
+                    "every confine_to= root must be a path, not "
+                    f"{type(part).__name__}"
+                )
+    return tuple(_confinement_key(part) for part in parts)
 
 
 def _error_phase(error: BaseException) -> str:
@@ -583,6 +647,9 @@ class ConfigLoader(ConfigBackend):
         strict: bool = False,
         allow_commands: bool = True,
         sandbox: bool = False,
+        confine_to: (
+            "typing.Optional[typing.Union[bool, str, typing.Sequence[_PathLike]]]"
+        ) = None,
     ) -> None:
         """Configure a reusable loader.
 
@@ -674,6 +741,46 @@ class ConfigLoader(ConfigBackend):
                 ``SandboxedEnvironment``, blocking attribute traversal into
                 Python internals (SSTI). Set this when config values may be
                 untrusted.
+            confine_to: Roots every local file read must fall inside, or
+                `None` (the default) for no confinement. Without it a document
+                can read any file the process can, through an `!include` with
+                an absolute path or ``..`` traversal; with it, such a read
+                raises :class:`ConfinementError` **before** the file is
+                opened. Accepts:
+
+                * a sequence of paths — a target inside **any** of them is
+                  allowed;
+                * one string, split on `os.pathsep` like ``PATH``, so the
+                  value can come from an environment variable (a string
+                  without a separator is one root);
+                * `True`, meaning *base_dir*, read at check time;
+                * `False` or `None`, meaning off.
+
+                When, and only when, the argument is `None`, the
+                ``YACONFIGLIB_CONFINE_TO`` environment variable is read by the
+                same rules. An explicit argument ignores it entirely: a
+                variable that could widen an in-code allowlist would be an
+                escalation for anyone able to set the environment. An **unset**
+                variable means no confinement; an **empty** one — like
+                ``confine_to=[]`` — is an empty allowlist and refuses every
+                local file read.
+
+                The check is on the **logical** path: absolute,
+                ``..``-resolved, case-folded where the platform is. Symlinks
+                are deliberately *not* resolved, so a link inside a root may
+                point outside it — whoever can write to a config root can
+                already put a config there. What this closes is a hostile
+                *document*, not a hostile root.
+
+                Applies to every file source, a top-level one included, so
+                ``ConfigLoader(base_dir="conf", confine_to=True)`` also
+                refuses a caller's own absolute path outside ``conf``. Command
+                sources (governed by *allow_commands*) and in-memory ``#!``
+                documents are exempt — neither is a location — while a remote
+                URI source is refused, being inside no local root. Unlike
+                *allow_commands* and *sandbox* this is an instance setting
+                only: it does not tighten per call, and it is read from the
+                loader that performs the read.
         """
         self.allow_commands = bool(allow_commands)
         self.sandbox = bool(sandbox)
@@ -700,6 +807,11 @@ class ConfigLoader(ConfigBackend):
         self.encoding = encoding or self.DEFAULT_ENCODING
         self.recursive = False if recursive is None else recursive
         self.bound_loops = bool(bound_loops)
+        self.confine_to = confine_to
+        # Resolved once: normalising roots per read would re-walk the
+        # environment on every source. The True form stays unresolved, since
+        # base_dir can be reassigned.
+        self._confine_roots = _resolve_confine_to(confine_to)
         self.loader_factory = loader_factory or (
             lambda path: ConfigBackend.get_class_by_path(path)()
         )
@@ -757,6 +869,49 @@ class ConfigLoader(ConfigBackend):
 
     def _getpath(self, path: "_PathLike"):
         return path if isinstance(path, Path) else self.path_factory(path)
+
+    def _confinement_roots(self) -> "typing.Optional[typing.Tuple[str, ...]]":
+        """The roots a file read must fall inside, or None when confinement is off."""
+        roots = self._confine_roots
+        if roots is True:
+            # base_dir defaults to "", which means the working directory —
+            # the same directory a relative source resolves against.
+            return (_confinement_key(str(self.base_dir) or os.getcwd()),)
+        return roots
+
+    def _check_confinement(self, path: "_SourcePath") -> None:
+        """Refuse *path* unless ``confine_to=`` allows reading it.
+
+        Called for every source before its backend runs, so an `!include`
+        target and a top-level source are governed by one rule. Nothing has
+        been read when this raises, which is what makes skipping it through
+        ``ignore_error`` safe.
+        """
+        roots = self._confinement_roots()
+        if roots is None:
+            return
+        kind = _confinement_kind(path)
+        if kind == "exempt":
+            return
+        if kind == "check" and _within_roots(path, roots):
+            return
+        if not roots:
+            detail = "confine_to= allows nothing: the allowlist is empty"
+        elif kind == "remote":
+            detail = (
+                "confine_to= allows only local files, and this source is not one; "
+                f"allowed roots: {', '.join(roots)}"
+            )
+        else:
+            detail = f"outside every confine_to= root: {', '.join(roots)}"
+        # The resolved target for a local path — the ``..``-free, absolute
+        # spelling is the one the roots were compared against, so that is what
+        # a reader needs to see. A remote source has no such form, so it is
+        # named as written.
+        named = str(path) if kind == "remote" else _confinement_key(path)
+        error = ConfinementError(f"refusing to read {named}: {detail}")
+        _add_error_context(error, source=str(path))
+        raise error
 
     @property
     def base_dir(self):
@@ -829,6 +984,10 @@ class ConfigLoader(ConfigBackend):
                     return str(val)
 
             key_factory = _key
+        # Before the backend is even chosen: a refused source must not reach
+        # anything that could read it, and the refusal should not be preceded
+        # by an unrelated "no backend reads this" error.
+        self._check_confinement(path)
         logger.debug("Loading file: %s", path)
         _loader = loader_factory(path)
         is_command = isinstance(_loader, CommandBackend)

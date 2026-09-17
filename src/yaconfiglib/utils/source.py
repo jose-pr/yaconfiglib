@@ -20,13 +20,14 @@ import tempfile as _tempfile
 import re as _re
 
 try:
-    from pathlib_next import Path, Pathname
+    from pathlib_next import LocalPath, Path, Pathname
     from pathlib_next.mempath import MemPath
 
     HAS_PATHLIB_NEXT = True
 except ImportError:
     from pathlib import Path
 
+    LocalPath = None  # fallback
     Pathname = Path  # fallback
     MemPath = None  # fallback
     HAS_PATHLIB_NEXT = False
@@ -290,6 +291,95 @@ def _is_materialized_source(path: object) -> bool:
     if MemPath is not None and isinstance(path, MemPath):
         return True
     return str(path) in _TEMP_SOURCES
+
+
+#: Windows extended-length prefixes. `os.path.commonpath` compares components
+#: literally, so `\\?\C:\srv\conf\a.yaml` against the root `C:\srv\conf` raises
+#: `ValueError` ("Paths don't have the same drive") even though both name the
+#: same tree. Stripping the prefix first is what keeps a legitimately-spelled
+#: path acceptable (measured).
+_EXTENDED_UNC_PREFIX = "\\\\?\\UNC\\"
+_EXTENDED_PREFIX = "\\\\?\\"
+
+
+def _confinement_key(path: object) -> str:
+    r"""*path* as the string the containment test compares.
+
+    Absolute (so ``..`` is removed **before** the comparison rather than
+    treated as a component), ``normcase``-folded (so a case-differing spelling
+    of the same file matches on Windows and does not on POSIX, matching each
+    platform's own rules), and with any ``\\?\`` prefix stripped.
+
+    Deliberately **not** ``realpath``/``resolve()``: a symlink inside an
+    allowed root was put there by whoever administers that root, so following
+    the link is the intended behaviour. The trust boundary is write access to
+    a root, not the filesystem.
+    """
+    text = str(path)
+    if text.startswith(_EXTENDED_UNC_PREFIX):
+        text = "\\\\" + text[len(_EXTENDED_UNC_PREFIX) :]
+    elif text.startswith(_EXTENDED_PREFIX):
+        text = text[len(_EXTENDED_PREFIX) :]
+    return _os.path.normcase(_os.path.abspath(text))
+
+
+def _confinement_kind(path: object) -> str:
+    """How confinement treats *path*: ``"check"``, ``"exempt"`` or ``"remote"``.
+
+    Decided by **type**, never by reading the text:
+
+    * ``"exempt"`` — a `CommandSource` (governed by ``allow_commands``) or a
+      materialized source (an in-memory ``#!`` document or a rendered
+      template): neither has a location on disk to confine.
+    * ``"check"`` — a local filesystem path, which is what every ordinary file
+      source resolves to.
+    * ``"remote"`` — any other path type, such as a pathlib-next ``sftp://``
+      URI. It is inside no local root by definition, so confinement refuses it
+      rather than leaving a category the caller has to reason about.
+    """
+    if isinstance(path, CommandSource):
+        return "exempt"
+    if _is_materialized_source(path):
+        return "exempt"
+    if HAS_PATHLIB_NEXT:
+        if isinstance(path, LocalPath):
+            return "check"
+        if isinstance(path, Path):
+            # A pathlib-next path that is not local: a URI scheme. Tested
+            # before the os.PathLike fallback below, because a remote path may
+            # implement __fspath__ and would otherwise be checked as if its
+            # URI text were a filename.
+            return "remote"
+    elif isinstance(path, _stdlib_pathlib.PurePath):
+        return "check"
+    # A str or a plain os.PathLike: a local file named the same way
+    # path_factory would have named it.
+    if isinstance(path, (str, _os.PathLike)):
+        return "check"
+    return "remote"
+
+
+def _within_roots(path: object, roots: "_ty.Sequence[str]") -> bool:
+    """True when *path* resolves inside any one of *roots*.
+
+    *roots* are keys from `_confinement_key`, so both sides are normalised the
+    same way. An empty *roots* allows nothing: an empty allowlist means exactly
+    that.
+
+    Containment is decided with `os.path.commonpath`, never a string prefix
+    test: ``/srv/confidential/x`` *starts with* ``/srv/conf`` while lying
+    outside it. A `ValueError` — a different drive, or a drive/UNC mix — means
+    the two paths share no common root at all, which is simply "not
+    contained".
+    """
+    target = _confinement_key(path)
+    for root in roots:
+        try:
+            if _os.path.commonpath([target, root]) == root:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _rebase_include_sources(sources: _ty.Any, origin: "_ty.Optional[Path]") -> _ty.Any:
