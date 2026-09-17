@@ -288,6 +288,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- An `!include` inside the output of a **top-level** command source is read with the
+  load's `encoding=`. It was read as UTF-8 whatever the call passed, so a non-UTF-8
+  include raised `UnicodeDecodeError` — with a hint that told the caller to pass the very
+  encoding they had passed. An include inside a command reached *through* another
+  `!include` was already correct, and a mapping-form `encoding:` on a command include now
+  reaches that command's output and what the output includes.
 - The merge API type-checks as documented: `ConfigLoaderMergeMethod` is seen as a normal
   enum, so `ConfigLoaderMergeMethod.Deep` and `isinstance` checks work (the class is built
   at runtime by `MergeMethod.extend`, typed `type[IntEnum]`, so a checker saw no members);

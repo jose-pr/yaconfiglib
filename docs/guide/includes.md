@@ -101,9 +101,11 @@ special: !include {pathname: "utf16.yaml", encoding: "utf-16"}
 A mapping-form `encoding:` applies to that target only. An include whose
 real encoding differs from the call's therefore needs its own `encoding:`.
 
-!!! note "Known limitation"
-    Includes inside the output of a **top-level** command source are read as
-    UTF-8, regardless of the call's encoding.
+A **command source** is the one place where that target is not a file: the
+codec its output is decoded with is also the codec the output itself, and
+anything the output includes, are read with. So an `encoding:` on a command
+include reaches deeper than it would on a file include — deliberately, since
+there is no separate "file on disk" for it to stop at.
 
 ## Including command output
 

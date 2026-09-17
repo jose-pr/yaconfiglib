@@ -701,7 +701,13 @@ marker, and would add a BOM there.
   its output is decoded with `errors="replace"` and attached to `CommandError` (a
   `CalledProcessError`), since that text is a diagnostic rather than configuration; the
   message carries the **stderr tail**, never stdout. stderr from a *successful* run is
-  logged at DEBUG. Every `ValueError` this backend raises is a `ConfigValueError`; the
+  logged at DEBUG. The codec used to decode stdout is **also** the codec the output
+  document and that document's own `!include` targets are parsed with: the decoded text is
+  handed to `loads()` with `encoding=` set, from where plan-2's carrier takes it to every
+  depth. `master` is stripped alongside `origin` — it is the *including* document's
+  parser, so passing it on would share that document's anchors and let its inherited
+  encoding override the codec this output was decoded with.
+  Every `ValueError` this backend raises is a `ConfigValueError`; the
   missing-interpreter `FileNotFoundError` stays a plain `OSError`, since it is about the
   host rather than the configuration.
   With no `format=`/`+fmt`/shebang it **sniffs**: json (any value), yaml **only for a
