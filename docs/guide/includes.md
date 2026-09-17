@@ -101,6 +101,16 @@ special: !include {pathname: "utf16.yaml", encoding: "utf-16"}
 A mapping-form `encoding:` applies to that target only. An include whose
 real encoding differs from the call's therefore needs its own `encoding:`.
 
+An include is **resolved first and checked second**: the rules above decide
+which file the target names, and only then — if the load set `confine_to=` —
+is that resolved path required to fall inside one of the allowed roots. A
+target outside them raises `ConfinementError`, which is a `PermissionError`
+(and so an `OSError`) as well as a `yaconfiglib.ConfigError`, so
+`except PermissionError` and `except yaconfiglib.load_error_types()` both
+catch it. See
+[Reading local files](security.md#reading-local-files) for the option's forms
+and its limits.
+
 A **command source** is the one place where that target is not a file: the
 codec its output is decoded with is also the codec the output itself, and
 anything the output includes, are read with. So an `encoding:` on a command

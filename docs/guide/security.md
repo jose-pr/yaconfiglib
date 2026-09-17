@@ -104,21 +104,66 @@ With `inject_env=True`, templates see `env` as a read-only snapshot of
 `os.environ`: they can read environment variables (including secrets you may
 not want a third-party template to see) but cannot change them.
 
-## What the controls do not cover: reading local files
+## Reading local files
 
 `allow_commands=False` and `sandbox=True` stop **code execution** and
-**template injection**. They do not stop a document from **reading files**.
-`!include`/`!load` can read any file the process can: absolute paths and
-`..` traversal are not confined to `base_dir`. A hostile document can
-therefore pull in local files whose names match a backend (`.yaml`, `.yml`,
-`.json`, `.toml`, `.ini`, `.env`, ...), for example:
+**template injection**. Neither stops a document from **reading files**.
+
+**By default a document can read any file the process can.** `!include` and
+`!load` are not confined to `base_dir`: an absolute path or `..` traversal
+reaches anywhere, and a hostile document can pull in any local file whose
+name matches a backend (`.yaml`, `.yml`, `.json`, `.toml`, `.ini`, `.env`,
+...):
 
 ```yaml
 stolen: !include '/home/app/.config/service/credentials.yaml'
 ```
 
-If you load untrusted configuration, do not return, echo or log the loaded
-result verbatim, and run the process with only the file permissions it needs.
+### Confining reads to allowed roots
+
+`confine_to=` closes this. With it set, a local file read that resolves
+outside every allowed root raises `ConfinementError` **before the file is
+opened**:
+
+```python
+config = yaconfiglib.load(source, base_dir="conf", confine_to=True)
+```
+
+It accepts, in one option:
+
+- a sequence of roots — a target inside **any** of them is allowed;
+- one string split on `os.pathsep`, the `PATH` spelling, so the value can come
+  from an environment variable (a string without a separator is one root);
+- `True`, meaning *base_dir*;
+- `False` or `None`, meaning off, which is the default.
+
+When — and only when — the argument is `None`, the `YACONFIGLIB_CONFINE_TO`
+environment variable is read the same way. An explicit argument ignores it, so
+a variable cannot widen an allowlist your code set. An **unset** variable
+means no confinement, while an **empty** one, like `confine_to=[]`, is an
+empty allowlist and refuses every local file read: "nothing is allowed" is
+taken literally rather than treated as "off".
+
+Every file source is checked, a top-level one included — so
+`confine_to=True` also refuses a path *you* pass from outside `base_dir`,
+which is what confining to `base_dir` means. Command sources
+(`allow_commands` governs those) and in-memory `#!` documents are exempt: a
+command has no location, and an in-memory document is not on disk. A remote
+URI source is refused outright, being inside no local root.
+
+**Symlinks are deliberately not resolved.** The check is on the logical path,
+so a symlink inside a root may point at a file outside it — that link was put
+there by whoever administers the root, precisely so a configuration could
+reach the target. **The trust boundary is therefore write access to a
+configuration root, not the filesystem:** anyone who can create entries in a
+root can point a configuration outside it, but they could equally drop the
+configuration itself there. What `confine_to=` closes is a hostile
+*document*.
+
+### Either way
+
+Do not return, echo or log a loaded result verbatim, and run the process with
+only the file permissions it needs.
 
 ## Resource use
 
@@ -154,24 +199,35 @@ never in the message, only in the exception's `output` attribute.
 ```python
 config = yaconfiglib.load(
     source,
+    base_dir="conf",
     allow_commands=False,   # no shell execution
     interpolate=True,
     sandbox=True,           # SSTI-hardened templating
+    confine_to=True,        # no reads outside base_dir
 )
 ```
 
-With both controls set, the following are covered, including through nested
+With those controls set, the following are covered, including through nested
 `!include` targets and per-call overrides:
 
 - command sources, including a command produced by rendering a `.j2` source;
 - template injection in interpolated values, in `transform`/`%`-form
   `key_factory` expressions, and in `.j2` sources;
 - `!include` mapping keys, which can no longer re-enable commands or disable
-  the sandbox.
+  the sandbox;
+- **file reads**, which must resolve inside `conf` — an absolute path or `..`
+  traversal raises `ConfinementError` before anything is opened.
+
+What confinement does **not** cover, by design:
+
+- a symlink inside `conf` pointing outside it is followed, so anyone who can
+  write into `conf` can still point a configuration elsewhere — see
+  [reading local files](#reading-local-files);
+- in-memory `#!` documents and command sources are exempt (a command is
+  governed by `allow_commands`), and a remote URI source is refused rather
+  than checked.
 
 Still up to you:
-
-- **File disclosure** — see [reading local files](#what-the-controls-do-not-cover-reading-local-files).
 - Prefer a fixed `loader="yaml"` (or the specific format) over auto-detection so
   a filename can't select an unexpected backend. This applies to the top-level
   sources only: `!include` targets are still auto-detected from their names.
