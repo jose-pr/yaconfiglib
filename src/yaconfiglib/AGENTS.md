@@ -481,8 +481,10 @@ distinguish merge branches.
   (anything else raises `TypeError` naming `read()`). Being materialized, an `!include`
   inside it resolves against `base_dir`. Command URIs (`exec://`, `cmd://`,
   `sh://`, `+fmt` variants) pass through unresolved/unexpanded. In-memory content and
-  streams materialize to a `pathlib_next` `MemPath` when available, else a tracked temp
-  file (best-effort cleaned at interpreter exit). `memo` dedupes repeat sources across
+  streams materialize to a `pathlib_next` `MemPath` (a tracked temp file is the fallback
+  where that import fails, best-effort cleaned at interpreter exit — but **pathlib-next is
+  a required dependency**, so that path is not a supported configuration: the stdlib glob
+  fallback beside it cannot expand `**` at all). `memo` dedupes repeat sources across
   recursive calls (mutated in place; logs and skips a duplicate rather than erroring).
   Its keys are **lexical**: `os.path.normcase(os.path.abspath(...))` for a
   `pathlib.PurePath` (so `./x`, `x/../x` and, on Windows, `X` are one file),

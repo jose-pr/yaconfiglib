@@ -8,7 +8,11 @@
 
 **yaconfiglib** is a modern, extensible configuration parser library for Python. It allows you to seamlessly load, merge, and interpolate multiple configurations in a variety of formats (YAML, TOML, JSON, INI, `.env`), or execute scripts/commands directly to retrieve configuration objects dynamically.
 
-Zero required runtime dependencies (except standard pathlib, with optional packages to enable extra backends).
+One runtime dependency — [pathlib-next](https://github.com/jose-pr/pathlib-next),
+which provides the path layer: recursive `**` glob expansion, the error hook a
+glob needs to report an unreadable directory, loop bounding, and URI paths.
+Every *format* integration is optional: PyYAML, `tomli`, Jinja2 and Pydantic are
+extras, imported only when you use them.
 
 ---
 
@@ -22,7 +26,10 @@ Zero required runtime dependencies (except standard pathlib, with optional packa
 - **YAML Includes**: Out-of-the-box support for `!include` and `!load` YAML constructors to seamlessly and recursively import child configurations or commands.
 - **Advanced Templating**: Interleave configurations with Jinja2. Generate configuration blocks dynamically, auto-inject `os.environ` via `env.VAR_NAME`, or reference other configuration values by name in any order.
 - **Environment Overlays**: Load prefixed environment variables as flat or nested configuration, with optional scalar coercion for booleans, numbers, nulls, arrays, and objects.
-- **Path Agnostic**: Compatible with both standard `pathlib.Path` and optionally [pathlib_next](https://github.com/jose-pr/pathlib-next) for URI loading (HTTP, SFTP, etc.) exactly like standard file paths.
+- **Path Agnostic**: Sources may be a `str`, a standard `pathlib.Path`, or any
+  `os.PathLike`. Paths are handled by [pathlib_next](https://github.com/jose-pr/pathlib-next)
+  (a required dependency), so a URI path — HTTP, SFTP — loads exactly like a local file
+  once you install the scheme support it needs.
 
 ---
 
@@ -34,7 +41,7 @@ Install using `pip`:
 pip install yaconfiglib
 ```
 
-Optional dependencies:
+`pathlib-next` is installed with it. Optional extras, per format:
 
 | Extra | Adds | Needed for |
 | --- | --- | --- |
