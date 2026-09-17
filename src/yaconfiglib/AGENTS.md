@@ -124,11 +124,12 @@ that re-resolves its roots). Notable ones:
   per-call `recursive=`) and `.load_all()` (instance setting only — it has no per-call
   `recursive` parameter).
 - `bound_loops` — bound a `**` that crosses a **Windows junction loop** (a junction
-  pointing at one of its own ancestors), which otherwise walks until the filesystem
-  refuses the path and the load raises `OSError`. Default `False`; instance-wide, with
-  **no** per-call override, since a loop is a property of the tree. Also drops a directory
-  deliberately reachable under two names, and does nothing on POSIX (a directory symlink
-  is never descended) — see `parse_sources` below.
+  pointing at one of its own ancestors), which unbounded walks until the filesystem
+  refuses the path and the load raises `OSError`. Default **`True`**; `False` buys
+  pathlib's own unbounded walk. Instance-wide, with **no** per-call override, since a loop
+  is a property of the tree. Bounding keeps a directory reachable under two names (the
+  bound is the descent path, pathlib-next 0.9.9+) and does nothing on POSIX, where a
+  directory symlink is never descended — see `parse_sources` below.
 - `key_factory` — `(path, value) -> str` merge/document key (default: filename stem).
   The callable receives what `parse_sources` yielded: a path object, or — for a command
   URI — the `CommandSource` carrying the command text. As a string it is a `Path`
@@ -509,14 +510,15 @@ distinguish merge branches.
   pattern that names an **existing** path loads literally; **directory** matches are
   dropped (no backend reads a directory); and matches are **sorted** by component, since
   `load()` merges in the order it receives and glob promises no order. Dotfiles are
-  matched, per pathlib. **`bound_loops=False`** descends any one directory at most once
-  per `**` when set, keyed on its `(st_dev, st_ino)` identity: that is what bounds a
-  **Windows junction loop** (a junction pointing at one of its own ancestors), which
-  otherwise walks until the filesystem refuses the path and the load raises `OSError`. The
-  cost, and why it is off by default: identity cannot tell a loop from a directory
-  deliberately reachable under two names, so the second name then yields nothing. It is
-  forwarded to `glob(bound_loops=)` (pathlib-next 0.9.7+); the stdlib fallback ignores it,
-  having no `**` to bound. **Platform split:** only a junction is descended at all —
+  matched, per pathlib. **`bound_loops=True`** (the default) bounds a **Windows junction
+  loop** — a junction pointing at one of its own ancestors — which unbounded walks until
+  the filesystem refuses the path and the load raises `OSError`. The bound is the
+  **current descent path**, so a directory deliberately reachable under two sibling names
+  is still reached under both; that rule arrived in pathlib-next **0.9.9** (reported by
+  this project against 0.9.7, where the bound keyed on every directory seen and dropped
+  the second name), and it is why the floor is `>=0.9.9`. `bound_loops=False` restores
+  pathlib's unbounded walk. Forwarded to `glob(bound_loops=)`; the stdlib fallback ignores
+  it, having no `**` to bound. **Platform split:** only a junction is descended at all —
   Windows reports one as *not* a symlink — while a POSIX directory **symlink** is never
   entered by `**` (`recurse_symlinks=False` upstream, and `True` raises
   `NotImplementedError`), so a symlinked loop cannot occur and a symlinked layer must be

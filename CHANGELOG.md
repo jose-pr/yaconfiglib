@@ -51,15 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that is not a local filesystem path is refused, being inside no local root — note that a
   `scheme://…` *string* is not one of those with the default `path_factory`, which builds
   local paths: it is checked as the relative filename it becomes. Off by default, so no existing load changes.
-- `bound_loops=` on `ConfigLoader` and `parse_sources`: descend any one directory at most
-  once per `**`. It bounds a **Windows junction loop** — a junction pointing at one of its
-  own ancestors — which otherwise makes a recursive glob walk the loop until the
-  filesystem refuses the path, failing the load with `OSError` (or, under `ignore_error`,
-  merging the loop's files many times over). Default `False`, so every existing load is
-  unchanged; the cost when set is that a directory deliberately reachable under two names
-  (two junctions pointing at one shared directory) is read under only one of them, because
-  the bound is by directory identity. A POSIX directory *symlink* is never descended by
-  `**` in the first place, so nothing changes there.
+- `bound_loops=` on `ConfigLoader` and `parse_sources`: bound a **Windows junction loop**
+  — a junction pointing at one of its own ancestors — which unbounded makes a recursive
+  glob walk the loop until the filesystem refuses the path, failing the load with
+  `OSError` (or, under `ignore_error`, merging the loop's files many times over).
+  **Defaults to `True`** (see Changed); `bound_loops=False` restores pathlib's unbounded
+  walk. A POSIX directory *symlink* is never descended by `**` in the first place, so
+  nothing changes there.
 - `yaconfiglib.CommandError` (also a `subprocess.CalledProcessError`) and
   `yaconfiglib.CommandTimeoutError` (also a `subprocess.TimeoutExpired`), so a command
   failure can be caught either as the stdlib type it always was or as a
@@ -108,6 +106,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- **A recursive glob now bounds a directory loop by default** (`bound_loops=True`). A
+  `**` source that crossed a Windows junction loop used to walk it until the filesystem
+  refused the path, so the load failed with `OSError` — or, under `ignore_error`, merged
+  the loop's files once per lap. That is now bounded unless you ask for the old walk with
+  `bound_loops=False`. The default could not be this until pathlib-next 0.9.9: before it,
+  bounding also dropped a directory deliberately reachable under two names, because the
+  bound keyed on every directory seen rather than on the current descent path. **The
+  floor moves to `pathlib-next>=0.9.9`** for that rule, and a load that relied on a
+  looped tree failing now succeeds instead.
 - `from yaconfiglib.utils.merge import *` exports only the merge API and the typed-merge
   helpers; it previously also pulled in the module's internals.
 - `ConfigBackend` is a regular base class instead of a `typing.Protocol`.

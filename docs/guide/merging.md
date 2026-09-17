@@ -63,23 +63,24 @@ ConfigLoader(base_dir="conf", recursive=True).load("**/*.yaml")
 - **An explicitly named file beats a glob match for it**, wherever the two
   appear, and keeps its own position. That is what makes both layering idioms
   work: `load("base.yaml", "*.yaml")` and `load("*.yaml", "local.yaml")`.
-- **A `**` that crosses a Windows junction loop fails the load.** A junction
-  pointing at one of its own ancestors is walked over and over — merging the
-  loop's files once per lap — until the filesystem refuses the now-enormous
-  path, and that `OSError` reaches the caller. With `ignore_error` the load
-  finishes, having merged those files many times. Pass `bound_loops=True` to
-  descend each directory at most once per `**`:
+- **A `**` bounds a directory loop**, so a Windows junction pointing at one of
+  its own ancestors is descended once rather than walked until the filesystem
+  refuses the path. That is `bound_loops=True`, the default. Without it the
+  loop's files merge once per lap and the load eventually fails with `OSError`;
+  pass `bound_loops=False` for that unbounded walk, which is what `pathlib`
+  itself does:
 
     ```python
     yaconfiglib.load("**/*.yaml", base_dir="conf", recursive=True,
-                     bound_loops=True)
+                     bound_loops=False)   # pathlib's walk; a loop will raise
     ```
 
-    It is off by default because the bound is by directory *identity*, so it
-    also drops a directory deliberately reachable under two names: with two
-    junctions `site-a` and `site-b` pointing at one shared directory, only the
-    first is read. Set it for a tree that loops; leave it unset for a tree that
-    shares.
+    Bounding costs nothing else: a directory deliberately reachable under two
+    names is still read under both, because the bound is the **current descent
+    path** — a loop is a directory reachable below itself — and not every
+    directory the walk has seen. That is the rule `find -L` uses, and it
+    arrived in pathlib-next 0.9.9, which is why this package requires
+    `>=0.9.9`; on 0.9.7 and 0.9.8 bounding dropped the second name.
 
     Only junctions are affected. A **POSIX symlink** to a directory is never
     descended by `**` at all — `pathlib` does not follow one, and neither does
