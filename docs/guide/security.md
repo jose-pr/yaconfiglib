@@ -121,13 +121,29 @@ stolen: !include '/home/app/.config/service/credentials.yaml'
 
 ### Confining reads to allowed roots
 
-`confine_to=` closes this. With it set, a local file read that resolves
-outside every allowed root raises `ConfinementError` **before the file is
-opened**:
+`confine_to=` closes the `!include` route. With it set, a local file read
+that resolves outside every allowed root raises `ConfinementError` **before
+the file is opened**:
 
 ```python
-config = yaconfiglib.load(source, base_dir="conf", confine_to=True)
+config = yaconfiglib.load(
+    source,
+    base_dir="conf",
+    confine_to=True,
+    allow_commands=False,   # or a command reads the file for the document
+    sandbox=True,           # or a template expression does
+)
 ```
+
+**It is not a file-disclosure control on its own.** It confines the reads
+yaconfiglib performs *for* a document; it does not contain code the document
+gets to run. A non-sandboxed Jinja2 expression — in an interpolated value, a
+`transform`, or a `%`-form `key_factory` — reaches `open()` by attribute
+traversal with no path for the check to see, and a command source runs a
+program that can read anything. So `confine_to=` means something only
+alongside `sandbox=True` and `allow_commands=False`; note that interpolation
+is hardened by `sandbox=True` **only**, not by `allow_commands=False`. Use all
+three together, as the checklist below does.
 
 It accepts, in one option:
 
@@ -200,6 +216,9 @@ nothing. No filename and no directory listing is disclosed either way, and
 nothing outside the roots is ever read.
 
 ### Either way
+
+`confine_to=` is a **read** control. `dump()` writes wherever it is told, and
+is not checked against the roots.
 
 Do not return, echo or log a loaded result verbatim, and run the process with
 only the file permissions it needs.

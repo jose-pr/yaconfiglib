@@ -50,7 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   access to a root. Command sources and in-memory `#!` documents are exempt. A path object
   that is not a local filesystem path is refused, being inside no local root — note that a
   `scheme://…` *string* is not one of those with the default `path_factory`, which builds
-  local paths: it is checked as the relative filename it becomes. Off by default, so no existing load changes.
+  local paths: it is checked as the relative filename it becomes. Off by default, so no
+  existing load changes — unless `YACONFIGLIB_CONFINE_TO` is set in the environment, which
+  confines every loader constructed without an explicit `confine_to=`.
 - `bound_loops=` on `ConfigLoader` and `parse_sources`: bound a **Windows junction loop**
   — a junction pointing at one of its own ancestors — which unbounded makes a recursive
   glob walk the loop until the filesystem refuses the path, failing the load with

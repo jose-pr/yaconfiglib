@@ -573,10 +573,12 @@ predicates and `except` clauses on those types work. Each class below is a `Conf
   outside every `confine_to=` root, or the source is not a local file at all while
   confinement is on. Being a `PermissionError` it is an `OSError`, so a CLI catching that
   around a load already handles it, and `load_error_types()` covers it twice over. The
-  message names the **resolved** target (absolute, `..`-free) and every root it was
-  checked against — a refusal nobody can diagnose gets switched off — while the WARNING
-  line an `ignore_error=True` skip emits still carries only source, phase and error type.
-  Raised before the file is opened, so a skip is safe: nothing was read.
+  message names the target as it was **compared** (absolute, `..`-free, case-folded where
+  the platform is) and every root it was checked against — a refusal nobody can diagnose
+  gets switched off — while the WARNING line an `ignore_error=True` skip emits still
+  carries only source, phase and error type. **For a glob match it names the pattern
+  instead**, since the match is a filename the document did not write; the resolved path
+  goes to DEBUG. Raised before the file is opened, so a skip is safe: nothing was read.
 - **`CommandError(ConfigError, subprocess.CalledProcessError)`** — a command source
   exited non-zero. Stdlib constructor and attributes; its `__str__` is the stdlib text,
   then `stderr: <last 20 non-empty lines, capped at 2000 chars>`, then the context
