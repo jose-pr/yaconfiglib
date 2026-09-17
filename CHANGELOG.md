@@ -311,6 +311,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `confine_to=` no longer fails open in four ways a caller could reach by accident.
+  Passing it to an existing loader's `.load()`/`.load_all()` now raises `ConfigTypeError`
+  instead of being forwarded to the backend and ignored — it is a constructor setting, and
+  a caller who wrote it there had no confinement and no warning (the module-level
+  `load`/`loads`/`load_as` route it correctly and are unchanged). Assigning
+  `loader.confine_to` after construction is honoured, where it used to change what the
+  loader reported without changing what it enforced, in both directions. An open **stream**
+  is now checked against the roots by the file its `name` names, so
+  `load(open(path), confine_to=...)` refuses a path outside them; a stream with no real
+  name (`sys.stdin`, a descriptor, a `StringIO`) stays exempt. And an `!include` inside a
+  **command's output** is confined: that output is parsed by a fresh loader, which was
+  therefore checking against no roots at all while the same include in a file was refused.
 - An `!include` inside the output of a **top-level** command source is read with the
   load's `encoding=`. It was read as UTF-8 whatever the call passed, so a non-UTF-8
   include raised `UnicodeDecodeError` — with a hint that told the caller to pass the very

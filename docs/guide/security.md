@@ -146,10 +146,16 @@ taken literally rather than treated as "off".
 
 Every file source is checked, a top-level one included — so
 `confine_to=True` also refuses a path *you* pass from outside `base_dir`,
-which is what confining to `base_dir` means. Command sources
-(`allow_commands` governs those) and in-memory `#!` documents are exempt: a
-command has no location, and an in-memory document is not on disk. A remote
-URI source is refused outright, being inside no local root.
+which is what confining to `base_dir` means. That covers an open file object
+you hand to `load()`, by the file its `name` points at, and an `!include`
+inside a command's output. Exempt, because neither has a location to confine:
+a command source itself (`allow_commands` governs those), an in-memory `#!`
+document, and a stream with no real name such as `sys.stdin`.
+
+`confine_to=` is a loader setting with no per-call form. Passing it to an
+existing loader's `.load()` raises `ConfigTypeError`, rather than being taken
+for a backend option and ignored — every other unknown keyword is ignored by
+design, and this one is deliberately not.
 
 **Symlinks are deliberately not resolved.** The check is on the logical path,
 so a symlink inside a root may point at a file outside it — that link was put

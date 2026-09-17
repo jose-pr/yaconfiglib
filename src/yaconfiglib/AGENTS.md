@@ -108,7 +108,11 @@ recursive=None, bound_loops=False, key_factory=None, log_level=None, interpolate
 merge=ConfigLoaderMergeMethod.Simple, merge_options=None, ignore_error=False,
 inject_env=False, strict=False, allow_commands=True, sandbox=False, confine_to=None)`
 
-All constructor args become instance defaults, overridable per-call. Notable ones:
+All constructor args become instance defaults, overridable per-call — except
+`confine_to`, which is a security setting and has **no** per-call form: passing it to
+`.load()`/`.load_all()` raises `ConfigTypeError` instead of being silently forwarded to the
+backend. Assigning `loader.confine_to = …` afterwards **is** honoured (it is a property
+that re-resolves its roots). Notable ones:
 
 - `base_dir` — a `str` or any `os.PathLike` (a stdlib `pathlib.Path` and a pathlib-next
   path both qualify): the directory relative file-path sources you pass to `.load()` resolve
@@ -173,12 +177,17 @@ All constructor args become instance defaults, overridable per-call. Notable one
   **symlinks are deliberately not resolved** (a link inside a root was placed there by
   whoever administers the root; the threat closed here is a hostile document, not a
   hostile root). Applies to **every** file source including a top-level one, so
-  `confine_to=True` also refuses the caller's own absolute path outside `base_dir`.
-  Command sources (`allow_commands` governs those) and in-memory `#!` documents are
-  exempt **by type**; a remote URI source is refused, being inside no local root. Unlike
-  `allow_commands`/`sandbox` it is an **instance** setting: no per-call override, and it
-  does not travel through the trust `ContextVar` — the loader performing the read is the
-  one consulted.
+  `confine_to=True` also refuses the caller's own absolute path outside `base_dir`. An
+  open **stream** is checked by its `name` when that names a real file (a nameless one —
+  `<stdin>`, a descriptor, `StringIO` — stays exempt, having no location), and an
+  `!include` inside a **command's output** is checked as well: `CommandBackend` hands the
+  resolved roots to the loader that parses that output, because `loads()` builds a fresh
+  `ConfigLoader` and confinement — unlike the trust policy — does not ride a `ContextVar`.
+  Command sources themselves (`allow_commands` governs those) and in-memory `#!` documents
+  are exempt **by type**. It is an **instance** setting: a `confine_to=` passed to
+  `.load()`/`.load_all()` raises `ConfigTypeError` (the one keyword this library refuses
+  rather than ignoring — silence is the wrong answer for a security control), while
+  assigning the attribute re-resolves the roots.
 - **Jinja2 is required** by `interpolate=True`, `transform=` and a `%` `key_factory`.
   If it is missing or unimportable, each raises `ImportError` naming `yaconfiglib[jinja2]`
   and the original import error, **before** the source loop and therefore before

@@ -111,6 +111,9 @@ catch it. See
 [Reading local files](security.md#reading-local-files) for the option's forms
 and its limits.
 
+An `!include` inside a command's output is confined too, when the load set
+`confine_to=`: the roots are passed to the loader that parses that output.
+
 A **command source** is the one place where that target is not a file: the
 codec its output is decoded with is also the codec the output itself, and
 anything the output includes, are read with. So an `encoding:` on a command
