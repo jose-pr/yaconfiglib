@@ -68,8 +68,10 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 - **`ConfigError`** and subclasses, **`load_error_types()`** — see "Errors" below.
 - **`ErrorFrame`** — one step in an error's `config_frames`; see "Errors" below.
 - **`MergeMethod`**, **`typed_merge`**, **`OpaqueMerge`**, **`opaque`**,
-  **`TypedNamespace`** — re-exported from `utils.merge` / `utils.typing_merge`; see
-  "Merge strategies" / "Typed merge".
+  **`TypedNamespace`** — import them from **`yaconfiglib`** (or
+  `yaconfiglib.utils.typing_merge`, where they are defined); `yaconfiglib.utils.merge`
+  re-exports them explicitly through its `__all__`, so a checker accepts that path too.
+  See "Merge strategies" / "Typed merge".
 
 ### Typing
 
@@ -118,8 +120,14 @@ All constructor args become instance defaults, overridable per-call. Notable one
   URI — the `CommandSource` carrying the command text. As a string it is a `Path`
   attribute name, or `"%<jinja-expr>"` for a template; **both string forms work at
   construction as well as per call**.
-- `merge` — a `ConfigLoaderMergeMethod` (or any `Merge`-compatible callable) applied
-  between successive sources, left-to-right.
+- `merge` — a `ConfigLoaderMergeMethod` member, **its name as a case-insensitive
+  string** (`merge="deep"`, resolved through the enum's `_missing_`), or any
+  `Merge`-compatible callable; applied between successive sources, left-to-right.
+  A type checker reads a restated enum declaration under `TYPE_CHECKING` — the runtime
+  class comes from `MergeMethod.extend`, which is typed `type[IntEnum]` and therefore
+  showed no members — and a test pins the two against each other. Note for mypy:
+  `ConfigLoaderMergeMethod("hash")` (by value) is not accepted statically; use
+  `merge="hash"` or `ConfigLoaderMergeMethod["Hash"]`.
 - `ignore_error` — `bool` (ignore/re-raise every failure uniformly) or a predicate
   `(error, *, phase, path, loader, **extra) -> bool`. **Every offer passes those three
   keywords**, so one predicate works in every phase: `phase` is `"load"`, `"include"`,
@@ -320,7 +328,13 @@ distinguish merge branches.
 
 ## Typed merge (`utils/typing_merge.py`)
 
-- **`typed_merge(cls, *objects, init=True) -> T`** — recursively merge `*objects` into
+- **`typed_merge(cls, *objects, init=True)`** — three overloads, because `cls` is not
+  always a class: a **class** hint returns `T`, a call with **no objects** returns `None`,
+  and any other typing form (`Optional[...]`, `Dict[str, int]`, a union) returns `Any`.
+  Note the runtime rule the middle overload cannot express: an **empty unpacked
+  sequence**, or sources that are all `None`, also return `None`, so a caller with
+  possibly-empty layers must check the result.
+  Recursively merges `*objects` into
   an instance of `cls`, guided by `cls`'s type hints. Mappings/dataclasses/
   `Namespace`-likes merge field-by-field (collecting a field's value across every
   object, then recursing per-field using its type hint); sequences take the last

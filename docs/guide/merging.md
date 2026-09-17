@@ -9,6 +9,8 @@ order and merges each new result into the running total using a
 from yaconfiglib import ConfigLoader, ConfigLoaderMergeMethod
 
 loader = ConfigLoader(merge=ConfigLoaderMergeMethod.Deep)
+# or, equivalently, the strategy name (case-insensitive):
+loader = ConfigLoader(merge="deep")
 config = loader.load("base.yaml", "production.yaml", "local.yaml")
 ```
 

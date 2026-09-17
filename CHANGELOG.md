@@ -83,6 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `from yaconfiglib.utils.merge import *` exports only the merge API and the typed-merge
+  helpers; it previously also pulled in the module's internals.
 - `ConfigBackend` is a regular base class instead of a `typing.Protocol`.
   `issubclass()`/`isinstance()` checks against it now work — they raised `TypeError` — and
   type checkers no longer report `ConfigLoader()`, `EnvVarBackend()`, `PythonBackend()` or
@@ -286,6 +288,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- The merge API type-checks as documented: `ConfigLoaderMergeMethod` is seen as a normal
+  enum, so `ConfigLoaderMergeMethod.Deep` and `isinstance` checks work (the class is built
+  at runtime by `MergeMethod.extend`, typed `type[IntEnum]`, so a checker saw no members);
+  `merge="deep"` is accepted wherever a strategy is; `typed_merge()` accepts
+  `Optional[...]`, unions and generic hints and is typed as returning `None` when called
+  with no objects; `@opaque` keeps the decorated class's type; and importing
+  `typed_merge`, `OpaqueMerge`, `opaque` and `TypedNamespace` from
+  `yaconfiglib.utils.merge` satisfies a strict checker's re-export rule.
 - Backend types say what they actually are: `Jinja2ConfigLoader.load()` is typed as
   returning the parsed document (it claimed `None`), a name-only backend
   (`PATHNAME_REGEX = None`) type-checks, `YamlConfig` accepts
