@@ -7,12 +7,8 @@ import typing
 
 import yaml
 
-try:
-    from pathlib_next import Path, Pathname
-except ImportError:
-    from pathlib import Path
-
-    Pathname = Path
+# pathlib-next is a required dependency; see utils/source.py.
+from pathlib_next import Path, Pathname
 
 from yaconfiglib.backends.base import ConfigBackend, _include_call
 from yaconfiglib.errors import ErrorFrame, _add_error_context

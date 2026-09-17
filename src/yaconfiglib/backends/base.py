@@ -8,15 +8,11 @@ import typing as _ty
 from ..errors import ConfigTypeError as _ConfigTypeError
 from ..errors import UnsupportedFormatError as _UnsupportedFormatError
 
-try:
-    from pathlib_next import LocalPath as _LocalPath
-    from pathlib_next import Path as _Path
-    from pathlib_next import Pathname as _Pathname
-except ImportError:
-    from pathlib import Path as _Path  # type: ignore[no-redef]
-
-    _LocalPath = _Path
-    _Pathname = _Path
+# pathlib-next is a required dependency; see utils/source.py for why this
+# import is unconditional.
+from pathlib_next import LocalPath as _LocalPath
+from pathlib_next import Path as _Path
+from pathlib_next import Pathname as _Pathname
 
 if _ty.TYPE_CHECKING:
     import yaml as _yaml

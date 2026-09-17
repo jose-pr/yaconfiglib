@@ -110,27 +110,18 @@ class TestRegistryBackends:
         assert result == {"value": "from-env"}
 
     @pytest.mark.usefixtures("needs_jinja2")
-    def test_jinja_backend_falls_back_to_temp_file_without_pathlib_next(
-        self, tmp_path, monkeypatch
-    ):
-        # Regression: the ImportError fallback set MemPath = None and load()
-        # called it unconditionally, so every .j2 source raised
-        # "TypeError: 'NoneType' object is not callable" without pathlib_next —
-        # even though the class docstring promised "a real temp file when
-        # pathlib_next is unavailable". Simulating the absent import is enough;
-        # MemPath is the only thing this backend uses it for.
-        from yaconfiglib.backends import jinja2 as jinja2_backend
-
-        monkeypatch.setattr(jinja2_backend, "MemPath", None)
-
+    def test_jinja_backend_renders_to_a_mempath(self, tmp_path):
+        # Was `..._falls_back_to_temp_file_without_pathlib_next`, which
+        # monkeypatched `MemPath` to None to simulate a missing import. That
+        # cannot happen now — pathlib-next is a required dependency and the
+        # import is unconditional — so what is left worth pinning is that a
+        # rendered template is still dispatched by its STRIPPED filename
+        # rather than read as text.
         template = tmp_path / "config.yaml.j2"
         template.write_text("port: {{ 8000 + 80 }}\nname: plain\n")
 
         loader = ConfigLoader(base_dir=tmp_path)
-        result = loader.load("config.yaml.j2")
-        # Rendered, and still dispatched to the YAML backend by the stripped
-        # filename rather than being read as text.
-        assert result == {"port": 8080, "name": "plain"}
+        assert loader.load("config.yaml.j2") == {"port": 8080, "name": "plain"}
 
 
 class TestCommandBackend:
@@ -419,17 +410,13 @@ class TestIncludePathResolution:
 
         assert result == {"db": {"host": "from-other"}}
 
-    @pytest.mark.parametrize("materialized_as", ["mempath", "tempfile"])
     @pytest.mark.usefixtures("needs_yaml")
-    def test_in_memory_document_include_uses_base_dir(
-        self, tmp_path, monkeypatch, materialized_as
-    ):
+    def test_in_memory_document_include_uses_base_dir(self, tmp_path, monkeypatch):
+        # Was parametrized over ["mempath", "tempfile"], the second half
+        # monkeypatching `MemPath` to None. An in-memory document is always a
+        # MemPath now, so only the real path remains.
         conf, elsewhere = self._tree(tmp_path)
         monkeypatch.chdir(elsewhere)
-        if materialized_as == "tempfile":
-            from yaconfiglib.utils import source as source_module
-
-            monkeypatch.setattr(source_module, "MemPath", None)
 
         result = ConfigLoader(base_dir=conf).load("#!mem.yaml\nd: !include db.toml\n")
 
@@ -726,17 +713,17 @@ class TestJinja2SourceTrust:
             yaconfiglib.load(str(doc), allow_commands=False)
         assert not marker.exists()
 
-    @pytest.mark.parametrize("without_pathlib_next", [False, True])
-    def test_rendered_command_source_refused(
-        self, tmp_path, monkeypatch, without_pathlib_next
-    ):
+    @pytest.mark.parametrize("source_kind", ["in_memory", "template_file"])
+    def test_rendered_command_source_refused(self, tmp_path, monkeypatch, source_kind):
         from yaconfiglib import CommandsDisabledError, ConfigLoader
-        from yaconfiglib.backends import jinja2 as jinja2_backend
 
         monkeypatch.chdir(tmp_path)
         marker = tmp_path / "pwned.marker"
-        if without_pathlib_next:
-            monkeypatch.setattr(jinja2_backend, "MemPath", None)
+        if source_kind == "template_file":
+            # A `.j2` FILE whose rendered name is a command source. This case
+            # used to be spelled by patching `MemPath` to None to simulate a
+            # missing pathlib-next; the template file is what it was actually
+            # covering, and that is kept.
             self._write(tmp_path / "x.cmd.j2", "echo pwned> pwned.marker\n")
             source = "x.cmd.j2"
         else:
@@ -846,19 +833,6 @@ class TestJinja2TemplateNaming:
     """A .j2 template must keep the format extension it renders to."""
 
     def test_j2_without_inner_extension_names_the_template(self, tmp_path):
-        template = tmp_path / "config.j2"
-        template.write_text("a: 1\n", encoding="utf-8")
-
-        with pytest.raises(NotImplementedError, match=r"config\.j2") as exc_info:
-            ConfigLoader(base_dir=tmp_path).load("config.j2")
-        assert "config.yaml.j2" in str(exc_info.value)
-
-    def test_j2_without_inner_extension_names_the_template_without_pathlib_next(
-        self, tmp_path, monkeypatch
-    ):
-        from yaconfiglib.backends import jinja2 as jinja2_backend
-
-        monkeypatch.setattr(jinja2_backend, "MemPath", None)
         template = tmp_path / "config.j2"
         template.write_text("a: 1\n", encoding="utf-8")
 
@@ -1578,17 +1552,6 @@ class TestScriptLaunch:
             ),
             encoding="utf-8",
         )
-        name = "gen.bat" if WIN else "gen.sh"
-        body = (
-            f'#!{name}\n@echo off\necho {{"who": "memory"}}\n'
-            if WIN
-            else f'#!{name}\n#!/bin/sh\necho \'{{"who": "memory"}}\'\n'
-        )
-        assert ConfigLoader().load(body, loader="command") == {"who": "memory"}
-
-    def test_in_memory_script_runs_body_tempfile(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr("yaconfiglib.utils.source.MemPath", None)
         name = "gen.bat" if WIN else "gen.sh"
         body = (
             f'#!{name}\n@echo off\necho {{"who": "memory"}}\n'

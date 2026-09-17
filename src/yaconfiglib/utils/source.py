@@ -8,7 +8,6 @@ concrete :class:`~pathlib.Path`-like objects ready for a backend to read.
 
 from __future__ import annotations
 
-import atexit as _atexit
 import io as _io
 import itertools as _itertools
 import logging
@@ -19,18 +18,14 @@ import glob as _glob
 import tempfile as _tempfile
 import re as _re
 
-try:
-    from pathlib_next import LocalPath, Path, Pathname
-    from pathlib_next.mempath import MemPath
-
-    HAS_PATHLIB_NEXT = True
-except ImportError:
-    from pathlib import Path
-
-    LocalPath = None  # fallback
-    Pathname = Path  # fallback
-    MemPath = None  # fallback
-    HAS_PATHLIB_NEXT = False
+# pathlib-next is a REQUIRED dependency (`pyproject.toml`), so this import is
+# unconditional: a missing one is an ImportError here, like any other declared
+# dependency. It used to fall back to stdlib `pathlib` with a HAS_PATHLIB_NEXT
+# flag, which was dead code that also answered differently — a `**` source
+# silently expanded to nothing, and the suite measured 33 failures without the
+# package installed.
+from pathlib_next import LocalPath, Path, Pathname
+from pathlib_next.mempath import MemPath
 
 logger = logging.getLogger(__name__)
 
@@ -110,58 +105,13 @@ class CommandSource(str):
 
 _SOURCE_COUNTER = _itertools.count()
 
-# Temp files created by the no-pathlib_next fallback (delete=False so the
-# backend can re-open them). Best-effort removal at interpreter exit — they
-# previously leaked one file per materialized source.
-_TEMP_SOURCES: list[str] = []
-
-
-def _cleanup_temp_sources() -> None:
-    for name in _TEMP_SOURCES:
-        try:
-            _os.unlink(name)
-        except OSError:
-            pass
-
-
-_atexit.register(_cleanup_temp_sources)
-
-
-def _materialize_temp(
-    content: "_ty.Union[str, bytes]", encoding: "_ty.Optional[str]", suffix: str
-) -> Path:
-    """Write *content* to a tracked temp file and return its Path.
-
-    The suffix is reduced to a basename (separators stripped) so a virtual
-    filename from an in-memory ``#!`` marker line can never steer the temp
-    file outside the temp directory.
-    """
-    mode = "w" if isinstance(content, str) else "wb"
-    # newline="": a str payload keeps its own line endings. Without it a "\n"
-    # became "\r\n" on Windows, and a YAML block scalar gained a blank line
-    # per break.
-    kwargs = (
-        {"encoding": encoding or "utf-8", "newline": ""}
-        if isinstance(content, str)
-        else {}
-    )
-    safe_suffix = _os.path.basename(str(suffix).replace("\\", "/")) if suffix else ""
-    with _tempfile.NamedTemporaryFile(
-        mode=mode, delete=False, suffix="-" + (safe_suffix or "source.yaml"), **kwargs
-    ) as tmp:
-        tmp.write(content)
-        name = tmp.name
-    _TEMP_SOURCES.append(name)
-    return Path(name)
-
 
 def _materialize_script(content: bytes, suffix: str) -> "tuple[str, str]":
     """Write *content* to a private temp directory as ``script<suffix>``.
 
-    Returns ``(directory, file)``. Deliberately NOT `_materialize_temp`, which
-    keeps its files for later reads: a script is executed once and the caller
-    removes the whole directory afterwards, so the file never sits in a shared
-    or globbed location. On POSIX the file is mode 0o700, so a ``#!`` line can
+    Returns ``(directory, file)``. Its own directory, not a shared temp file:
+    a script is executed once and the caller removes the whole directory
+    afterwards, so it never sits in a shared or globbed location. On POSIX the file is mode 0o700, so a ``#!`` line can
     run it directly.
     """
     directory = _tempfile.mkdtemp(prefix="yaconfiglib-script-")
@@ -292,30 +242,21 @@ def _marker_view(
 
 
 def _materialize(filename: str, data: bytes) -> Path:
-    """Store *data* under *filename* as an in-memory (or temp-file) source."""
-    # Read the module global at call time: tests monkeypatch it to exercise the
-    # no-pathlib_next fallback.
-    mem_path = MemPath
-    if mem_path is not None:
-        path = mem_path(filename)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-        return path
-    return _materialize_temp(data, None, filename)
+    """Store *data* under *filename* as an in-memory source."""
+    path = MemPath(filename)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
 
 
 def _is_materialized_source(path: object) -> bool:
     """True for a source that has no meaningful directory of its own.
 
-    In-memory documents (``MemPath``) and the temp files the no-pathlib_next
-    fallback writes are not part of a config tree: ``MemPath``'s parent is ``''``
-    and a temp file's is the system temp directory. Includes inside them keep
-    resolving against ``base_dir``. Module globals are read at call time because
-    tests monkeypatch ``MemPath``.
+    An in-memory document is a ``MemPath``, whose parent is ``''`` — it is not
+    part of a config tree, so includes inside it keep resolving against
+    ``base_dir`` rather than against "next to itself".
     """
-    if MemPath is not None and isinstance(path, MemPath):
-        return True
-    return str(path) in _TEMP_SOURCES
+    return isinstance(path, MemPath)
 
 
 #: Windows extended-length prefixes. `os.path.commonpath` compares components
@@ -370,17 +311,14 @@ def _confinement_kind(path: object) -> str:
         return "exempt"
     if _is_materialized_source(path):
         return "exempt"
-    if HAS_PATHLIB_NEXT:
-        if isinstance(path, LocalPath):
-            return "check"
-        if isinstance(path, Path):
-            # A pathlib-next path that is not local: a URI scheme. Tested
-            # before the os.PathLike fallback below, because a remote path may
-            # implement __fspath__ and would otherwise be checked as if its
-            # URI text were a filename.
-            return "remote"
-    elif isinstance(path, _stdlib_pathlib.PurePath):
+    if isinstance(path, LocalPath):
         return "check"
+    if isinstance(path, Path):
+        # A pathlib-next path that is not local: a URI scheme. Tested before
+        # the os.PathLike fallback below, because a remote path may implement
+        # __fspath__ and would otherwise be checked as if its URI text were a
+        # filename.
+        return "remote"
     # A str or a plain os.PathLike: a local file named the same way
     # path_factory would have named it.
     if isinstance(path, (str, _os.PathLike)):
@@ -770,7 +708,7 @@ def _expand_pattern(
     *on_error* is the already-adapted hook (see `_glob_error_hook`), or None to
     keep pathlib's silent skip. *bound_loops* is passed straight through.
     """
-    if HAS_PATHLIB_NEXT and isinstance(path, Path):
+    if isinstance(path, Path):
         # The test is isinstance, not hasattr("glob"): a STDLIB path has .glob
         # too, but no `recursive` keyword, and base_dir may be one.
         if glob_base is not None:
@@ -794,11 +732,13 @@ def _expand_pattern(
         return path.glob(
             None, recursive=recursive, on_error=on_error, bound_loops=bound_loops
         )
-    # Fallback path traversal: stdlib glob takes the pattern as an argument, so
-    # separate it from its directory. It has no error hook and swallows a
+    # A stdlib path, which a caller gets by passing `path_factory=pathlib.Path`.
+    # NOT a no-pathlib-next fallback: pathlib-next is a required dependency and
+    # its import is unconditional. stdlib glob takes the pattern as an argument,
+    # so separate it from its directory. It has no error hook and swallows a
     # listing failure itself, so *on_error* cannot be honoured here — and
-    # neither can *bound_loops*: `parent.glob(name)` cannot expand ``**`` at
-    # all, so it has no descent to bound.
+    # neither can *bound_loops*, nor `recursive`: `parent.glob(name)` cannot
+    # expand ``**`` at all, so such a source expands to nothing (measured).
     return path.parent.glob(path.name)
 
 

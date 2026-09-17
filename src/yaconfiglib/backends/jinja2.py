@@ -9,14 +9,10 @@ import typing as _ty
 from jinja2 import Environment
 from jinja2.sandbox import SandboxedEnvironment
 
-try:
-    from pathlib_next import Path, PosixPathname
-    from pathlib_next.mempath import MemPath
-except ImportError:
-    from pathlib import Path
-    from pathlib import PurePosixPath as PosixPathname  # type: ignore[no-redef]
-
-    MemPath = None  # type: ignore[assignment,misc]
+# pathlib-next is a required dependency; see utils/source.py for why this
+# import is unconditional.
+from pathlib_next import Path, PosixPathname
+from pathlib_next.mempath import MemPath
 
 from yaconfiglib.backends.base import ConfigBackend
 from yaconfiglib.errors import (
@@ -26,7 +22,6 @@ from yaconfiglib.errors import (
 )
 from yaconfiglib.backends.command import CommandBackend
 from yaconfiglib.utils import jinja2
-from yaconfiglib.utils.source import _materialize_temp
 from yaconfiglib.utils.trust import CommandsDisabledError, current_policy, is_hardened
 
 __all__ = ["Jinja2ConfigLoader"]
@@ -79,9 +74,7 @@ class Jinja2ConfigLoader(ConfigBackend):
                 ``sandbox=True``, ``allow_commands=False`` or ``strict=True``
                 is in effect. Under ``sandbox=True`` or
                 ``allow_commands=False`` it must be a
-                :class:`jinja2.sandbox.SandboxedEnvironment`. The legacy
-                keyword ``envoriment`` (a historical typo) is still accepted
-                as a fallback — prefer ``environment``.
+                :class:`jinja2.sandbox.SandboxedEnvironment`.
             path_factory: Path constructor used when *path* is a string. It is
                 also forwarded to the resolved backend.
 
@@ -106,7 +99,6 @@ class Jinja2ConfigLoader(ConfigBackend):
         policy = current_policy()
         hardened = is_hardened(policy)
         strict = policy[2]
-        environment = environment or kwargs.pop("envoriment", None)
         if environment is None:
             if hardened or strict:
                 environment = jinja2.get_environment(strict, hardened)
@@ -147,18 +139,9 @@ class Jinja2ConfigLoader(ConfigBackend):
         # Name the rendered document after the template minus its .j2/.jinja2
         # suffix, so backend auto-detection resolves settings.yaml.j2 -> YAML.
         rendered_name = stripped.as_posix()
-        if MemPath is None:
-            # Without pathlib_next this used to call MemPath(...) anyway —
-            # TypeError: 'NoneType' object is not callable for any .j2 source —
-            # despite this class's own docstring promising "a real temp file
-            # when pathlib_next is unavailable". Reuse source.py's existing
-            # temp-file materializer, which keeps the rendered basename as the
-            # temp file's suffix so auto-detection still works.
-            target = _materialize_temp(rendered, encoding, rendered_name)
-        else:
-            target = MemPath(rendered_name)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(rendered, encoding=encoding)
+        target = MemPath(rendered_name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(rendered, encoding=encoding)
         parent_loader = loader
         rendered_loader = rendered_cls()
         if isinstance(rendered_loader, CommandBackend) and not policy[0]:

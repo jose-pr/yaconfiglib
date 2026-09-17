@@ -503,18 +503,21 @@ class TestLoaderStateHygiene:
         assert loader.merge_options == {}
 
     def test_construction_does_not_mutate_module_logger(self):
+        # Library code must not call setLevel on a shared logger: constructing
+        # a loader (including the import-time DEFAULT_LOADER) must leave the
+        # process's logging configuration exactly as it found it.
         import logging
 
         mod_logger = logging.getLogger("yaconfiglib.loader")
         before = mod_logger.level
-        with pytest.warns(DeprecationWarning):
-            ConfigLoader(log_level=logging.DEBUG)
         ConfigLoader()
+        ConfigLoader(base_dir="anywhere")
         assert mod_logger.level == before
 
-    def test_log_level_is_deprecated_and_accepts_any_int(self):
-        # 25 is not a LogLevel member; it used to raise ValueError.
-        with pytest.warns(DeprecationWarning, match="no effect"):
+    def test_log_level_is_gone(self):
+        # It was accepted-and-ignored with a DeprecationWarning for one
+        # release; the shim is removed, so the keyword is now simply unknown.
+        with pytest.raises(TypeError):
             ConfigLoader(log_level=25)
 
     def test_default_construction_emits_no_deprecation_warning(self):
@@ -1971,8 +1974,6 @@ class TestDumpOutputContract:
         import yaconfiglib
         from yaconfiglib.utils.source import MemPath
 
-        if MemPath is None:
-            pytest.skip("pathlib_next is not installed")
         obj = {"a": 1}
         target = MemPath("dumped.yaml")
         # os.fspath(MemPath) raises, so write_text is the only way in.

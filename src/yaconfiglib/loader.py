@@ -11,12 +11,10 @@ import os
 import sys
 import types
 import typing
-import warnings
 
-try:
-    from pathlib_next import Path
-except ImportError:
-    from pathlib import Path
+# pathlib-next is a required dependency; see utils/source.py for why this
+# import is unconditional.
+from pathlib_next import Path
 
 from pathlib import PurePosixPath
 
@@ -680,7 +678,6 @@ class ConfigLoader(ConfigBackend):
         recursive: typing.Optional[bool] = None,
         bound_loops: bool = True,
         key_factory: "typing.Optional[typing.Union[str, typing.Callable[[_SourcePath, typing.Any], str]]]" = None,
-        log_level: typing.Optional[typing.Any] = None,
         interpolate: typing.Optional[bool] = None,
         merge: "typing.Union[str, ConfigLoaderMergeMethod, Merge]" = (
             ConfigLoaderMergeMethod.Simple
@@ -740,9 +737,6 @@ class ConfigLoader(ConfigBackend):
                 command text — or a string: a `Path` attribute name, or a
                 ``"%<jinja-expr>"`` template. Both string forms work here and
                 per call. Defaults to the source's filename stem.
-            log_level: Deprecated and ignored. It never changed anything:
-                library code must not call ``setLevel`` on a shared logger.
-                Configure the ``yaconfiglib`` logger through :mod:`logging`.
             interpolate: If True, run Jinja2 interpolation over the merged
                 result after loading (see :func:`yaconfiglib.utils.jinja2.interpolate`).
             merge: The merge strategy applied between successive sources —
@@ -859,17 +853,6 @@ class ConfigLoader(ConfigBackend):
         self.interpolate = False if interpolate is None else bool(interpolate)
         self.inject_env = bool(inject_env)
         self.strict = bool(strict)
-        if log_level is not None:
-            # Never had an effect: setting the level here made every construction
-            # (including the import-time DEFAULT_LOADER) mutate global logging
-            # state, so it was removed — but the parameter stayed, silently
-            # ignoring valid values and rejecting ints that are not a LogLevel.
-            warnings.warn(
-                "ConfigLoader(log_level=...) has no effect and will be removed; "
-                "configure the 'yaconfiglib' logger with the logging module instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
         self.path_factory = path_factory or self.DEFAULT_PATH_FACTORY
         self.base_dir = base_dir or ""
         self.encoding = encoding or self.DEFAULT_ENCODING

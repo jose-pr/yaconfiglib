@@ -161,14 +161,6 @@ class TestInMemoryTextMaterialization:
         source = ("#!" + LF + "a: 1" + LF).encode(codec)
         assert ConfigLoader().load(source, encoding=codec) == {"a": 1}
 
-    def test_temp_fallback_text_doc(self, monkeypatch):
-        import yaconfiglib.utils.source as source_mod
-        from yaconfiglib import ConfigLoader
-
-        monkeypatch.setattr(source_mod, "MemPath", None)
-        doc = "#!" + LF + "msg: |" + CRLF + "  日本" + CRLF
-        assert ConfigLoader(encoding="cp1252").load(doc) == {"msg": "日本" + LF}
-
     def test_bytes_doc_decoded_with_loader_codec(self):
         from yaconfiglib import ConfigLoader
 

@@ -14,10 +14,9 @@ import typing
 import typing as _ty
 from collections.abc import Mapping
 
-try:
-    from pathlib_next import Path
-except ImportError:
-    from pathlib import Path
+# pathlib-next is a required dependency; see utils/source.py for why this
+# import is unconditional.
+from pathlib_next import Path
 
 import configparser
 

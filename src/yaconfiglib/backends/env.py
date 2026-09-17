@@ -6,10 +6,9 @@ import os
 import json
 import typing as _ty
 
-try:
-    from pathlib_next import Path as _Path
-except ImportError:
-    from pathlib import Path as _Path  # type: ignore[no-redef]
+# pathlib-next is a required dependency; see utils/source.py for why this
+# import is unconditional.
+from pathlib_next import Path as _Path
 
 from ..errors import ConfigValueError
 from .base import ConfigBackend
