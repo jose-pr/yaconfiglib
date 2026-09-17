@@ -83,6 +83,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `ConfigBackend` is a regular base class instead of a `typing.Protocol`.
+  `issubclass()`/`isinstance()` checks against it now work — they raised `TypeError` — and
+  type checkers no longer report `ConfigLoader()`, `EnvVarBackend()`, `PythonBackend()` or
+  a custom backend as abstract. Registration was already nominal, so dispatch is
+  unchanged; the one behaviour difference is that an object which merely *looks* like a
+  backend is no longer an `isinstance` of it — subclass `ConfigBackend` instead.
 - `yaconfiglib.utils` no longer re-exports the internal names `T` and `annotations`,
   which a star-import of its `enum` module leaked.
 - While sniffing a command's output format, only a parse failure now means "try the next
@@ -280,6 +286,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Backend types say what they actually are: `Jinja2ConfigLoader.load()` is typed as
+  returning the parsed document (it claimed `None`), a name-only backend
+  (`PATHNAME_REGEX = None`) type-checks, `YamlConfig` accepts
+  `loader_cls=yaml.SafeLoader`/`CSafeLoader` and any dumper class (the previous hints
+  rejected the backend's own defaults, since `SafeLoader` does not subclass `BaseLoader`),
+  backend `dumps()` accepts the data it serializes, and
+  `ConfigBackend.get_class_by_name()` is typed — and now explicitly returns — `None` for
+  an unknown name.
 - `typing.get_type_hints()` now works on Python 3.9 — the supported floor — for the whole
   public API (`ConfigLoader`, `load`/`loads`, `parse_sources`, the Jinja2 helpers, the
   merge methods, every backend). Hints used `X | Y` and `typing.Self`, which 3.9 cannot

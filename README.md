@@ -104,7 +104,7 @@ config = ConfigLoader().load(
 | Module | Purpose |
 | --- | --- |
 | `yaconfiglib.loader` | Core `ConfigLoader` orchestrator, `load()`, `loads()`, `load_as()`, `dump()`, `dumps()`, and `DotAccessibleDict` |
-| `yaconfiglib.backends` | `ConfigBackend` protocol & registry |
+| `yaconfiglib.backends` | `ConfigBackend` base class & registry |
 | `yaconfiglib.backends.yaml` | `YamlConfig` parsing and include tag construction |
 | `yaconfiglib.backends.toml` | `TomlConfig` parsing (stdlib `tomllib`, or its `tomli` backport below 3.11) |
 | `yaconfiglib.backends.json` | `JsonConfig` parsing |

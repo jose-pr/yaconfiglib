@@ -308,6 +308,10 @@ error or a `yaconfiglib.ConfigError` subclass (`ConfigValueError`,
 `ConfigTypeError`), so callers can catch it with everything else through
 `yaconfiglib.load_error_types()`.
 
+`ConfigBackend` is a plain base class, so only `load()` is required and a
+type checker treats your subclass as concrete — there are no abstract members
+to satisfy, and `issubclass(MyBackend, ConfigBackend)` works.
+
 Subclass `ConfigBackend` and override `load()` (and optionally `dumps()`,
 which you call on the backend instance — `yaconfiglib.dump()`/`dumps()`
 always write YAML):

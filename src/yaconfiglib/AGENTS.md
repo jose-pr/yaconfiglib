@@ -63,7 +63,8 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
   `sh://`, a `+fmt` variant, or a script-extension file) is reached while
   `allow_commands=False` is in effect, including via a nested `!include` (raised by
   `ConfigLoader._load()`, with a backstop in `CommandBackend.load()` during a load).
-- **`ConfigBackend`** — the pluggable-backend protocol; see `backends/base.py` below.
+- **`ConfigBackend`** — the pluggable-backend **base class**; see `backends/base.py`
+  below.
 - **`ConfigError`** and subclasses, **`load_error_types()`** — see "Errors" below.
 - **`ErrorFrame`** — one step in an error's `config_frames`; see "Errors" below.
 - **`MergeMethod`**, **`typed_merge`**, **`OpaqueMerge`**, **`opaque`**,
@@ -526,11 +527,17 @@ predicates and `except` clauses on those types work. Each class below is a `Conf
 
 ## Backends (`backends/`)
 
-- **`ConfigBackend`** (`base.py`, `typing.Protocol`) — the pluggable-backend contract.
+- **`ConfigBackend`** (`base.py`) — the pluggable-backend contract, a **plain base
+  class**. It was a `typing.Protocol`, which made `issubclass()` against it raise
+  `TypeError` on every interpreter and made type checkers report every backend without
+  a `dumps` — including `ConfigLoader` itself — as abstract. Registration was always
+  nominal (`type.__subclasses__`), so nothing about dispatch changed; what did change
+  is that an object which merely *looks* like a backend is no longer an `isinstance`
+  of it. `issubclass`/`isinstance` now work.
   Subclassing and importing the subclass is the entire registration mechanism (no
   registry call needed); lookup walks `__subclasses__(recursive=True)` in
   definition order.
-  - Override **`load(self, path, **options) -> object`** (required). Unrecognized
+  - Override **`load(self, path, **options) -> Any`** (required). Unrecognized
     `**options` should generally be ignored, not raise — `ConfigLoader` forwards a
     shared option set to every backend it calls.
   - For content it cannot accept, raise the parser's own error or a `ConfigError`
