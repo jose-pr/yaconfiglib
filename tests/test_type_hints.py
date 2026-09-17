@@ -460,3 +460,98 @@ class TestBackendContractTypes:
         assert typing.get_origin(_hints(ConfigBackend.get_class_by_path)["return"]) is (
             type
         )
+
+
+class TestMergeTypingSurface:
+    """The merge API as a checker sees it.
+
+    `ConfigLoaderMergeMethod` is built at runtime by `MergeMethod.extend`, which
+    returns `type[IntEnum]` — so a checker saw an enum with no members and
+    `ConfigLoaderMergeMethod.Deep` was an error. A member-bearing enum cannot be
+    subclassed either way, so the declaration a checker reads restates the
+    members, and this class pins it against the runtime enum.
+    """
+
+    def test_merge_method_shim_matches_runtime_enum(self):
+        import ast
+        import inspect
+
+        import yaconfiglib.loader as loader_module
+        from yaconfiglib.loader import ConfigLoaderMergeMethod
+
+        tree = ast.parse(inspect.getsource(loader_module))
+        shim = None
+        for node in tree.body:
+            if not isinstance(node, ast.If):
+                continue
+            for inner in node.body:
+                if (
+                    isinstance(inner, ast.ClassDef)
+                    and inner.name == "ConfigLoaderMergeMethod"
+                ):
+                    shim = inner
+        assert shim is not None, "no TYPE_CHECKING declaration found"
+        assert [ast.unparse(b) for b in shim.bases] == ["IntEnum"]
+
+        declared = {}
+        methods = set()
+        for statement in shim.body:
+            if isinstance(statement, ast.Assign) and isinstance(
+                statement.targets[0], ast.Name
+            ):
+                declared[statement.targets[0].id] = ast.literal_eval(statement.value)
+            elif isinstance(statement, ast.FunctionDef):
+                methods.add(statement.name)
+        # The pin: a member added at runtime must be added here too, or a
+        # checker silently stops knowing about it.
+        assert declared == {m.name: m.value for m in ConfigLoaderMergeMethod}
+        assert {"__call__", "init"} <= methods
+
+    def test_merge_hints_accept_strategy_names(self):
+        from yaconfiglib.loader import ConfigLoader
+
+        # ConfigLoader(merge="deep") is documented, and both entry points
+        # resolve a string through the enum's case-insensitive _missing_.
+        for obj in (ConfigLoader.__init__, ConfigLoader.load):
+            assert str in _flatten_union(_hints(obj)["merge"]), obj
+
+    def test_typed_merge_accepts_special_form_hints(self):
+        import typing
+
+        from yaconfiglib import typed_merge
+
+        hints = _hints(typed_merge)
+        # `type[T]` alone rejects the documented Optional[...] / Dict[str, int]
+        # hints, which are not classes.
+        assert hints["cls"] is typing.Any
+        assert hints["return"] is typing.Any
+        get_overloads = getattr(typing, "get_overloads", None)
+        if get_overloads is not None:  # 3.11+
+            assert len(get_overloads(typed_merge)) == 3
+
+    def test_opaque_preserves_class_type_hint(self):
+        import typing
+
+        from yaconfiglib import opaque
+
+        hints = _hints(opaque)
+        # Without the TypeVar, pyright erases the decorated class to `type`.
+        assert hints["return"] == hints["cls"]
+        assert typing.get_origin(hints["cls"]) is type
+
+    def test_merge_module_exports_typed_merge_helpers(self):
+        import yaconfiglib.utils.merge as merge_module
+
+        expected = {
+            "Merge",
+            "MergeMethod",
+            "is_array",
+            "is_scalar",
+            "typed_merge",
+            "OpaqueMerge",
+            "opaque",
+            "TypedNamespace",
+        }
+        assert expected <= set(merge_module.__all__)
+        for name in expected:
+            assert getattr(merge_module, name, None) is not None, name

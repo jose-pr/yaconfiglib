@@ -368,7 +368,19 @@ def _merge_fields(
     return inst
 
 
-def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
+@typing.overload
+def typed_merge(cls: "typing.Type[T]", *objects: object, init: bool = True) -> T: ...
+
+
+@typing.overload
+def typed_merge(cls: "typing.Type[T]", init: bool = True) -> None: ...
+
+
+@typing.overload
+def typed_merge(cls: typing.Any, *objects: object, init: bool = True) -> typing.Any: ...
+
+
+def typed_merge(cls: typing.Any, *objects: object, init: bool = True) -> typing.Any:
     """Recursively merge *objects* into an instance of *cls*.
 
     ``None`` objects are skipped at every level, so a later ``None`` never
@@ -497,7 +509,7 @@ class OpaqueMerge:
         return _last_wins(cls, *objects, init=init)
 
 
-def opaque(cls: type) -> type:
+def opaque(cls: "typing.Type[T]") -> "typing.Type[T]":
     """Class decorator equivalent of :class:`OpaqueMerge`.
 
     Marks *cls* opaque to :func:`typed_merge` (last object wins) without altering

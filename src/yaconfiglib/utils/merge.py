@@ -28,6 +28,21 @@ import typing as _ty
 
 from .enum import IntEnum
 
+#: The module's public surface. `yaconfiglib` (or
+#: `yaconfiglib.utils.typing_merge`) is the canonical import for the
+#: typed-merge helpers; they are re-exported here, and this list is what
+#: makes that re-export explicit to a type checker.
+__all__ = [
+    "Merge",
+    "MergeMethod",
+    "is_array",
+    "is_scalar",
+    "typed_merge",
+    "OpaqueMerge",
+    "opaque",
+    "TypedNamespace",
+]
+
 logger = logging.getLogger(__name__)
 
 # Tuple used for isinstance() checks — must be a plain tuple for 3.9 compat.

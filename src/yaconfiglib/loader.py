@@ -178,10 +178,37 @@ class _ConfigLoaderMergeMethod(IntEnum):
 
 
 if typing.TYPE_CHECKING:
+    # What a type checker reads. The runtime class is built by
+    # `MergeMethod.extend(...)`, which returns `type[IntEnum]` — so a checker
+    # saw no members at all and `ConfigLoaderMergeMethod.Deep` was an error.
+    # A member-bearing enum cannot be subclassed, at runtime or statically,
+    # so the members are restated here and pinned against the runtime enum by
+    # `TestMergeTypingSurface.test_merge_method_shim_matches_runtime_enum`.
 
-    class ConfigLoaderMergeMethod(
-        _ConfigLoaderMergeMethod, MergeMethod, typing.Protocol
-    ): ...
+    class ConfigLoaderMergeMethod(IntEnum):
+        Simple = 1
+        Deep = 2
+        Substitute = 3
+        Last = 4
+        List = 5
+        Hash = 6
+
+        def __call__(
+            self,
+            a: typing.Any,
+            b: typing.Any,
+            *,
+            memo: "typing.Optional[dict]" = None,
+            **options: typing.Any,
+        ) -> typing.Any: ...
+
+        def init(
+            self,
+            initial: object,
+            configloaderkey: str,
+            memo: "typing.Optional[dict]" = None,
+            **options: typing.Any,
+        ): ...
 
 else:
     ConfigLoaderMergeMethod = MergeMethod.extend(
@@ -546,7 +573,7 @@ class ConfigLoader(ConfigBackend):
         key_factory: "typing.Optional[typing.Union[str, typing.Callable[[_SourcePath, typing.Any], str]]]" = None,
         log_level: typing.Optional[typing.Any] = None,
         interpolate: typing.Optional[bool] = None,
-        merge: "typing.Union[ConfigLoaderMergeMethod, Merge]" = (
+        merge: "typing.Union[str, ConfigLoaderMergeMethod, Merge]" = (
             ConfigLoaderMergeMethod.Simple
         ),
         merge_options: "typing.Optional[typing.Mapping[str, typing.Any]]" = None,
@@ -856,7 +883,9 @@ class ConfigLoader(ConfigBackend):
         key_factory: "typing.Optional[typing.Union[str, typing.Callable[[_SourcePath, typing.Any], str]]]" = None,
         flatten: bool = False,
         interpolate: typing.Optional[bool] = None,
-        merge: "typing.Optional[typing.Union[ConfigLoaderMergeMethod, Merge]]" = None,
+        merge: (
+            "typing.Optional[typing.Union[str, ConfigLoaderMergeMethod, Merge]]"
+        ) = None,
         merge_options: "typing.Optional[typing.Mapping[str, typing.Any]]" = None,
         allow_commands: typing.Optional[bool] = None,
         sandbox: typing.Optional[bool] = None,
