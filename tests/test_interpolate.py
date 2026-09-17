@@ -8,7 +8,6 @@ pytest.importorskip("jinja2")
 
 from yaconfiglib.utils import jinja2 as j2  # noqa: E402 - needs the skip above
 
-
 # ---------------------------------------------------------------------------
 # compile / eval helpers
 # ---------------------------------------------------------------------------

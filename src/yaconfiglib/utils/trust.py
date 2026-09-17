@@ -35,7 +35,6 @@ __all__ = [
 # either place must match the same class.
 from ..errors import CommandsDisabledError as CommandsDisabledError  # noqa: E402
 
-
 #: ``(allow_commands, sandbox, strict)`` in effect for the current context.
 _POLICY: "contextvars.ContextVar[typing.Tuple[bool, bool, bool]]" = (
     contextvars.ContextVar("yaconfiglib_trust_policy", default=(True, False, False))

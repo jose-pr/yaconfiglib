@@ -14,7 +14,6 @@ from yaconfiglib import ConfigLoader
 from yaconfiglib.loader import ConfigLoaderMergeMethod
 from yaconfiglib.utils.source import parse_sources
 
-
 # ---------------------------------------------------------------------------
 # Basic loading
 # ---------------------------------------------------------------------------
