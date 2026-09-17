@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import codecs
+import contextlib
 import contextvars
 import copy as _copy
 import dataclasses
@@ -393,6 +394,28 @@ def _nested_model(hint: object) -> object:
     return None
 
 
+@contextlib.contextmanager
+def _model_field(model_cls: type, segment: object = None):
+    """Attribute a hydration failure to *model_cls*, and to *segment* if given.
+
+    The same contract as the typed-merge wrapper: only `TypeError` and
+    `ValueError` (which covers a Pydantic v2 `ValidationError`), the error is
+    always re-raised unchanged, and the key is built inside out so the path
+    reads relative to the model the caller asked for.
+    """
+    try:
+        yield
+    except (TypeError, ValueError) as error:
+        if segment is not None:
+            existing = getattr(error, "config_key", ()) or ()
+            try:
+                error.config_key = (segment,) + tuple(existing)
+            except (AttributeError, TypeError):
+                pass
+        _add_error_context(error, model=getattr(model_cls, "__name__", None))
+        raise
+
+
 def _hydrate(model_cls: type, data: typing.Mapping) -> object:
     """Build *model_cls* from *data*, recursing into model-typed fields.
 
@@ -423,11 +446,14 @@ def _hydrate(model_cls: type, data: typing.Mapping) -> object:
                 continue
             nested = _nested_model(hints.get(key))
             if nested is not None and isinstance(value, typing.Mapping):
-                value = _hydrate(nested, value)
+                with _model_field(model_cls, key):
+                    value = _hydrate(nested, value)
             values[key] = value
-        return model_cls(**values)
+        with _model_field(model_cls):
+            return model_cls(**values)
 
-    return model_cls(**data)
+    with _model_field(model_cls):
+        return model_cls(**data)
 
 
 class _IgnoreError(typing.Protocol):
@@ -1056,9 +1082,16 @@ class ConfigLoader(ConfigBackend):
         """
         data = self.load(*pathname, **kwargs)
         if not isinstance(data, dict):
-            raise TypeError(
-                "Loaded configuration must be a dictionary to load as a model"
+            # Naming the model and the actual type separates "this document is
+            # the wrong shape" from "nothing matched", which used to share one
+            # message.
+            message = (
+                f"load_as({getattr(model_cls, '__name__', model_cls)}) needs a "
+                f"mapping, got {type(data).__name__}"
             )
+            if data is None:
+                message += "; no source was loaded"
+            raise ConfigTypeError(message)
         return _hydrate(model_cls, data)
 
     def load_all(

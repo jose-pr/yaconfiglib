@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import collections.abc as _abc
+import contextlib
 import inspect
 import sys
 import types
@@ -9,6 +10,9 @@ import typing
 from argparse import Namespace
 from dataclasses import fields as _dc_fields
 from dataclasses import is_dataclass
+
+from .. import errors as _errors
+from ..errors import ConfigTypeError, ConfigValueError
 
 T = typing.TypeVar("T")
 
@@ -134,6 +138,54 @@ def _type_hints(origin: type) -> dict:
     return hints
 
 
+#: "this failure is the model's, not one field's" — a construction error.
+_NO_FIELD = object()
+
+
+@contextlib.contextmanager
+def _field(origin: object, segment: object = _NO_FIELD):
+    """Attribute a coercion or construction failure to *origin*'s *segment*.
+
+    Only `TypeError` and `ValueError` are caught — the two types coercion
+    constructors and this module's own raises produce — and the error is always
+    re-raised, with its type and identity untouched. Wrapped **outside** the
+    two internal fallbacks (`_construct_sequence`'s retry and the mapping
+    retry), so an error those swallow on purpose is never annotated.
+    """
+    try:
+        yield
+    except (TypeError, ValueError) as error:
+        _attribute_field(error, origin, segment)
+        raise
+
+
+def _attribute_field(
+    error: BaseException, origin: object, segment: object = _NO_FIELD
+) -> None:
+    """Record *segment* and *origin*'s name on *error*, then let it travel on.
+
+    The key is built from the inside out: each level prepends its own field or
+    index to whatever path the level below recorded, so an error from deep in a
+    model reads `at db.hosts[0].port (Outer)` — relative to the model the
+    caller actually asked for, whose name wins because outer handlers run last.
+
+    Pass no *segment* for a construction failure: the error belongs to this
+    model as a whole, not to one of its fields.
+    """
+    model = getattr(origin, "__name__", None)
+    if segment is _NO_FIELD:
+        _errors._add_error_context(error, model=model)
+        return
+    existing = getattr(error, "config_key", ()) or ()
+    # Set directly: _add_error_context keeps the first key it is given, and here
+    # each level legitimately extends the path.
+    try:
+        error.config_key = (segment,) + tuple(existing)
+    except (AttributeError, TypeError):
+        pass
+    _errors._add_error_context(error, model=model)
+
+
 def _construct_sequence(origin: type, value: object, items: list) -> object:
     """Build *items* into *origin*, or fall back to *value* if it refuses them."""
     target = origin
@@ -163,7 +215,7 @@ def _merge_sequence(
         # A scalar or mapping where a sequence was declared is an authoring
         # error the merge cannot guess at (wrap it as one item? split it?).
         # bytes stays allowed: a bytearray hint legitimately consumes it.
-        raise TypeError(
+        raise ConfigTypeError(
             f"cannot merge a {type(value).__name__} value into sequence type "
             f"{origin.__name__}"
         )
@@ -177,15 +229,13 @@ def _merge_sequence(
         # A NamedTuple: each item takes its field's hint and the constructor
         # enforces arity. Never zip(fields, value) — zip truncates, so a
         # three-item value would silently come back as a two-field instance.
-        items = [
-            typed_merge(
-                hints.get(fields[i], type(item)) if i < len(fields) else type(item),
-                item,
-                init=init,
-            )
-            for i, item in enumerate(value)
-        ]
-        return origin(*items)
+        items = []
+        for i, item in enumerate(value):
+            hint = hints.get(fields[i], type(item)) if i < len(fields) else type(item)
+            with _field(origin, fields[i] if i < len(fields) else i):
+                items.append(typed_merge(hint, item, init=init))
+        with _field(origin):
+            return origin(*items)
 
     child_cls = cls_args[0] if cls_args else None
     if issubclass(origin, tuple):
@@ -194,18 +244,21 @@ def _merge_sequence(
         if args and not (len(args) == 2 and args[1] is Ellipsis):
             items = list(value)
             if len(items) != len(args):
-                raise TypeError(
+                raise ConfigTypeError(
                     f"cannot merge {len(items)} items into a "
                     f"{len(args)}-element {origin.__name__} hint"
                 )
-            coerced = [
-                typed_merge(arg or type(item), item, init=init)
-                for arg, item in zip(args, items)
-            ]
+            coerced = []
+            for index, (arg, item) in enumerate(zip(args, items)):
+                with _field(origin, index):
+                    coerced.append(typed_merge(arg or type(item), item, init=init))
             return _construct_sequence(origin, value, coerced)
         child_cls = args[0] if args else None
 
-    items = [typed_merge(child_cls or type(item), item, init=init) for item in value]
+    items = []
+    for index, item in enumerate(value):
+        with _field(origin, index):
+            items.append(typed_merge(child_cls or type(item), item, init=init))
     return _construct_sequence(origin, value, items)
 
 
@@ -278,7 +331,10 @@ def _merge_fields(
             merged[name] = None
             continue
         hint = hints.get(name, child_cls or type(present[-1]))
-        merged[name] = typed_merge(hint, *values, init=init) if hint else present[-1]
+        with _field(origin, name):
+            merged[name] = (
+                typed_merge(hint, *values, init=init) if hint else present[-1]
+            )
 
     if target is not None:
         for prop, value in merged.items():
@@ -287,7 +343,8 @@ def _merge_fields(
 
     if is_mapping:
         if init:
-            return _construct_mapping(origin, objects, merged)
+            with _field(origin):
+                return _construct_mapping(origin, objects, merged)
         if inspect.isabstract(origin):
             return dict(merged)
         inst = origin.__new__(origin)
@@ -302,7 +359,8 @@ def _merge_fields(
             # pass through, which a custom **kwargs __init__ relies on.
             for name in (f.name for f in _dc_fields(origin) if not f.init):
                 merged.pop(name, None)
-        return origin(**merged)
+        with _field(origin):
+            return origin(**merged)
 
     inst = origin.__new__(origin)
     for prop, value in merged.items():
@@ -402,7 +460,7 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
         try:
             return _BOOL_WORDS[value.strip().lower()]
         except KeyError:
-            raise ValueError(f"cannot interpret {value!r} as a bool") from None
+            raise ConfigValueError(f"cannot interpret {value!r} as a bool") from None
     return origin(value)
 
 

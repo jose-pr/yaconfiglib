@@ -190,8 +190,15 @@ def _render_context(error: BaseException) -> str:
         else:
             parts.append(f"{frame.kind} {frame.source}")
     key = getattr(error, "config_key", None)
-    if key:
+    model = getattr(error, "config_model", None)
+    if key and model:
+        parts.append(f"at {_render_key(key)} ({model})")
+    elif key:
         parts.append(f"at {_render_key(key)}")
+    elif model:
+        # One spelling for the model wherever it appears, so a failure at a
+        # field and a failure constructing the model read alike.
+        parts.append(f"({model})")
     return f" [{'; '.join(parts)}]" if parts else ""
 
 
@@ -325,13 +332,19 @@ def _add_error_context(
     source: "_ty.Optional[str]" = None,
     frame: "_ty.Optional[ErrorFrame]" = None,
     key: "_ty.Optional[_ty.Sequence[_ty.Union[str, int]]]" = None,
+    model: "_ty.Optional[str]" = None,
 ) -> BaseException:
     """Record where *error* came from, and render it into *error*'s message.
 
     Returns the same object, with its type and identity untouched — an
     `except yaml.YAMLError` clause and an `ignore_error` predicate see exactly
-    what they saw before, plus `config_source`, `config_frames` and
-    `config_key`.
+    what they saw before, plus `config_source`, `config_frames`,
+    `config_key` and `config_model`.
+
+    *model* overwrites any model already recorded, so as the error travels out
+    of nested `typed_merge`/`load_as` calls the **outermost** model is the one
+    named — which is the one the caller asked for, and the one the key path is
+    relative to.
 
     Never raises: it runs inside ``except`` blocks, where an error of its own
     would replace the one being annotated.
@@ -352,6 +365,8 @@ def _add_error_context(
         _set_attribute(error, "config_frames", tuple(frames) + (frame,))
     if key and getattr(error, "config_key", None) is None:
         _set_attribute(error, "config_key", tuple(key))
+    if model is not None:
+        _set_attribute(error, "config_model", model)
     _write_context(error)
     return error
 

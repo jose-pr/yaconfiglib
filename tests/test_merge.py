@@ -2,6 +2,7 @@
 Tests for MergeMethod (simple, substitute, deep) and typed_merge.
 """
 
+import dataclasses
 import typing
 from argparse import Namespace
 from dataclasses import dataclass, field
@@ -1003,3 +1004,74 @@ class TestTypedMergeMappingConstruction:
 
         merged = typed_merge(Namespace, Source(port="8080"))
         assert merged.port == 8080
+
+
+@dataclasses.dataclass
+class _CtxInner:
+    port: int
+
+
+@dataclasses.dataclass
+class _CtxOuter:
+    db: _CtxInner
+
+
+@dataclasses.dataclass
+class _CtxPorts:
+    ports: typing.List[int]
+
+
+class TestTypedMergeErrorContext:
+    """A model failure points at the field, not just at the value.
+
+    `typed_merge(Outer, {"db": {"port": "abc"}})` reported only
+    `invalid literal for int() with base 10: 'abc'` — in a large configuration
+    that could be any of a hundred fields.
+    """
+
+    def test_field_coercion_error_names_field_path(self):
+        from yaconfiglib import typed_merge
+
+        with pytest.raises(ValueError) as caught:
+            typed_merge(_CtxOuter, {"db": {"port": "abc"}})
+        error = caught.value
+        assert error.config_key == ("db", "port")
+        assert error.config_model == "_CtxOuter"
+        message = str(error)
+        assert "db.port" in message
+        assert "(_CtxOuter)" in message
+
+    def test_unexpected_field_error_names_model(self):
+        from yaconfiglib import typed_merge
+
+        with pytest.raises(TypeError) as caught:
+            typed_merge(_CtxInner, {"prot": 1})
+        message = str(caught.value)
+        # The parenthesized form is the added context: 3.14's own message
+        # already says "_CtxInner.__init__()", so asserting that alone would
+        # pass there for the wrong reason.
+        assert "(_CtxInner)" in message
+        assert "prot" in message
+
+    def test_sequence_item_error_names_index(self):
+        from yaconfiglib import typed_merge
+
+        with pytest.raises(ValueError) as caught:
+            typed_merge(_CtxPorts, {"ports": ["1", "x"]})
+        assert "ports[1]" in str(caught.value)
+
+    def test_own_raises_are_config_errors(self):
+        import yaconfiglib
+        from yaconfiglib import typed_merge
+
+        # A scalar where a sequence is declared is this module's own refusal.
+        with pytest.raises(yaconfiglib.ConfigTypeError) as caught:
+            typed_merge(_CtxPorts, {"ports": "80"})
+        assert isinstance(caught.value, TypeError)
+
+    def test_error_types_unchanged(self):
+        from yaconfiglib import typed_merge
+
+        # The pin: int("abc") still surfaces as a ValueError.
+        with pytest.raises(ValueError):
+            typed_merge(_CtxOuter, {"db": {"port": "abc"}})

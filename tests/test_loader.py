@@ -1262,7 +1262,9 @@ class TestLoadAs:
 
         (tmp_path / "list.yaml").write_text("- 1\n- 2\n", encoding="utf-8")
 
-        with pytest.raises(TypeError, match="must be a dictionary"):
+        # The TYPE is what this pins; the message now names the model and the
+        # type actually loaded (see TestLoadAsErrorContext).
+        with pytest.raises(TypeError, match="needs a mapping"):
             ConfigLoader(base_dir=tmp_path).load_as(Plain, "list.yaml")
 
     @pytest.mark.usefixtures("needs_yaml")
@@ -2310,3 +2312,70 @@ class TestInterpolationIgnoreError:
             loader.load("typo.yaml", interpolate=True)
         with pytest.raises(_jinja2.UndefinedError):
             list(loader.load_all("typo.yaml", interpolate=True))
+
+
+@pytest.mark.usefixtures("needs_yaml")
+class TestLoadAsErrorContext:
+    """`load_as` says which model, which field, and whether anything loaded.
+
+    A list document and a glob that matched nothing produced the same message,
+    "Loaded configuration must be a dictionary to load as a model", which named
+    neither the model nor what was actually loaded.
+    """
+
+    def test_load_as_non_mapping_names_model_and_type(self, tmp_path):
+        import dataclasses
+
+        from yaconfiglib import ConfigLoader
+
+        @dataclasses.dataclass
+        class Inner:
+            port: int
+
+        (tmp_path / "list.yaml").write_text("- 1\n- 2\n", encoding="utf-8")
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        with pytest.raises(TypeError) as caught:
+            loader.load_as(Inner, "list.yaml")
+        message = str(caught.value)
+        assert "Inner" in message
+        assert "list" in message
+
+    def test_load_as_nothing_loaded_says_so(self, tmp_path):
+        import dataclasses
+
+        from yaconfiglib import ConfigLoader
+
+        @dataclasses.dataclass
+        class Inner:
+            port: int
+
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        with pytest.raises(TypeError) as caught:
+            loader.load_as(Inner, "conf.d/*.nomatch")
+        # "Nothing matched" and "wrong shape" are different problems.
+        assert "no source was loaded" in str(caught.value)
+
+    def test_load_as_nested_field_error_names_path(self, tmp_path):
+        import dataclasses
+
+        from yaconfiglib import ConfigLoader
+
+        @dataclasses.dataclass
+        class Inner:
+            port: int
+
+        @dataclasses.dataclass
+        class Outer:
+            db: Inner
+
+        (tmp_path / "typo.yaml").write_text("db:\n  prot: 1\n", encoding="utf-8")
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        with pytest.raises(TypeError) as caught:
+            loader.load_as(Outer, "typo.yaml")
+        error = caught.value
+        # The unknown key is filtered out, so Inner() is missing `port` — and
+        # the error now says which field of which model that was.
+        assert error.config_key == ("db",)
+        message = str(error)
+        assert "db" in message
+        assert "(Outer)" in message
