@@ -430,9 +430,24 @@ class CommandBackend(ConfigBackend):
         # Strip loader/format to avoid infinite recursion, and origin because the
         # command's output is not a file next to it (ConfigLoader has no such
         # parameter, so passing it through would raise TypeError).
+        # `master` is stripped for the same reason as `origin`: it is the PARSER
+        # of the document that included this command, and the output is a
+        # different document — it must not share that document's anchors, and
+        # its `_yaconfiglib_include_encoding` would otherwise override the codec
+        # this output was decoded with (measured: a mapping-form `encoding:` was
+        # ignored in favour of the including file's).
         loads_options = {
-            k: v for k, v in options.items() if k not in ("loader", "format", "origin")
+            k: v
+            for k, v in options.items()
+            if k not in ("loader", "format", "origin", "master")
         }
+        # The codec this output was decoded with is also the codec its own
+        # `!include` targets are read with. `encoding` is a named parameter
+        # here, so it is absent from **options: without this line the inner
+        # loads() fell back to UTF-8 and a non-UTF-8 include raised, blaming
+        # the caller for not passing an encoding they had passed. Set after the
+        # comprehension, so adding a key to the strip-list above cannot drop it.
+        loads_options["encoding"] = codec
 
         candidates = []
         if explicit_format:

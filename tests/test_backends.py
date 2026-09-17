@@ -1890,3 +1890,78 @@ class TestCommandErrors:
         # An in-memory source with no script extension, through loads().
         with pytest.raises(yaconfiglib.ConfigValueError):
             yaconfiglib.loads("echo 1", loader="command")
+
+
+@pytest.mark.usefixtures("needs_yaml")
+class TestCommandOutputIncludeEncoding:
+    """A command's output is parsed with the codec it was decoded with.
+
+    `encoding` is a named parameter of `CommandBackend.load`, so it was absent
+    from the options forwarded to the inner `loads()`: the output document, and
+    every `!include` inside it, were read as UTF-8. A non-UTF-8 include then
+    raised `UnicodeDecodeError` with a hint telling the caller to pass the very
+    encoding they had passed.
+    """
+
+    @staticmethod
+    def _emit(tmp_path, body, name="emit.py"):
+        script = tmp_path / name
+        script.write_text(body, encoding="utf-8")
+        return f'cmd://"{sys.executable}" "{script}"'
+
+    @staticmethod
+    def _cp1252_include(tmp_path):
+        (tmp_path / "sub.yaml").write_bytes("inner: café\n".encode("cp1252"))
+
+    def test_per_call_encoding_reaches_output_include(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        self._cp1252_include(tmp_path)
+        source = self._emit(tmp_path, "print('sub: !include sub.yaml')\n")
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        result = loader.load(source, encoding="cp1252", timeout=60)
+        assert ascii(result["sub"]["inner"]) == ascii("café")
+
+    def test_constructor_encoding_reaches_output_include(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        self._cp1252_include(tmp_path)
+        source = self._emit(tmp_path, "print('sub: !include sub.yaml')\n")
+        loader = ConfigLoader(base_dir=str(tmp_path), encoding="cp1252")
+        result = loader.load(source, timeout=60)
+        assert ascii(result["sub"]["inner"]) == ascii("café")
+
+    def test_output_round_trips_through_the_declared_codec(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        # The output is DECODED with the call's codec, so by construction it
+        # only ever holds characters that codec can represent — re-encoding the
+        # in-memory document can therefore never fall back to UTF-8 for a
+        # command source. This pins that round trip; a command that emits some
+        # other codec than the one declared is simply mojibake, as it would be
+        # for a file.
+        source = self._emit(
+            tmp_path,
+            "import sys\nsys.stdout.buffer.write('msg: caf\\xe9\\n'.encode('cp1252'))\n",
+            name="wide.py",
+        )
+        loader = ConfigLoader(base_dir=str(tmp_path), encoding="cp1252")
+        result = loader.load(source, timeout=60)
+        assert ascii(result["msg"]) == ascii("café")
+
+    def test_mapping_form_encoding_applies_to_output_includes(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        self._cp1252_include(tmp_path)
+        source = self._emit(tmp_path, "print('sub: !include sub.yaml')\n")
+        (tmp_path / "parent.yaml").write_text(
+            "cmd: !include {pathname: '"
+            + source.replace("\\", "/")
+            + "', encoding: cp1252}\n",
+            encoding="utf-8",
+        )
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        result = loader.load("parent.yaml", timeout=60)
+        # Pins the chosen rule: a mapping-form encoding governs the command's
+        # output AND what that output includes.
+        assert ascii(result["cmd"]["sub"]["inner"]) == ascii("café")
