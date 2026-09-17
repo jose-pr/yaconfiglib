@@ -56,12 +56,23 @@ toml tests then skip and nothing fails.
 
 ## Formatting
 
-black, with `target-version = ["py39"]`:
+black, with `target-version = ["py39"]` — that is the **output** target and is
+independent of the interpreter running black:
 
 ```bash
 black src/ tests/          # fix
-black --check src/ tests/  # verify, as CI does
+black --check src/ tests/  # verify
 ```
+
+Run it from the **3.14 venv**. black 26 requires Python 3.10+, so the 3.9 floor
+venv can only install black 25, and the two releases format one thing
+differently: 25 leaves two blank lines before a comment that follows an import
+block, 26 leaves one. The tree is formatted with 26, which 25 also accepts — so
+either venv's `--check` passes today, but only the 3.14 one will keep the tree
+that way.
+
+There is **no format job in CI**; formatting is verified locally. Adding one
+would mean a job on Python 3.10+, since that is where a current black installs.
 
 ## Examples and benchmarks
 

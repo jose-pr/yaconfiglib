@@ -63,6 +63,8 @@ exclude = ["*.local.*"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 
+# black itself needs Python 3.10+ from version 26 on, so the 3.9 floor venv
+# keeps an older one; run the formatter from the 3.14 venv (see AGENTS.md).
 # Pinned to the project's MINIMUM supported Python so black never emits syntax
 # the floor cannot parse.
 [tool.black]
