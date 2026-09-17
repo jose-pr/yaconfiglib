@@ -75,6 +75,15 @@ logger = logging.getLogger(__name__)
 
 T = typing.TypeVar("T")
 
+#: What a source resolves to before a backend reads it: a path object, or — for
+#: a command URI — the command text itself, which `parse_sources` yields as a
+#: `CommandSource`. `key_factory` and `loader_factory` are called with this.
+_SourcePath = typing.Union[Path, CommandSource]
+
+#: Anything with `__fspath__`, so a stdlib `pathlib.Path` and a pathlib-next
+#: path are both accepted, as the runtime already does.
+_PathLike = typing.Union[str, "os.PathLike[str]"]
+
 
 class _ConfigLoaderMergeMethod(IntEnum):
     """Loader-specific merge strategies layered on top of :class:`~yaconfiglib.utils.merge.MergeMethod`.
@@ -100,8 +109,8 @@ class _ConfigLoaderMergeMethod(IntEnum):
         self,
         initial: object,
         configloaderkey: str,
-        memo: dict = None,
-        **options,
+        memo: "typing.Optional[dict]" = None,
+        **options: typing.Any,
     ):
         """Seed the running result from the first source's document.
 
@@ -128,8 +137,8 @@ class _ConfigLoaderMergeMethod(IntEnum):
         b: object,
         *,
         configloaderkey: str,
-        memo: dict = None,
-        **options,
+        memo: "typing.Optional[dict]" = None,
+        **options: typing.Any,
     ):
         return b
 
@@ -139,8 +148,8 @@ class _ConfigLoaderMergeMethod(IntEnum):
         b: object,
         *,
         configloaderkey: str,
-        memo: dict = None,
-        **options,
+        memo: "typing.Optional[dict]" = None,
+        **options: typing.Any,
     ):
         a.append(b)
         return a
@@ -151,8 +160,8 @@ class _ConfigLoaderMergeMethod(IntEnum):
         b: object,
         *,
         configloaderkey: str,
-        memo: dict = None,
-        **options,
+        memo: "typing.Optional[dict]" = None,
+        **options: typing.Any,
     ):
         if configloaderkey in a:
             # The default key is the filename stem, so a directory glob like
@@ -526,18 +535,22 @@ class ConfigLoader(ConfigBackend):
 
     def __init__(
         self,
-        base_dir: str | Path = "",
+        base_dir: "_PathLike" = "",
         *,
-        encoding: str = None,
-        path_factory: typing.Callable[[str], Path] = None,
-        loader_factory: type[ConfigBackend] = None,
-        recursive: bool = None,
-        key_factory: typing.Callable[[Path, object], str] = None,
-        log_level: object = None,
-        interpolate: bool = None,
-        merge: ConfigLoaderMergeMethod | Merge = ConfigLoaderMergeMethod.Simple,
-        merge_options: dict[str] = None,
-        ignore_error: _IgnoreError | bool = False,
+        encoding: typing.Optional[str] = None,
+        path_factory: "typing.Optional[typing.Callable[[str], os.PathLike[str]]]" = None,
+        loader_factory: (
+            "typing.Optional[typing.Callable[[_SourcePath], ConfigBackend]]"
+        ) = None,
+        recursive: typing.Optional[bool] = None,
+        key_factory: "typing.Optional[typing.Union[str, typing.Callable[[_SourcePath, typing.Any], str]]]" = None,
+        log_level: typing.Optional[typing.Any] = None,
+        interpolate: typing.Optional[bool] = None,
+        merge: "typing.Union[ConfigLoaderMergeMethod, Merge]" = (
+            ConfigLoaderMergeMethod.Simple
+        ),
+        merge_options: "typing.Optional[typing.Mapping[str, typing.Any]]" = None,
+        ignore_error: "typing.Union[_IgnoreError, bool]" = False,
         inject_env: bool = False,
         strict: bool = False,
         allow_commands: bool = True,
@@ -551,7 +564,9 @@ class ConfigLoader(ConfigBackend):
                 includes inside documents that are not files (``loads()``,
                 ``#!`` strings, streams, command output). A relative
                 ``!include`` inside a YAML *file* resolves against that
-                file's own directory. Accepts a string or ``Path``.
+                file's own directory. Accepts a string or any
+                `os.PathLike` — a stdlib `pathlib.Path` and a pathlib-next
+                path both qualify.
             encoding: Default text encoding for reading sources.
             path_factory: Callable used to build a ``Path`` from a bare
                 string source. Defaults to :attr:`DEFAULT_PATH_FACTORY`.
@@ -561,11 +576,14 @@ class ConfigLoader(ConfigBackend):
                 dispatch.
             recursive: Whether glob sources should recurse into
                 subdirectories by default.
-            key_factory: Callable ``(path, value) -> str`` producing the
-                merge key used to track/name each loaded document (e.g.
-                for :attr:`ConfigLoaderMergeMethod.Hash`). Defaults to the
-                source's filename stem. May also be set per-call as a
-                string attribute name or a ``"%<jinja-expr>"`` template.
+            key_factory: How to name each loaded document for merging
+                (e.g. for :attr:`ConfigLoaderMergeMethod.Hash`). Either a
+                callable ``(path, value) -> str``, which receives the source
+                path — or, for a command URI, the
+                :class:`~yaconfiglib.utils.source.CommandSource` carrying the
+                command text — or a string: a `Path` attribute name, or a
+                ``"%<jinja-expr>"`` template. Both string forms work here and
+                per call. Defaults to the source's filename stem.
             log_level: Deprecated and ignored. It never changed anything:
                 library code must not call ``setLevel`` on a shared logger.
                 Configure the ``yaconfiglib`` logger through :mod:`logging`.
@@ -698,7 +716,7 @@ class ConfigLoader(ConfigBackend):
             )
         return True
 
-    def _getpath(self, path: str | Path):
+    def _getpath(self, path: "_PathLike"):
         return path if isinstance(path, Path) else self.path_factory(path)
 
     @property
@@ -706,20 +724,20 @@ class ConfigLoader(ConfigBackend):
         return self._base_dir
 
     @base_dir.setter
-    def base_dir(self, value: str | Path):
+    def base_dir(self, value: "_PathLike"):
         self._base_dir = self._getpath(value)
 
     def _load(
         self,
         path: Path,
         *,
-        encoding: str,
-        loader: str = None,
-        transform: str = None,
-        key_factory: str | typing.Callable[[Path], str] = None,
-        allow_commands: bool = None,
-        **reader_args,
-    ) -> tuple[str, object]:
+        encoding: typing.Optional[str],
+        loader: "typing.Optional[typing.Union[str, ConfigBackend, typing.Callable[[_SourcePath], ConfigBackend]]]" = None,
+        transform: typing.Optional[str] = None,
+        key_factory: "typing.Optional[typing.Union[str, typing.Callable[[_SourcePath, typing.Any], str]]]" = None,
+        allow_commands: typing.Optional[bool] = None,
+        **reader_args: typing.Any,
+    ) -> "typing.Tuple[str, typing.Any]":
 
         # NOTE: `recursive` is deliberately NOT a parameter here. Glob expansion
         # happens in parse_sources(), before _load() is ever called, so a
@@ -830,20 +848,20 @@ class ConfigLoader(ConfigBackend):
     def load(
         self,
         *pathname: SourceLike,
-        recursive: bool = None,
-        encoding: str = None,
-        loader: str = None,
-        transform: str = None,
-        default: object = None,
-        key_factory: str | typing.Callable[[Path], str] = None,
+        recursive: typing.Optional[bool] = None,
+        encoding: typing.Optional[str] = None,
+        loader: "typing.Optional[typing.Union[str, ConfigBackend, typing.Callable[[_SourcePath], ConfigBackend]]]" = None,
+        transform: typing.Optional[str] = None,
+        default: typing.Any = None,
+        key_factory: "typing.Optional[typing.Union[str, typing.Callable[[_SourcePath, typing.Any], str]]]" = None,
         flatten: bool = False,
-        interpolate: bool = None,
-        merge: ConfigLoaderMergeMethod | Merge = None,
-        merge_options: dict[str] = None,
-        allow_commands: bool = None,
-        sandbox: bool = None,
-        **reader_args: object,
-    ) -> object:
+        interpolate: typing.Optional[bool] = None,
+        merge: "typing.Optional[typing.Union[ConfigLoaderMergeMethod, Merge]]" = None,
+        merge_options: "typing.Optional[typing.Mapping[str, typing.Any]]" = None,
+        allow_commands: typing.Optional[bool] = None,
+        sandbox: typing.Optional[bool] = None,
+        **reader_args: typing.Any,
+    ) -> typing.Any:
         """Load, merge, and (optionally) interpolate one or more configuration sources.
 
         Each item in *pathname* is resolved via
@@ -1069,7 +1087,9 @@ class ConfigLoader(ConfigBackend):
 
             return result
 
-    def load_as(self, model_cls: type[T], *pathname: SourceLike, **kwargs) -> T:
+    def load_as(
+        self, model_cls: "typing.Type[T]", *pathname: SourceLike, **kwargs: typing.Any
+    ) -> T:
         """Load configuration sources and instantiate as *model_cls*.
 
         Supports Pydantic models (when pydantic is already imported) or
@@ -1096,13 +1116,13 @@ class ConfigLoader(ConfigBackend):
 
     def load_all(
         self,
-        *pathname: Path | typing.Sequence[Path],
-        encoding: str = None,
-        interpolate: bool = None,
-        sandbox: bool = None,
-        allow_commands: bool = None,
-        **reader_args: object,
-    ) -> typing.Iterator[object]:
+        *pathname: SourceLike,
+        encoding: typing.Optional[str] = None,
+        interpolate: typing.Optional[bool] = None,
+        sandbox: typing.Optional[bool] = None,
+        allow_commands: typing.Optional[bool] = None,
+        **reader_args: typing.Any,
+    ) -> "typing.Iterator[typing.Any]":
         """Yield each source's parsed (and optionally interpolated) document individually, without merging.
 
         Unlike :meth:`load`, which merges every source into a single
@@ -1305,7 +1325,7 @@ class DotAccessibleDict(dict):
         for key, value in list(self.items()):
             dict.__setitem__(self, key, _to_dot_access(value, memo))
 
-    def __getattr__(self, name: str) -> object:
+    def __getattr__(self, name: str) -> typing.Any:
         try:
             return self[name]
         except KeyError:
@@ -1364,8 +1384,8 @@ class DotAccessibleDict(dict):
         return merged
 
     def get(
-        self, key: typing.Hashable, default: object = None, dig: bool = True
-    ) -> object:
+        self, key: typing.Hashable, default: typing.Any = None, dig: bool = True
+    ) -> typing.Any:
         """Look up *key*, optionally as a path into nested containers.
 
         The order is: an **exact** key wins; then, when *dig* is true, a
@@ -1497,7 +1517,7 @@ def _split_loader_kwargs(kwargs: dict) -> "tuple[dict, dict]":
     return loader_kwargs, load_kwargs
 
 
-def load(fp: typing.Any, **kwargs) -> object:
+def load(fp: typing.Any, **kwargs: typing.Any) -> typing.Any:
     """Load configuration from a file path or an open file object.
 
     An open file object is anything with ``read()``, and it is parsed by the
@@ -1532,7 +1552,9 @@ def load(fp: typing.Any, **kwargs) -> object:
     return loader_inst.load(fp, **load_kwargs)
 
 
-def _marker_name(view: str | bytes, encoding: str) -> typing.Optional[str]:
+def _marker_name(
+    view: typing.Union[str, bytes], encoding: typing.Optional[str]
+) -> typing.Optional[str]:
     """The ``#!name`` first line of *view*, if it names a recognized format.
 
     ``None`` when there is no marker line, when its name decodes to nothing a
@@ -1552,7 +1574,7 @@ def _marker_name(view: str | bytes, encoding: str) -> typing.Optional[str]:
     return name if name and _backend_claims(name) else None
 
 
-def loads(s: typing.Union[str, bytes, bytearray], **kwargs) -> object:
+def loads(s: typing.Union[str, bytes, bytearray], **kwargs: typing.Any) -> typing.Any:
     """Load configuration from a string or bytes in memory.
 
     The text is parsed as **YAML** unless ``loader=`` is given, or its first
@@ -1590,7 +1612,9 @@ def loads(s: typing.Union[str, bytes, bytearray], **kwargs) -> object:
     return loader_inst.load(view, **load_kwargs)
 
 
-def load_as(model_cls: type[T], *pathname: SourceLike, **kwargs) -> T:
+def load_as(
+    model_cls: "typing.Type[T]", *pathname: SourceLike, **kwargs: typing.Any
+) -> T:
     """Load one or more sources and instantiate *model_cls* from the result.
 
     Unlike :func:`load`, this takes **several** sources, merged in order.
@@ -1622,7 +1646,11 @@ def _is_utf_codec(name: typing.Optional[str]) -> bool:
 
 
 def dump(
-    obj: object, fp: typing.Any, *, encoding: typing.Optional[str] = None, **kwargs
+    obj: typing.Any,
+    fp: typing.Any,
+    *,
+    encoding: typing.Optional[str] = None,
+    **kwargs: typing.Any,
 ) -> None:
     """Write *obj* as YAML to *fp*.
 
@@ -1688,7 +1716,7 @@ def dump(
     )
 
 
-def dumps(obj: object, **kwargs) -> str:
+def dumps(obj: typing.Any, **kwargs: typing.Any) -> str:
     """Serialize *obj* to a YAML string (always YAML; see :class:`~yaconfiglib.backends.yaml.YamlConfig`).
 
     A loaded configuration writes as a plain mapping and a ``tuple`` as a plain

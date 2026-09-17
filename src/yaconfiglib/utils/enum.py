@@ -4,6 +4,10 @@ import typing as _ty
 from enum import IntEnum as _IntEnum
 from itertools import chain as _chain
 
+#: Declared so a star-import of this module stops leaking `T` and
+#: `annotations` into `yaconfiglib.utils`.
+__all__ = ["IntEnum"]
+
 T = _ty.TypeVar("T", bound="IntEnum")
 
 

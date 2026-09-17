@@ -1,4 +1,5 @@
 import json
+import os as _os
 import re
 import typing as _ty
 
@@ -19,12 +20,12 @@ class JsonConfig(ConfigBackend):
 
     def load(
         self,
-        path: "_ty.Union[Path, str]",
+        path: "_ty.Union[str, _os.PathLike]",
         encoding: "_ty.Optional[str]" = None,
-        json_decoder_options: dict = None,
+        json_decoder_options: "_ty.Optional[_ty.Dict[str, _ty.Any]]" = None,
         path_factory: "_ty.Optional[_ty.Callable[[str], Path]]" = None,
-        **options,
-    ) -> object:
+        **options: _ty.Any,
+    ) -> _ty.Any:
         """Parse *path* as JSON and return the resulting object.
 
         Args:
@@ -41,6 +42,6 @@ class JsonConfig(ConfigBackend):
             self._read_text(path, encoding), **(json_decoder_options or {})
         )
 
-    def dumps(self, data: object, **options) -> str:
+    def dumps(self, data: _ty.Any, **options: _ty.Any) -> str:
         """Serialize *data* to a JSON string via :func:`json.dumps`."""
         return json.dumps(data, **options)

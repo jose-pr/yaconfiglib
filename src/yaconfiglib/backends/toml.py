@@ -1,3 +1,4 @@
+import os as _os
 import re
 import typing as _ty
 
@@ -34,11 +35,11 @@ class TomlConfig(ConfigBackend):
 
     def load(
         self,
-        path: "_ty.Union[Path, str]",
+        path: "_ty.Union[str, _os.PathLike]",
         encoding: "_ty.Optional[str]" = None,
         path_factory: "_ty.Optional[_ty.Callable[[str], Path]]" = None,
-        **options,
-    ):
+        **options: _ty.Any,
+    ) -> _ty.Any:
         """Parse *path* as TOML and return the resulting dict.
 
         Args:

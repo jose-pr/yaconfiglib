@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import typing
 
@@ -102,15 +103,15 @@ class YamlConfig(ConfigBackend):
 
     def load(
         self,
-        path: Path | str,
-        encoding: str = None,
-        master: yaml.Loader = None,
-        loader_cls: type[yaml.Loader] = None,
-        path_factory: type[Path] = None,
-        loader: ConfigBackend = None,
-        origin: Path | str = None,
-        **options,
-    ) -> object:
+        path: "typing.Union[str, os.PathLike]",
+        encoding: typing.Optional[str] = None,
+        master: "typing.Optional[yaml.Loader]" = None,
+        loader_cls: "typing.Optional[typing.Type[yaml.Loader]]" = None,
+        path_factory: "typing.Optional[typing.Callable[[str], os.PathLike]]" = None,
+        loader: "typing.Optional[ConfigBackend]" = None,
+        origin: "typing.Optional[typing.Union[str, os.PathLike]]" = None,
+        **options: typing.Any,
+    ) -> typing.Any:
         """Parse *path* as YAML and return the resulting object.
 
         Args:
@@ -285,7 +286,12 @@ class YamlConfig(ConfigBackend):
 
         loader_cls._yaconfiglib_include_registered = True  # type: ignore[attr-defined]
 
-    def dumps(self, data: object, dumper_cls: yaml.Dumper = None, **options) -> str:
+    def dumps(
+        self,
+        data: typing.Any,
+        dumper_cls: "typing.Optional[typing.Type[yaml.Dumper]]" = None,
+        **options: typing.Any,
+    ) -> str:
         """Serialize *data* to a YAML string using *dumper_cls*.
 
         Defaults to :attr:`DEFAULT_DUMPER_CLS`, which writes every ``dict``

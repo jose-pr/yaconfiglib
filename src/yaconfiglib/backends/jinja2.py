@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import os as _os
 import re
 import types
 import typing as _ty
@@ -52,12 +53,12 @@ class Jinja2ConfigLoader(ConfigBackend):
 
     def load(
         self,
-        path: "_ty.Union[Path, str]",
+        path: "_ty.Union[str, _os.PathLike]",
         encoding: "_ty.Optional[str]" = None,
-        loader: ConfigBackend = None,
-        environment: Environment = None,
+        loader: "_ty.Optional[ConfigBackend]" = None,
+        environment: "_ty.Optional[Environment]" = None,
         path_factory: "_ty.Optional[_ty.Callable[[str], Path]]" = None,
-        **kwargs,
+        **kwargs: _ty.Any,
     ) -> None:
         """Render *path* as a Jinja2 template, then load the result with the matching backend.
 

@@ -37,7 +37,7 @@ def _strip_annotated(hint: object) -> object:
     return hint
 
 
-def _runtime_class(member: object) -> type | None:
+def _runtime_class(member: object) -> typing.Optional[type]:
     """The class an ``isinstance`` test for union *member* should use, if any."""
     member = _strip_annotated(member)
     cls = typing.get_origin(member) or member
@@ -388,7 +388,7 @@ def typed_merge(cls: type[T], *objects: object, init: bool = True) -> T:
         return None
 
     hints: dict[str, type] = {}
-    child_cls: type | None = None
+    child_cls: typing.Optional[type] = None
 
     # Normalize the hint once, against the value it will be applied to: strip
     # Annotated, and unwrap a union to a single member (NoneType members dropped).

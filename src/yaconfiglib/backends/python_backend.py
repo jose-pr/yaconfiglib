@@ -42,8 +42,8 @@ class PythonBackend(ConfigBackend):
 
     def load(
         self,
-        path: _Path | str | object = None,
-        **_options,
+        path: _ty.Any = None,
+        **_options: _ty.Any,
     ) -> object:
         """Return the wrapped object, ignoring any file I/O.
 

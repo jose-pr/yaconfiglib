@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import json
+import typing as _ty
 
 try:
     from pathlib_next import Path as _Path
@@ -121,7 +122,7 @@ class EnvVarBackend(ConfigBackend):
         self,
         prefix: str = "",
         lowercase: bool = True,
-        nested_delimiter: str | None = None,
+        nested_delimiter: _ty.Optional[str] = None,
         coerce: bool = False,
     ) -> None:
         self.prefix = prefix
@@ -131,12 +132,12 @@ class EnvVarBackend(ConfigBackend):
 
     def load(
         self,
-        path: _Path | str | None = None,
-        prefix: str | None = None,
-        lowercase: bool | None = None,
-        nested_delimiter: str | None = None,
-        coerce: bool | None = None,
-        **_options,
+        path: _ty.Any = None,
+        prefix: _ty.Optional[str] = None,
+        lowercase: _ty.Optional[bool] = None,
+        nested_delimiter: _ty.Optional[str] = None,
+        coerce: _ty.Optional[bool] = None,
+        **_options: _ty.Any,
     ) -> dict[str, object]:
         """Snapshot ``os.environ`` (optionally filtered/coerced) into a dict.
 

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+import os as _os
 import re
 import shutil
 import signal
 import subprocess
 import sys
 import typing
+import typing as _ty
 from collections.abc import Mapping
 
 try:
@@ -291,12 +293,12 @@ class CommandBackend(ConfigBackend):
 
     def load(
         self,
-        path: Path | str,
-        encoding: str = None,
-        format: str | list[str] = None,
-        path_factory: typing.Callable[[str], Path] = None,
+        path: "_ty.Union[str, _os.PathLike]",
+        encoding: _ty.Optional[str] = None,
+        format: "_ty.Optional[_ty.Union[str, _ty.Sequence[str]]]" = None,
+        path_factory: "_ty.Optional[_ty.Callable[[str], _os.PathLike]]" = None,
         timeout: typing.Optional[float] = None,
-        **options,
+        **options: _ty.Any,
     ) -> object:
         """Run the command encoded in *path* and parse its stdout.
 

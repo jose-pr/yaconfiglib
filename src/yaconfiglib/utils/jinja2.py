@@ -54,10 +54,10 @@ _JINJA_MARKERS = ("{{", "{%", "{#")
 
 def load_template(
     source: str,
-    name: str | None = None,
-    filename: str | None = None,
-    environment: Environment | None = None,
-    globals: _ty.MutableMapping | None = None,
+    name: _ty.Optional[str] = None,
+    filename: _ty.Optional[str] = None,
+    environment: _ty.Optional[Environment] = None,
+    globals: "_ty.Optional[_ty.MutableMapping[str, _ty.Any]]" = None,
 ) -> Template:
     """Compile *source* into a :class:`~jinja2.Template`."""
     env = environment or DEFAULT_ENV
@@ -110,8 +110,8 @@ def _cache_put(cache: _OrderedDict, code: str, env: Environment, value) -> None:
 
 def compile(
     code: str,
-    environment: Environment | None = None,
-    globals: _ty.MutableMapping | None = None,
+    environment: _ty.Optional[Environment] = None,
+    globals: "_ty.Optional[_ty.MutableMapping[str, _ty.Any]]" = None,
 ) -> _ty.Callable[..., str]:
     """Return a render callable for *code* (a Jinja2 template string).
 
@@ -130,7 +130,9 @@ def compile(
     return lambda **kwargs: render(**{**globals, **kwargs})
 
 
-def references(code: str, environment: Environment | None = None) -> frozenset:
+def references(
+    code: str, environment: _ty.Optional[Environment] = None
+) -> "frozenset[str]":
     """Return the names *code* reads from its context, parsing it at most once.
 
     Cached like :func:`compile`/:func:`eval`, because a caller that orders values
@@ -155,9 +157,9 @@ def references(code: str, environment: Environment | None = None) -> frozenset:
 
 def eval(
     code: str,
-    environment: Environment | None = None,
-    globals: _ty.MutableMapping | None = None,
-) -> _ty.Callable[..., object]:
+    environment: _ty.Optional[Environment] = None,
+    globals: "_ty.Optional[_ty.MutableMapping[str, _ty.Any]]" = None,
+) -> _ty.Callable[..., _ty.Any]:
     """Return a callable that evaluates *code* as a Jinja2 expression.
 
     The expression result is captured via a ``{% do %}`` statement and
@@ -221,8 +223,10 @@ def _attribute_render_error(error: BaseException, keypath: tuple) -> None:
 
 
 def interpolate(
-    data: object, globals: dict | None = None, environment: Environment | None = None
-) -> object:
+    data: _ty.Any,
+    globals: "_ty.Optional[_ty.Dict[str, _ty.Any]]" = None,
+    environment: _ty.Optional[Environment] = None,
+) -> _ty.Any:
     """Recursively interpolate Jinja2 templates within *data*, in one pass.
 
     Every string is rendered exactly once, against *globals* as it stands;
@@ -257,10 +261,10 @@ def interpolate(
 
 
 def _interpolate(
-    data: object,
-    globals: dict,
-    environment: Environment | None,
-    memo: dict,
+    data: _ty.Any,
+    globals: "_ty.Dict[str, _ty.Any]",
+    environment: _ty.Optional[Environment],
+    memo: "_ty.Dict[int, _ty.Any]",
     *,
     keypath: tuple = (),
     on_error: "_ty.Optional[_ty.Callable[[BaseException, tuple], bool]]" = None,

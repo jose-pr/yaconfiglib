@@ -292,7 +292,7 @@ def _is_materialized_source(path: object) -> bool:
     return str(path) in _TEMP_SOURCES
 
 
-def _rebase_include_sources(sources: object, origin: Path | None) -> object:
+def _rebase_include_sources(sources: _ty.Any, origin: "_ty.Optional[Path]") -> _ty.Any:
     """Resolve include *sources* against the directory of *origin*, keeping their shape.
 
     Relative paths inside a configuration file are written relative to that file.
@@ -339,7 +339,7 @@ def _caller_components(path) -> "list[str]":
     return components
 
 
-def has_glob_pattern(path: Path) -> bool:
+def has_glob_pattern(path: "_ty.Union[str, _os.PathLike]") -> bool:
     """Check whether *path* holds glob pattern characters outside its anchor.
 
     Accepts a ``str``, a pathlib-next path, or any other ``os.PathLike``.
@@ -663,12 +663,12 @@ def _materialize_inline(
 
 
 def parse_sources(
-    sources: _ty.Iterable[SourceLike | _ty.Iterable[SourceLike]],
-    base_dir: Path = None,
-    encoding: str = None,
-    memo: _ty.Iterable[str | Path] = None,
-    path_factory: type[Path] = None,
-    recursive: bool = None,
+    sources: "_ty.Iterable[_ty.Union[SourceLike, _ty.Iterable[SourceLike]]]",
+    base_dir: "_ty.Optional[_ty.Union[str, _os.PathLike]]" = None,
+    encoding: _ty.Optional[str] = None,
+    memo: "_ty.Optional[_ty.Iterable[_ty.Union[str, Path]]]" = None,
+    path_factory: "_ty.Optional[_ty.Callable[[str], _os.PathLike]]" = None,
+    recursive: _ty.Optional[bool] = None,
     on_error: "_ty.Optional[_ty.Callable[[OSError, _ty.Any], bool]]" = None,
 ) -> _ty.Iterator[Path]:
     """Resolve *sources* into a flat stream of loadable :class:`Path`-like objects.
@@ -693,12 +693,12 @@ def parse_sources(
 
 
 def _iter_sources(
-    sources: _ty.Iterable[SourceLike | _ty.Iterable[SourceLike]],
-    base_dir: Path = None,
-    encoding: str = None,
-    memo: _ty.Iterable[str | Path] = None,
-    path_factory: type[Path] = None,
-    recursive: bool = None,
+    sources: "_ty.Iterable[_ty.Union[SourceLike, _ty.Iterable[SourceLike]]]",
+    base_dir: "_ty.Optional[_ty.Union[str, _os.PathLike]]" = None,
+    encoding: _ty.Optional[str] = None,
+    memo: "_ty.Optional[_ty.Iterable[_ty.Union[str, Path]]]" = None,
+    path_factory: "_ty.Optional[_ty.Callable[[str], _os.PathLike]]" = None,
+    recursive: _ty.Optional[bool] = None,
     on_error: "_ty.Optional[_ty.Callable[[OSError, _ty.Any], bool]]" = None,
     *,
     text_fallback: bool = False,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os as _os
 import re
 import typing as _ty
 
@@ -132,12 +133,12 @@ class DotenvBackend(ConfigBackend):
 
     def load(
         self,
-        path: _Path | str,
-        encoding: str = None,
-        path_factory: _ty.Callable[[str], _Path] = None,
-        lowercase: bool | None = None,
+        path: "_ty.Union[str, _os.PathLike]",
+        encoding: _ty.Optional[str] = None,
+        path_factory: "_ty.Optional[_ty.Callable[[str], _os.PathLike]]" = None,
+        lowercase: _ty.Optional[bool] = None,
         dotenv_strict: _ty.Optional[bool] = None,
-        **_options,
+        **_options: _ty.Any,
     ) -> dict[str, str]:
         """Parse *path* as a ``.env`` file into a flat ``{key: value}`` dict.
 

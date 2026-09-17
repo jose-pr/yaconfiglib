@@ -1,4 +1,5 @@
 import logging
+import os as _os
 import re
 import typing as _ty
 from configparser import (
@@ -69,7 +70,7 @@ class IniConfig(ConfigBackend):
 
     def load(
         self,
-        path: "_ty.Union[Path, str]",
+        path: "_ty.Union[str, _os.PathLike]",
         encoding: "_ty.Optional[str]" = None,
         path_factory: "_ty.Optional[_ty.Callable[[str], Path]]" = None,
         ini_default_section: "_ty.Optional[str]" = None,

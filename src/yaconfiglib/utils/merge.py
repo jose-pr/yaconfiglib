@@ -24,6 +24,7 @@ from __future__ import annotations
 import copy
 import logging
 import typing
+import typing as _ty
 
 from .enum import IntEnum
 
@@ -152,9 +153,9 @@ class Merge(typing.Protocol):
         a: object,
         b: object,
         *,
-        memo: dict | None = None,
-        **options,
-    ) -> object: ...
+        memo: "_ty.Optional[dict]" = None,
+        **options: typing.Any,
+    ) -> typing.Any: ...
 
 
 class MergeMethod(IntEnum):
@@ -179,8 +180,8 @@ class MergeMethod(IntEnum):
         a: object,
         b: object,
         *,
-        memo: dict | None = None,
-        **options,
+        memo: "_ty.Optional[dict]" = None,
+        **options: typing.Any,
     ):
         method: Merge = getattr(self, f"_{self.name.lower()}")
         return method(a, b, memo={} if memo is None else memo, **options)
@@ -194,8 +195,8 @@ class MergeMethod(IntEnum):
         a: object,
         b: object,
         *,
-        memo: dict | None = None,
-        **options,
+        memo: "_ty.Optional[dict]" = None,
+        **options: typing.Any,
     ):
         if b is None:
             return a
@@ -221,8 +222,8 @@ class MergeMethod(IntEnum):
         a: object,
         b: object,
         *,
-        memo: dict | None = None,
-        **options,
+        memo: "_ty.Optional[dict]" = None,
+        **options: typing.Any,
     ):
         if b is None:
             return a
@@ -287,9 +288,9 @@ class MergeMethod(IntEnum):
         a: object,
         b: object,
         *,
-        memo: dict | None = None,
+        memo: "_ty.Optional[dict]" = None,
         mergelists: bool = False,
-        **options,
+        **options: typing.Any,
     ):
         if b is None:
             return a
@@ -329,7 +330,7 @@ class MergeMethod(IntEnum):
         a: typing.Mapping,
         b: typing.Mapping,
         *,
-        memo: dict | None,
+        memo: "_ty.Optional[dict]",
         mergelists: bool,
         **options,
     ) -> typing.Mapping:
@@ -368,7 +369,7 @@ class MergeMethod(IntEnum):
         a: typing.Sequence,
         b: typing.Sequence,
         *,
-        memo: dict | None,
+        memo: "_ty.Optional[dict]",
         mergelists: bool,
         **options,
     ) -> typing.Sequence:

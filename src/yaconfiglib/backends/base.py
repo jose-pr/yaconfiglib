@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os as _os
 import re as _re
 import typing as _ty
 
@@ -28,6 +29,11 @@ else:
         ...
 
 logger = logging.getLogger(__name__)
+
+#: `typing.Self` is 3.11+, and the floor is 3.9: a bound TypeVar keeps the
+#: subclass precision (`YamlConfig.get_class_by_name` is typed as returning a
+#: `YamlConfig` subclass) while resolving with `get_type_hints` everywhere.
+_BackendT = _ty.TypeVar("_BackendT", bound="ConfigBackend")
 
 #: Keyword arguments an ``!include``/``!load`` mapping node may pass to the nested
 #: load. Everything else a document supplies (``allow_commands``, ``sandbox``,
@@ -197,7 +203,7 @@ class ConfigBackend(_ty.Protocol):
         text = path.read_text(encoding=encoding or self.DEFAULT_ENCODING)
         return text[1:] if text.startswith("\ufeff") else text
 
-    def __call__(self, *args, **kwds):
+    def __call__(self, *args: _ty.Any, **kwds: _ty.Any) -> _ty.Any:
         """Dispatch to :meth:`_yaml_tag_constructor` when used as a PyYAML tag constructor.
 
         This lets a backend instance be registered directly with
@@ -224,7 +230,7 @@ class ConfigBackend(_ty.Protocol):
         pathname, args, kwargs = _include_call(loader, node)
         return self.load(pathname, *args, **kwargs, master=loader)
 
-    def load(self, path: _Path, **options) -> object:
+    def load(self, path: "_ty.Any", **options: _ty.Any) -> _ty.Any:
         """Read *path* and return the parsed configuration object.
 
         Subclasses must override this. Implementations typically accept
@@ -235,7 +241,7 @@ class ConfigBackend(_ty.Protocol):
         """
         raise NotImplementedError()
 
-    def load_all(self, path: _Path, **options) -> _ty.Iterable[object]:
+    def load_all(self, path: "_ty.Any", **options: _ty.Any) -> "_ty.Iterable[_ty.Any]":
         """Yield one or more parsed documents from *path*.
 
         The default implementation yields a single document produced by
@@ -244,7 +250,7 @@ class ConfigBackend(_ty.Protocol):
         """
         yield self.load(path, **options)
 
-    def dumps(self, data: object, **options) -> str:
+    def dumps(self, data: _ty.Any, **options: _ty.Any) -> str:
         """Serialize *data* back to this backend's text format.
 
         Optional. Note that :func:`yaconfiglib.dump`/:func:`yaconfiglib.dumps`
@@ -255,7 +261,9 @@ class ConfigBackend(_ty.Protocol):
         raise NotImplementedError
 
     @classmethod
-    def __subclasses__(cls, *, recursive=False) -> list[type[_ty.Self]]:
+    def __subclasses__(
+        cls: "_ty.Type[_BackendT]", *, recursive: bool = False
+    ) -> "_ty.List[_ty.Type[_BackendT]]":
         """Return direct (or, if *recursive*, all transitive) subclasses.
 
         Overrides :meth:`type.__subclasses__` to add the *recursive* flag,
@@ -263,7 +271,7 @@ class ConfigBackend(_ty.Protocol):
         to discover every registered backend regardless of how deep its
         class hierarchy is.
         """
-        direct: list[type[_ty.Self]] = type.__subclasses__(cls)
+        direct: "_ty.List[_ty.Type[_BackendT]]" = type.__subclasses__(cls)
         if not recursive:
             return direct
         # Deterministic, definition-order walk (depth-first, deduplicated).
@@ -271,7 +279,7 @@ class ConfigBackend(_ty.Protocol):
         # get_class_by_path()'s "first match wins" depend on hash order —
         # backend resolution could differ between runs when two backends'
         # regexes both matched a path.
-        ordered: list[type[_ty.Self]] = []
+        ordered: "_ty.List[_ty.Type[_BackendT]]" = []
         for scls in direct:
             if scls not in ordered:
                 ordered.append(scls)
@@ -281,7 +289,9 @@ class ConfigBackend(_ty.Protocol):
         return ordered
 
     @classmethod
-    def get_class_by_name(cls, name: str) -> type[_ty.Self]:
+    def get_class_by_name(
+        cls: "_ty.Type[_BackendT]", name: str
+    ) -> "_ty.Optional[_ty.Type[_BackendT]]":
         """Look up a registered backend class by its :attr:`NAME`.
 
         Falls back to a derived name (lowercased class name with a
@@ -320,7 +330,7 @@ class ConfigBackend(_ty.Protocol):
         return sorted(name for name in names if name)
 
     @classmethod
-    def can_load_path(cls, path: _Path) -> bool:
+    def can_load_path(cls, path: "_ty.Union[str, _os.PathLike]") -> bool:
         """Return True if this backend's :attr:`PATHNAME_REGEX` matches *path*'s filename."""
         return (
             cls.PATHNAME_REGEX.match(path.name) is not None
@@ -350,7 +360,9 @@ class ConfigBackend(_ty.Protocol):
         return ""
 
     @classmethod
-    def get_class_by_path(cls, path: _Path):
+    def get_class_by_path(
+        cls: "_ty.Type[_BackendT]", path: "_ty.Union[str, _os.PathLike]"
+    ) -> "_ty.Type[_BackendT]":
         """Find the first registered backend class whose :meth:`can_load_path` matches *path*.
 
         Raises:
