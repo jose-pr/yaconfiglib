@@ -134,8 +134,21 @@ It accepts, in one option:
 - a sequence of roots — a target inside **any** of them is allowed;
 - one string split on `os.pathsep`, the `PATH` spelling, so the value can come
   from an environment variable (a string without a separator is one root);
+- a single path object;
 - `True`, meaning *base_dir*;
 - `False` or `None`, meaning off, which is the default.
+
+**Every root must be an absolute path**, and anything else raises
+`ConfigTypeError`. A relative root would be resolved against the process
+working directory, which is not what an allowlist should do — and that is how a
+typo, an empty list entry or a stray space after a separator in
+`YACONFIGLIB_CONFINE_TO` would otherwise have become a root under the working
+directory. Use `confine_to=True` for "wherever `base_dir` points". A whole UNC
+share (`\\server\share`) is a valid root.
+
+Note what `confine_to=True` means when `base_dir` is not set: the working
+directory, since that is where relative sources resolve. For a service whose
+working directory you do not control, name the roots explicitly.
 
 When — and only when — the argument is `None`, the `YACONFIGLIB_CONFINE_TO`
 environment variable is read the same way. An explicit argument ignores it, so

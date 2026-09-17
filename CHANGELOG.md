@@ -320,6 +320,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- A `confine_to=` root must now be an **absolute** path; anything else raises
+  `ConfigTypeError` instead of being resolved against the process working directory. That
+  silent resolution was how a typo, a `""` list entry or a stray space after a separator
+  in `YACONFIGLIB_CONFINE_TO` became a root under the working directory — `confine_to=[""]`
+  allowed the whole of it, and an environment value of `"/a/conf: /b/conf"` dropped the
+  second root and added a cwd-relative one in its place. Empty entries are now dropped in
+  the sequence form as they always were in the string form, so `[""]` is an empty
+  allowlist. A whole **UNC share** is also usable as a root now
+  (`\\server\share`): `os.path.commonpath` treats a bare share as a relative path, so
+  such a root previously refused every file inside it.
 - `confine_to=` no longer fails open in four ways a caller could reach by accident.
   Passing it to an existing loader's `.load()`/`.load_all()` now raises `ConfigTypeError`
   instead of being forwarded to the backend and ignored — it is a constructor setting, and

@@ -167,8 +167,15 @@ that re-resolves its roots). Notable ones:
   or `ConfinementError` is raised before the file is opened. This is what stops an
   untrusted document reading arbitrary files through `!include '/etc/shadow'` or
   `../../secret`. Forms: a sequence of paths (inside **any** is allowed), one string split
-  on `os.pathsep` like `PATH`, `True` meaning `base_dir` (read at check time, so a later
-  `base_dir =` is honoured), or `False`/`None` for off. `YACONFIGLIB_CONFINE_TO` is read
+  on `os.pathsep` like `PATH`, a single path object, `True` meaning `base_dir` (read at
+  check time, so a later `base_dir =` is honoured), or `False`/`None` for off. **Each root
+  must be absolute** or `ConfigTypeError` is raised — `abspath` would otherwise resolve a
+  typo, an empty entry or a stray leading space into a root under the working directory
+  (empty entries are dropped in both the string and the sequence form, so `[""]` is an
+  empty allowlist, not the cwd). Anchoring is **not** tested with `os.path.isabs` alone:
+  that is `False` for a bare UNC share before 3.13, and a whole share is a valid root —
+  such a root also gets a trailing separator, because `commonpath` treats
+  `\\host\share` as relative and would otherwise refuse everything inside it. `YACONFIGLIB_CONFINE_TO` is read
   **only** when the argument is `None` — an env var that could widen an in-code allowlist
   would be an escalation for whoever sets the environment. An **unset** variable means no
   confinement; an **empty** one, like `confine_to=[]`, is an empty allowlist and refuses
