@@ -449,6 +449,23 @@ class CommandBackend(ConfigBackend):
         # comprehension, so adding a key to the strip-list above cannot drop it.
         loads_options["encoding"] = codec
 
+        # Confinement has to be handed over explicitly. Unlike the trust
+        # policy, which rides a ContextVar into any nested load, `confine_to`
+        # is an instance setting — and this output is parsed by a NEW loader
+        # (`loads()` builds one), so without this an `!include` inside a
+        # command's output was checked against no roots at all while the same
+        # include in a file was refused.
+        # The already-resolved roots, not the raw value: re-resolving would
+        # re-read YACONFIGLIB_CONFINE_TO and would resolve a `confine_to=True`
+        # against the INNER loader's base_dir, which is a different directory.
+        _resolve_roots = getattr(options.get("loader"), "_confinement_roots", None)
+        if callable(_resolve_roots):
+            _roots = _resolve_roots()
+            if _roots is not None:
+                # `()` is meaningful: an empty allowlist refuses every read,
+                # and must reach the inner loader as such.
+                loads_options["confine_to"] = _roots
+
         candidates = []
         if explicit_format:
             if isinstance(explicit_format, str):

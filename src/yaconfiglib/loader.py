@@ -308,6 +308,27 @@ def _resolve_confine_to(
     return tuple(_confinement_key(part) for part in parts)
 
 
+def _reject_per_call_confine_to(reader_args: "typing.Mapping[str, typing.Any]") -> None:
+    """Refuse a ``confine_to=`` passed to ``.load()``/``.load_all()``.
+
+    It is a constructor setting, so it would otherwise land in the backend's
+    reader arguments and be dropped — leaving a caller who asked for
+    confinement with none, and no warning. This library ignores an unknown
+    keyword by design (backends are pluggable and read their own options), and
+    that rule stands for every other name; a security control is the one place
+    where silence is the wrong answer.
+    """
+    if "confine_to" not in reader_args:
+        return
+    raise ConfigTypeError(
+        "confine_to= is a ConfigLoader setting, not a per-call option: it "
+        "cannot be passed to .load()/.load_all(), where it would be forwarded "
+        "to the backend and ignored. Pass it to ConfigLoader(confine_to=...), "
+        "or use the module-level yaconfiglib.load()/loads()/load_as(), which "
+        "route constructor names to the loader."
+    )
+
+
 def _error_phase(error: BaseException) -> str:
     """``"include"`` when *error* came from a nested include, else ``"load"``.
 
@@ -774,13 +795,22 @@ class ConfigLoader(ConfigBackend):
 
                 Applies to every file source, a top-level one included, so
                 ``ConfigLoader(base_dir="conf", confine_to=True)`` also
-                refuses a caller's own absolute path outside ``conf``. Command
-                sources (governed by *allow_commands*) and in-memory ``#!``
-                documents are exempt — neither is a location — while a remote
-                URI source is refused, being inside no local root. Unlike
-                *allow_commands* and *sandbox* this is an instance setting
-                only: it does not tighten per call, and it is read from the
-                loader that performs the read.
+                refuses a caller's own absolute path outside ``conf``. That
+                includes an open **stream**: a stream whose ``name`` is a real
+                file is checked against the roots before it is read, while one
+                with no location (``<stdin>``, a descriptor, a `StringIO`)
+                stays exempt. An `!include` inside a **command's output** is
+                checked too — the roots are handed to the loader that parses
+                that output. Command sources themselves (governed by
+                *allow_commands*) and in-memory ``#!`` documents are exempt:
+                neither is a location.
+
+                Unlike *allow_commands* and *sandbox* this is an instance
+                setting, read from the loader that performs the read. Passing
+                it to :meth:`load`/:meth:`load_all` raises
+                :class:`ConfigTypeError` rather than being forwarded to the
+                backend and ignored — assigning :attr:`confine_to` later is
+                honoured, since the roots are re-resolved on assignment.
         """
         self.allow_commands = bool(allow_commands)
         self.sandbox = bool(sandbox)
@@ -807,11 +837,8 @@ class ConfigLoader(ConfigBackend):
         self.encoding = encoding or self.DEFAULT_ENCODING
         self.recursive = False if recursive is None else recursive
         self.bound_loops = bool(bound_loops)
+        # The property's setter resolves the roots; see `confine_to` below.
         self.confine_to = confine_to
-        # Resolved once: normalising roots per read would re-walk the
-        # environment on every source. The True form stays unresolved, since
-        # base_dir can be reassigned.
-        self._confine_roots = _resolve_confine_to(confine_to)
         self.loader_factory = loader_factory or (
             lambda path: ConfigBackend.get_class_by_path(path)()
         )
@@ -869,6 +896,30 @@ class ConfigLoader(ConfigBackend):
 
     def _getpath(self, path: "_PathLike"):
         return path if isinstance(path, Path) else self.path_factory(path)
+
+    @property
+    def confine_to(
+        self,
+    ) -> "typing.Optional[typing.Union[bool, str, typing.Sequence[_PathLike]]]":
+        """The roots as given. Assigning re-resolves them, so this never lies.
+
+        A plain attribute would have: the resolved roots are cached, so an
+        assignment would change what the loader *reports* while leaving what it
+        *enforces* untouched — in both directions, which for a security control
+        is the worst kind of accessor.
+        """
+        return self._confine_to
+
+    @confine_to.setter
+    def confine_to(
+        self,
+        value: "typing.Optional[typing.Union[bool, str, typing.Sequence[_PathLike]]]",
+    ) -> None:
+        self._confine_to = value
+        # Resolved once per assignment: normalising roots per read would
+        # re-walk the environment on every source. The `True` form stays
+        # unresolved, since base_dir can be reassigned after this.
+        self._confine_roots = _resolve_confine_to(value)
 
     def _confinement_roots(self) -> "typing.Optional[typing.Tuple[str, ...]]":
         """The roots a file read must fall inside, or None when confinement is off."""
@@ -1116,6 +1167,7 @@ class ConfigLoader(ConfigBackend):
             The merged (and possibly interpolated) result. Dict results
             are wrapped in :class:`DotAccessibleDict`.
         """
+        _reject_per_call_confine_to(reader_args)
         encoding = encoding or self.encoding
         interpolate = self.interpolate if interpolate is None else interpolate
         sandbox = self.sandbox if sandbox is None else sandbox
@@ -1168,6 +1220,7 @@ class ConfigLoader(ConfigBackend):
                 ),
                 bound_loops=self.bound_loops,
                 text_fallback=True,
+                confine=self._check_confinement,
             ):
                 # Which step this source reached, so the one handler below can
                 # name the phase and add the frame without a second offer.
@@ -1354,6 +1407,7 @@ class ConfigLoader(ConfigBackend):
             :class:`DotAccessibleDict`.
         """
         interpolate = self.interpolate if interpolate is None else interpolate
+        _reject_per_call_confine_to(reader_args)
         encoding = encoding or self.encoding
         sandbox = self.sandbox if sandbox is None else sandbox
         allow_commands = (
@@ -1380,6 +1434,7 @@ class ConfigLoader(ConfigBackend):
             ),
             bound_loops=self.bound_loops,
             text_fallback=True,
+            confine=self._check_confinement,
         ):
             value = None
             # Set when an interpolation failure was already offered and

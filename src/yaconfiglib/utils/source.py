@@ -248,6 +248,31 @@ def _stream_filename(stream: object) -> "_ty.Optional[str]":
     return basename
 
 
+def _stream_origin(stream: object) -> "_ty.Optional[str]":
+    """The real file *path* behind a stream, or None when it has none.
+
+    Distinct from `_stream_filename`, which answers "which backend reads
+    this" and so returns a basename: a confinement check has to compare the
+    whole path, and a basename would resolve against the working directory.
+
+    A pseudo-name (``<stdin>``, ``<string>``), a descriptor `int` and a
+    nameless reader all return None. That is deliberate — such a stream has
+    no location to confine, and treating ``"<stdin>"`` as a filename would
+    resolve it into a cwd-relative path and refuse it.
+    """
+    name = getattr(stream, "name", None)
+    if isinstance(name, (bytes, _os.PathLike)):
+        try:
+            name = _os.fsdecode(name)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(name, str) or not name:
+        return None
+    if name.startswith("<") and name.endswith(">"):
+        return None
+    return name
+
+
 def _marker_view(
     source: bytes, encoding: "_ty.Optional[str]"
 ) -> "_ty.Union[str, bytes]":
@@ -806,6 +831,7 @@ def _iter_sources(
     bound_loops: bool = False,
     *,
     text_fallback: bool = False,
+    confine: "_ty.Optional[_ty.Callable[[object], None]]" = None,
 ) -> "_ty.Iterator[_ty.Tuple[_ty.Any, _ty.Optional[str]]]":
     """Resolve *sources* into loadable paths, each with the codec to read it with.
 
@@ -932,6 +958,15 @@ def _iter_sources(
 
     for kind, payload in items:
         if kind == "inline":
+            # A stream is materialized into a MemPath, which has no location,
+            # so the check downstream would see nothing to confine. Ask about
+            # the file the stream is *on*, before it is read — a caller who
+            # confines reads means this file too. A stream with no real name
+            # (``<stdin>``, a descriptor) stays exempt.
+            if confine is not None and payload[1] is None:
+                origin = _stream_origin(payload[0])
+                if origin is not None:
+                    confine(origin)
             yield _materialize_inline(
                 payload[0], payload[1], encoding, text_fallback=text_fallback
             )

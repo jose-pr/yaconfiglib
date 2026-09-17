@@ -6,13 +6,16 @@ Without confinement a document can read any file the process can, through an
 control works and that it stays off unless asked for.
 """
 
+import io
 import os
 import subprocess
 import sys
 
 import pytest
 
+import yaconfiglib
 from yaconfiglib import ConfigError, ConfigLoader, ConfinementError
+from yaconfiglib.errors import ConfigTypeError
 
 
 def _write(path, text):
@@ -184,3 +187,118 @@ class TestConfinement:
             assert os.path.normcase(str(root)) in os.path.normcase(message)
         # An OSError for a CLI, a ConfigError for this library's own handling.
         assert isinstance(caught.value, (ConfigError, PermissionError))
+
+
+@pytest.mark.usefixtures("needs_yaml")
+class TestConfinementCannotFailOpenSilently:
+    """The ways a caller could *believe* confinement is on and have none.
+
+    Every case here read the outside file before 2026-09-17. A control that
+    fails open without a word is worse than one that is absent, because the
+    absent one is visible — so each of these now raises or is enforced.
+    """
+
+    def test_per_call_confine_to_is_refused(self, tmp_path):
+        # It is a constructor setting, so it used to land in **reader_args,
+        # reach the backend and be dropped: the caller asked for confinement
+        # and got none. Every OTHER unknown keyword is still ignored by
+        # design (backends are pluggable); this one is special-cased because
+        # silence is the wrong answer for a security option.
+        conf = _tree(tmp_path)
+        loader = ConfigLoader(base_dir=str(conf))
+        with pytest.raises(ConfigTypeError) as caught:
+            loader.load("inside.yaml", confine_to=[str(conf)])
+        message = str(caught.value)
+        assert "ConfigLoader" in message
+        # The message has to say where the keyword does work.
+        assert "load" in message
+
+    def test_per_call_confine_to_is_refused_by_load_all(self, tmp_path):
+        conf = _tree(tmp_path)
+        loader = ConfigLoader(base_dir=str(conf))
+        with pytest.raises(ConfigTypeError):
+            list(loader.load_all("inside.yaml", confine_to=[str(conf)]))
+
+    def test_module_level_confine_to_still_reaches_the_loader(self, tmp_path):
+        # The counterpart: yaconfiglib.load() routes constructor names to the
+        # loader, so the same keyword must keep working there.
+        conf = _tree(tmp_path)
+        with pytest.raises(ConfinementError):
+            yaconfiglib.load(
+                str(tmp_path / "secret.yaml"),
+                base_dir=str(conf),
+                confine_to=[str(conf)],
+            )
+
+    def test_assigning_confine_to_takes_effect(self, tmp_path):
+        # The attribute used to report a root set that nothing enforced.
+        conf = _tree(tmp_path)
+        loader = ConfigLoader(base_dir=str(conf))
+        assert loader.load(str(tmp_path / "secret.yaml")) == {"secret": "s3cr3t"}
+        loader.confine_to = [str(conf)]
+        assert loader.confine_to == [str(conf)]
+        with pytest.raises(ConfinementError):
+            loader.load(str(tmp_path / "secret.yaml"))
+
+    def test_assigning_confine_to_none_turns_it_off(self, tmp_path):
+        # And the other direction, which used to stay confined.
+        conf = _tree(tmp_path)
+        loader = ConfigLoader(base_dir=str(conf), confine_to=[str(conf)])
+        with pytest.raises(ConfinementError):
+            loader.load(str(tmp_path / "secret.yaml"))
+        loader.confine_to = None
+        assert loader.load(str(tmp_path / "secret.yaml")) == {"secret": "s3cr3t"}
+
+    def test_stream_on_an_outside_file_is_refused(self, tmp_path):
+        # A stream materializes into a MemPath, which has no location, so the
+        # check downstream saw nothing to confine while the caller's own
+        # `open()` had already handed us the file.
+        conf = _tree(tmp_path)
+        loader = ConfigLoader(base_dir=str(conf), confine_to=[str(conf)])
+        with open(tmp_path / "secret.yaml", encoding="utf-8") as handle:
+            with pytest.raises(ConfinementError):
+                loader.load(handle)
+
+    def test_stream_inside_a_root_still_loads(self, tmp_path):
+        conf = _tree(tmp_path)
+        loader = ConfigLoader(base_dir=str(conf), confine_to=[str(conf)])
+        with open(conf / "inside.yaml", encoding="utf-8") as handle:
+            assert loader.load(handle) == {"inside": True}
+
+    def test_a_nameless_stream_stays_exempt(self, tmp_path):
+        # There is no location to confine, and treating "<stdin>" as a
+        # filename would resolve it under the working directory and refuse a
+        # perfectly ordinary pipe. Both spellings must stay loadable.
+        conf = _tree(tmp_path)
+        loader = ConfigLoader(base_dir=str(conf), confine_to=[str(conf)])
+        assert loader.load(io.StringIO("k: v\n")) == {"k": "v"}
+
+        class _Pipe(io.StringIO):
+            name = "<stdin>"
+
+        assert loader.load(_Pipe("k: v\n")) == {"k": "v"}
+
+    def test_command_output_includes_are_confined(self, tmp_path):
+        # The output is parsed by a NEW loader, so the roots have to be handed
+        # over: the same !include was refused in a file and honoured here.
+        conf = _tree(tmp_path)
+        emit = tmp_path / "emit.py"
+        emit.write_text(
+            "print(\"data: !include '%s'\")\n" % (tmp_path / "secret.yaml").as_posix(),
+            encoding="utf-8",
+        )
+        loader = ConfigLoader(base_dir=str(conf), confine_to=[str(conf)])
+        cmd = f'cmd://"{sys.executable}" "{emit}"'
+        with pytest.raises(ConfinementError):
+            loader.load(cmd, timeout=60)
+
+    def test_command_output_includes_inside_a_root_still_load(self, tmp_path):
+        conf = _tree(tmp_path)
+        emit = tmp_path / "emit_ok.py"
+        emit.write_text(
+            "print(\"data: !include '%s'\")\n" % (conf / "inside.yaml").as_posix(),
+            encoding="utf-8",
+        )
+        loader = ConfigLoader(base_dir=str(conf), confine_to=[str(conf)])
+        cmd = f'cmd://"{sys.executable}" "{emit}"'
+        assert loader.load(cmd, timeout=60) == {"data": {"inside": True}}
