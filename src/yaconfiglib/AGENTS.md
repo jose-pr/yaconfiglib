@@ -7,7 +7,7 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 
 ## Top-level (`import yaconfiglib`)
 
-- **`load(fp, **kwargs) -> object`** / **`loads(s: str | bytes, **kwargs) -> object`** —
+- **`load(fp, **kwargs) -> Any`** / **`loads(s, **kwargs) -> Any`** —
   one-shot load from a file path, an open file object (anything with `read()` — parsed by
   the backend its file **name** selects, so `load(open("settings.toml"))` reads TOML; an
   unrecognized name such as `<stdin>` or `x.yaml.gz` is YAML, and `loader=` overrides), or
@@ -70,6 +70,30 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
   **`TypedNamespace`** — re-exported from `utils.merge` / `utils.typing_merge`; see
   "Merge strategies" / "Typed merge".
 
+### Typing
+
+- The package ships **`py.typed`**, so a consumer's checker reads these annotations.
+- **Parsed results are `Any`**, not `object`: a document can be a mapping, a list or a
+  scalar, and the documented `config.database.host` access has to type-check. That covers
+  `load`/`loads`/`load_as`, `ConfigLoader.load`, `load_all -> Iterator[Any]`, and
+  `DotAccessibleDict.__getattr__`/`.get`. (typeshed types `json.load` and
+  `yaml.safe_load` the same way.)
+- **Every public annotation resolves with `typing.get_type_hints` on Python 3.9**, the
+  project's floor. Hints are spelled `typing.Union`/`typing.Optional` — never `X | Y`,
+  which is evaluable only on 3.10+ — and `typing.Self` (3.11+) is replaced by a bound
+  `TypeVar`, so `Backend.get_class_by_name` still narrows to that subclass. Every name
+  used in a hint is importable at runtime, not only under `TYPE_CHECKING`.
+- **Path parameters accept `os.PathLike`**, so a stdlib `pathlib.Path` works everywhere a
+  pathlib-next path does; `path_factory` is a `(str) -> os.PathLike` callable.
+- **`loader_factory` is a `(path) -> ConfigBackend` callable**, not `type[ConfigBackend]`:
+  the class spelling type-checked but crashed, since backends take no constructor
+  argument from the loader.
+- **`ignore_error` predicates are checked against the keywords they are called with**
+  (`phase`, `path`, `loader`, plus extras), so a predicate accepting only the error — which
+  fails at runtime — is reported, while `(error, **context)` keeps checking.
+- Every parameter defaulting to `None` is `Optional`/`Any`, and every `*args`/`**kwargs`
+  is annotated, so a strict checker reports no partially-unknown types.
+
 ## `ConfigLoader` (`loader.py`)
 
 `ConfigLoader(base_dir="", *, encoding=None, path_factory=None, loader_factory=None,
@@ -79,7 +103,8 @@ inject_env=False, strict=False, allow_commands=True, sandbox=False)`
 
 All constructor args become instance defaults, overridable per-call. Notable ones:
 
-- `base_dir` — directory the relative file-path sources you pass to `.load()` resolve
+- `base_dir` — a `str` or any `os.PathLike` (a stdlib `pathlib.Path` and a pathlib-next
+  path both qualify): the directory relative file-path sources you pass to `.load()` resolve
   against; also the anchor for includes inside documents that are not files (`loads()`,
   `#!` strings, streams, command output). A relative `!include` inside a YAML **file**
   resolves against that file's own directory instead.
@@ -87,8 +112,11 @@ All constructor args become instance defaults, overridable per-call. Notable one
   Default `False`. Forwarded to `parse_sources` by both `.load()` (which also honors a
   per-call `recursive=`) and `.load_all()` (instance setting only — it has no per-call
   `recursive` parameter).
-- `key_factory` — `(path, value) -> str` merge/document key (default: filename stem);
-  as a string it's a `Path` attribute name, or `"%<jinja-expr>"` for a template.
+- `key_factory` — `(path, value) -> str` merge/document key (default: filename stem).
+  The callable receives what `parse_sources` yielded: a path object, or — for a command
+  URI — the `CommandSource` carrying the command text. As a string it is a `Path`
+  attribute name, or `"%<jinja-expr>"` for a template; **both string forms work at
+  construction as well as per call**.
 - `merge` — a `ConfigLoaderMergeMethod` (or any `Merge`-compatible callable) applied
   between successive sources, left-to-right.
 - `ignore_error` — `bool` (ignore/re-raise every failure uniformly) or a predicate
@@ -148,7 +176,7 @@ All constructor args become instance defaults, overridable per-call. Notable one
 
 - **`.load(*pathname, recursive=None, encoding=None, loader=None, transform=None,
   default=None, key_factory=None, flatten=False, interpolate=None, merge=None,
-  merge_options=None, allow_commands=None, sandbox=None, **reader_args) -> object`** —
+  merge_options=None, allow_commands=None, sandbox=None, **reader_args) -> Any`** —
   resolve `*pathname` via `parse_sources` (globs, nested lists, in-memory `#!`-marked
   strings, open file objects — anything with `read()`, parsed by the backend their file
   name selects — command URIs), parse each with its backend, and merge in order.

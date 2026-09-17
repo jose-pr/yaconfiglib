@@ -83,6 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- `yaconfiglib.utils` no longer re-exports the internal names `T` and `annotations`,
+  which a star-import of its `enum` module leaked.
 - While sniffing a command's output format, only a parse failure now means "try the next
   format". Anything else — a disabled command, an error from an `!include` inside the
   output, a `TypeError`, a missing file — propagates instead of falling through to
@@ -278,6 +280,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `typing.get_type_hints()` now works on Python 3.9 — the supported floor — for the whole
+  public API (`ConfigLoader`, `load`/`loads`, `parse_sources`, the Jinja2 helpers, the
+  merge methods, every backend). Hints used `X | Y` and `typing.Self`, which 3.9 cannot
+  evaluate, so anything introspecting the API there failed on most of it.
+- Type checkers now accept the documented calls. Results of
+  `load()`/`loads()`/`ConfigLoader.load()`/`load_all()` and `DotAccessibleDict` attribute
+  access are typed `Any` rather than `object`, so `config.database.host` checks;
+  `loader=` accepts a backend instance or a callable; `key_factory` accepts a string at
+  construction and its callable form is the `(path, value)` callable it is actually called
+  with; `loader_factory` is typed as the `(path) -> backend` callable it is called as
+  (passing a backend class type-checked but never worked); `key_factory`/`loader_factory`
+  callables are typed as receiving a path or, for a command URI, a `CommandSource`;
+  `ignore_error=` predicates are checked against the keywords they receive, so one that
+  accepts only the error — and fails at runtime — is reported; path parameters accept
+  `os.PathLike` such as `pathlib.Path`; `load_all()` accepts the same sources as `load()`;
+  and parameters defaulting to `None` accept `None`. Code that runs today needs no change,
+  and `cast()` / `# type: ignore` workarounds for these can go.
 - `typed_merge()` and `load_as()` errors name the field path and the model
   (`... [at db.port (AppConfig)]`, and `ports[1]` for a list item), readable as
   `error.config_key` and `error.config_model`. A coercion failure reported only the
