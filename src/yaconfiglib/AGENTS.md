@@ -100,7 +100,7 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 ## `ConfigLoader` (`loader.py`)
 
 `ConfigLoader(base_dir="", *, encoding=None, path_factory=None, loader_factory=None,
-recursive=None, key_factory=None, log_level=None, interpolate=None,
+recursive=None, bound_loops=False, key_factory=None, log_level=None, interpolate=None,
 merge=ConfigLoaderMergeMethod.Simple, merge_options=None, ignore_error=False,
 inject_env=False, strict=False, allow_commands=True, sandbox=False)`
 
@@ -115,6 +115,12 @@ All constructor args become instance defaults, overridable per-call. Notable one
   Default `False`. Forwarded to `parse_sources` by both `.load()` (which also honors a
   per-call `recursive=`) and `.load_all()` (instance setting only — it has no per-call
   `recursive` parameter).
+- `bound_loops` — bound a `**` that crosses a **Windows junction loop** (a junction
+  pointing at one of its own ancestors), which otherwise walks until the filesystem
+  refuses the path and the load raises `OSError`. Default `False`; instance-wide, with
+  **no** per-call override, since a loop is a property of the tree. Also drops a directory
+  deliberately reachable under two names, and does nothing on POSIX (a directory symlink
+  is never descended) — see `parse_sources` below.
 - `key_factory` — `(path, value) -> str` merge/document key (default: filename stem).
   The callable receives what `parse_sources` yielded: a path object, or — for a command
   URI — the `CommandSource` carrying the command text. As a string it is a `Path`
@@ -413,7 +419,7 @@ distinguish merge branches.
 ## Source resolution (`utils/source.py`)
 
 - **`parse_sources(sources, base_dir=None, encoding=None, memo=None, path_factory=None,
-  recursive=None, on_error=None) -> Iterator[Path]`** — flattens `sources` (paths — a `str`, a
+  recursive=None, on_error=None, bound_loops=False) -> Iterator[Path]`** — flattens `sources` (paths — a `str`, a
   pathlib-next path, or any other `os.PathLike` such as `pathlib.Path`; glob patterns,
   command URIs — yielded as a `CommandSource`, a `str` subclass carrying the text
   **verbatim** (a path factory would rewrite `/` on Windows and collapse `//`, `/./`
@@ -469,8 +475,18 @@ distinguish merge branches.
   pattern that names an **existing** path loads literally; **directory** matches are
   dropped (no backend reads a directory); and matches are **sorted** by component, since
   `load()` merges in the order it receives and glob promises no order. Dotfiles are
-  matched, per pathlib. Known upstream limit: a `**` crossing a Windows junction can
-  repeat files.
+  matched, per pathlib. **`bound_loops=False`** descends any one directory at most once
+  per `**` when set, keyed on its `(st_dev, st_ino)` identity: that is what bounds a
+  **Windows junction loop** (a junction pointing at one of its own ancestors), which
+  otherwise walks until the filesystem refuses the path and the load raises `OSError`. The
+  cost, and why it is off by default: identity cannot tell a loop from a directory
+  deliberately reachable under two names, so the second name then yields nothing. It is
+  forwarded to `glob(bound_loops=)` (pathlib-next 0.9.7+); the stdlib fallback ignores it,
+  having no `**` to bound. **Platform split:** only a junction is descended at all —
+  Windows reports one as *not* a symlink — while a POSIX directory **symlink** is never
+  entered by `**` (`recurse_symlinks=False` upstream, and `True` raises
+  `NotImplementedError`), so a symlinked loop cannot occur and a symlinked layer must be
+  named as its own source.
 - **`has_glob_pattern(path) -> bool`** — whether *path* contains glob magic characters.
 
 ## Errors (`errors.py`)

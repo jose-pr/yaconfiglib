@@ -35,6 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `bound_loops=` on `ConfigLoader` and `parse_sources`: descend any one directory at most
+  once per `**`. It bounds a **Windows junction loop** — a junction pointing at one of its
+  own ancestors — which otherwise makes a recursive glob walk the loop until the
+  filesystem refuses the path, failing the load with `OSError` (or, under `ignore_error`,
+  merging the loop's files many times over). Default `False`, so every existing load is
+  unchanged; the cost when set is that a directory deliberately reachable under two names
+  (two junctions pointing at one shared directory) is read under only one of them, because
+  the bound is by directory identity. A POSIX directory *symlink* is never descended by
+  `**` in the first place, so nothing changes there.
 - `yaconfiglib.CommandError` (also a `subprocess.CalledProcessError`) and
   `yaconfiglib.CommandTimeoutError` (also a `subprocess.TimeoutExpired`), so a command
   failure can be caught either as the stdlib type it always was or as a
