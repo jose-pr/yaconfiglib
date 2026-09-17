@@ -368,12 +368,14 @@ def _merge_fields(
     return inst
 
 
+# Order matters: the no-objects overload must come first, or the variadic one
+# below matches a bare typed_merge(cls) and promises a T that is really None.
+@typing.overload
+def typed_merge(cls: "typing.Type[T]", *, init: bool = True) -> None: ...
+
+
 @typing.overload
 def typed_merge(cls: "typing.Type[T]", *objects: object, init: bool = True) -> T: ...
-
-
-@typing.overload
-def typed_merge(cls: "typing.Type[T]", init: bool = True) -> None: ...
 
 
 @typing.overload
