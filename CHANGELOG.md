@@ -35,6 +35,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `ConfigLoader(confine_to=...)` and `yaconfiglib.ConfinementError`: opt-in confinement of
+  file reads to allowed roots. With it set, an `!include` (or a top-level source) that
+  resolves outside every root raises `ConfinementError` — a `PermissionError`, and so an
+  `OSError` — before the file is opened, which closes the file-disclosure gap the security
+  guide documented: an untrusted document could otherwise read any file the process can
+  through an absolute path or `..` traversal. It takes a sequence of roots, one
+  `os.pathsep`-separated string (so the value can come from an environment variable),
+  `True` meaning `base_dir`, or `False`/`None` for off; `YACONFIGLIB_CONFINE_TO` is read
+  only when the argument is `None`, and an empty allowlist refuses every local read rather
+  than disabling the control. Containment is decided on the **logical** path
+  (absolute, `..`-resolved, case-folded where the platform is): symlinks are deliberately
+  not resolved, so a link inside a root may point outside it — the boundary is write
+  access to a root. Command sources and in-memory `#!` documents are exempt; a remote URI
+  source is refused. Off by default, so no existing load changes.
 - `bound_loops=` on `ConfigLoader` and `parse_sources`: descend any one directory at most
   once per `**`. It bounds a **Windows junction loop** — a junction pointing at one of its
   own ancestors — which otherwise makes a recursive glob walk the loop until the

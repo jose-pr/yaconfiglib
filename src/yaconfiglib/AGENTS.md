@@ -63,6 +63,10 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
   `sh://`, a `+fmt` variant, or a script-extension file) is reached while
   `allow_commands=False` is in effect, including via a nested `!include` (raised by
   `ConfigLoader._load()`, with a backstop in `CommandBackend.load()` during a load).
+- **`ConfinementError(ConfigError, PermissionError)`** — defined in `errors`,
+  re-exported from the package root. Raised when `confine_to=` is in effect and a file
+  read resolves outside every allowed root, **before** the file is opened; see
+  "Errors" below.
 - **`ConfigBackend`** — the pluggable-backend **base class**; see `backends/base.py`
   below.
 - **`ConfigError`** and subclasses, **`load_error_types()`** — see "Errors" below.
@@ -102,7 +106,7 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 `ConfigLoader(base_dir="", *, encoding=None, path_factory=None, loader_factory=None,
 recursive=None, bound_loops=False, key_factory=None, log_level=None, interpolate=None,
 merge=ConfigLoaderMergeMethod.Simple, merge_options=None, ignore_error=False,
-inject_env=False, strict=False, allow_commands=True, sandbox=False)`
+inject_env=False, strict=False, allow_commands=True, sandbox=False, confine_to=None)`
 
 All constructor args become instance defaults, overridable per-call. Notable ones:
 
@@ -154,6 +158,27 @@ All constructor args become instance defaults, overridable per-call. Notable one
   nested `!include`, raises `CommandsDisabledError` instead of executing. Set this when
   loading configuration you don't fully trust. A per-call value reaches nested includes
   too. Does **not** restrict a `CommandBackend` constructed and called outside a load.
+- `confine_to=` — every **local file** read must resolve inside one of the given roots,
+  or `ConfinementError` is raised before the file is opened. This is what stops an
+  untrusted document reading arbitrary files through `!include '/etc/shadow'` or
+  `../../secret`. Forms: a sequence of paths (inside **any** is allowed), one string split
+  on `os.pathsep` like `PATH`, `True` meaning `base_dir` (read at check time, so a later
+  `base_dir =` is honoured), or `False`/`None` for off. `YACONFIGLIB_CONFINE_TO` is read
+  **only** when the argument is `None` — an env var that could widen an in-code allowlist
+  would be an escalation for whoever sets the environment. An **unset** variable means no
+  confinement; an **empty** one, like `confine_to=[]`, is an empty allowlist and refuses
+  every local read. The comparison is `os.path.commonpath` over
+  `normcase(abspath(...))` with any `\\?\` prefix stripped — never a string prefix
+  test, which would accept `/srv/confidential` under the root `/srv/conf` — and
+  **symlinks are deliberately not resolved** (a link inside a root was placed there by
+  whoever administers the root; the threat closed here is a hostile document, not a
+  hostile root). Applies to **every** file source including a top-level one, so
+  `confine_to=True` also refuses the caller's own absolute path outside `base_dir`.
+  Command sources (`allow_commands` governs those) and in-memory `#!` documents are
+  exempt **by type**; a remote URI source is refused, being inside no local root. Unlike
+  `allow_commands`/`sandbox` it is an **instance** setting: no per-call override, and it
+  does not travel through the trust `ContextVar` — the loader performing the read is the
+  one consulted.
 - **Jinja2 is required** by `interpolate=True`, `transform=` and a `%` `key_factory`.
   If it is missing or unimportable, each raises `ImportError` naming `yaconfiglib[jinja2]`
   and the original import error, **before** the source loop and therefore before
@@ -514,6 +539,14 @@ predicates and `except` clauses on those types work. Each class below is a `Conf
   the hint, then `; registered: ...`.
 - **`CommandsDisabledError(ConfigError, ValueError)`** — a command source under
   `allow_commands=False`.
+- **`ConfinementError(ConfigError, PermissionError)`** — a local file read resolved
+  outside every `confine_to=` root, or the source is not a local file at all while
+  confinement is on. Being a `PermissionError` it is an `OSError`, so a CLI catching that
+  around a load already handles it, and `load_error_types()` covers it twice over. The
+  message names the **resolved** target (absolute, `..`-free) and every root it was
+  checked against — a refusal nobody can diagnose gets switched off — while the WARNING
+  line an `ignore_error=True` skip emits still carries only source, phase and error type.
+  Raised before the file is opened, so a skip is safe: nothing was read.
 - **`CommandError(ConfigError, subprocess.CalledProcessError)`** — a command source
   exited non-zero. Stdlib constructor and attributes; its `__str__` is the stdlib text,
   then `stderr: <last 20 non-empty lines, capped at 2000 chars>`, then the context
