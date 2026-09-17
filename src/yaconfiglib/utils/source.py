@@ -388,6 +388,39 @@ def _confinement_kind(path: object) -> str:
     return "remote"
 
 
+def _is_anchored_root(text: str) -> bool:
+    r"""Whether *text* names a place rather than a place *relative to* one.
+
+    A confinement root has to be anchored, because `os.path.abspath` silently
+    resolves anything else against the working directory — turning a typo, a
+    stray leading space or an empty entry into a root under the cwd, which is
+    a directory an attacker may be able to write to.
+
+    Not simply `os.path.isabs`: that is `False` for a **bare UNC share**
+    (``\\host\share``) before Python 3.13, and a whole share is a perfectly
+    ordinary configuration root. Its own drive test is the reliable one.
+    """
+    if _os.path.isabs(text):
+        return True
+    drive = _os.path.splitdrive(text)[0]
+    return drive.startswith("\\\\") or drive.startswith("//")
+
+
+def _confinement_root_key(text: str) -> str:
+    r"""`_confinement_key`, plus the fix a **root** needs.
+
+    `os.path.commonpath` treats a bare UNC share as *relative* — it is a drive
+    with no root component — so a ``\\host\share`` root raised `ValueError`
+    for every path inside it, which `_within_roots` then read as "not
+    contained". Appending the separator makes it a rooted path, and leaves
+    every other spelling untouched (measured).
+    """
+    key = _confinement_key(text)
+    if not _os.path.splitdrive(key)[1]:
+        key += _os.sep
+    return key
+
+
 def _within_roots(path: object, roots: "_ty.Sequence[str]") -> bool:
     """True when *path* resolves inside any one of *roots*.
 

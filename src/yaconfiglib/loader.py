@@ -52,6 +52,8 @@ from .utils.source import (
     _backend_claims,
     _confinement_key,
     _confinement_kind,
+    _confinement_root_key,
+    _is_anchored_root,
     _iter_sources,
     _marker_view,
     _within_roots,
@@ -305,7 +307,28 @@ def _resolve_confine_to(
                     "every confine_to= root must be a path, not "
                     f"{type(part).__name__}"
                 )
-    return tuple(_confinement_key(part) for part in parts)
+        # An empty entry means nothing, exactly as in the string form: it must
+        # not become `abspath("")`, which is the working directory.
+        parts = [part for part in parts if os.fspath(part)]
+
+    roots = []
+    for part in parts:
+        text = os.fspath(part)
+        if not _is_anchored_root(text):
+            # Never resolved against the working directory. `abspath` would
+            # accept every one of these silently — a bare `""`, a stray
+            # leading space from an environment variable, a drive-relative
+            # `C:conf`, a POSIX-spelled root on Windows — and hand back a root
+            # under the cwd, which is both wrong and possibly attacker-
+            # writable. A confinement allowlist is the wrong place to guess.
+            raise ConfigTypeError(
+                f"confine_to= root {text!r} is not an absolute path. Give each "
+                "root an absolute path, or pass confine_to=True to confine to "
+                "base_dir; a relative root would be resolved against the "
+                "working directory, which is not what an allowlist should do."
+            )
+        roots.append(_confinement_root_key(text))
+    return tuple(roots)
 
 
 def _reject_per_call_confine_to(reader_args: "typing.Mapping[str, typing.Any]") -> None:
@@ -781,8 +804,16 @@ class ConfigLoader(ConfigBackend):
                 * one string, split on `os.pathsep` like ``PATH``, so the
                   value can come from an environment variable (a string
                   without a separator is one root);
-                * `True`, meaning *base_dir*, read at check time;
+                * a single path object;
+                * `True`, meaning *base_dir*, read at check time — which is
+                  the working directory when *base_dir* is unset, since that
+                  is where relative sources resolve;
                 * `False` or `None`, meaning off.
+
+                Every root must be **absolute**; anything else raises
+                `ConfigTypeError` rather than being resolved against the
+                working directory. Empty entries are dropped, so ``[""]`` is
+                an empty allowlist rather than the whole working directory.
 
                 When, and only when, the argument is `None`, the
                 ``YACONFIGLIB_CONFINE_TO`` environment variable is read by the
@@ -934,7 +965,7 @@ class ConfigLoader(ConfigBackend):
         if roots is True:
             # base_dir defaults to "", which means the working directory —
             # the same directory a relative source resolves against.
-            return (_confinement_key(str(self.base_dir) or os.getcwd()),)
+            return (_confinement_root_key(str(self.base_dir) or os.getcwd()),)
         return roots
 
     def _check_confinement(self, path: "_SourcePath") -> None:

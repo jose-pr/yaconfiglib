@@ -302,3 +302,78 @@ class TestConfinementCannotFailOpenSilently:
         loader = ConfigLoader(base_dir=str(conf), confine_to=[str(conf)])
         cmd = f'cmd://"{sys.executable}" "{emit}"'
         assert loader.load(cmd, timeout=60) == {"data": {"inside": True}}
+
+
+@pytest.mark.usefixtures("needs_yaml")
+class TestConfinementRootForms:
+    """What counts as a root, and what is refused rather than guessed at.
+
+    `os.path.abspath` resolves anything unanchored against the working
+    directory, so before 2026-09-17 a typo, a stray space from an environment
+    variable or an empty list entry silently became a root under the cwd — a
+    directory an attacker may be able to write to. An allowlist is the wrong
+    place to guess.
+    """
+
+    def test_relative_root_is_refused(self, tmp_path):
+        # `abspath` would resolve it against the working directory and hand
+        # back a root nobody named — possibly one an attacker can write to.
+        conf = _tree(tmp_path)
+        with pytest.raises(ConfigTypeError) as caught:
+            ConfigLoader(base_dir=str(conf), confine_to=["conf"])
+        message = str(caught.value)
+        assert "absolute" in message
+        # It must say what to do instead.
+        assert "confine_to=True" in message
+
+    @pytest.mark.parametrize(
+        "root",
+        [".", "conf", "~/conf", pytest.param("C:conf", id="drive_relative")],
+    )
+    def test_unanchored_root_forms_are_refused(self, tmp_path, root):
+        if root == "C:conf" and sys.platform != "win32":
+            pytest.skip("drive-relative paths are a Windows spelling")
+        with pytest.raises(ConfigTypeError):
+            ConfigLoader(base_dir=str(tmp_path), confine_to=[root])
+
+    def test_empty_entries_do_not_become_the_working_directory(self, tmp_path):
+        # `[""]` is the shape `os.environ.get(X, "").split(os.pathsep)` makes
+        # in a caller's own code. It used to open the whole cwd tree; it now
+        # means what `""` means — an empty allowlist, which allows nothing.
+        conf = _tree(tmp_path)
+        loader = ConfigLoader(base_dir=str(conf), confine_to=[""])
+        assert loader._confine_roots == ()
+        _including(conf, "inside.yaml")
+        with pytest.raises(ConfinementError):
+            loader.load("app.yaml")
+
+    def test_env_value_with_a_stray_space_is_refused(self, tmp_path, monkeypatch):
+        # `abspath` strips a trailing space but keeps a leading one, so
+        # " C:\\other" stopped being drive-anchored and landed under the cwd —
+        # silently dropping the root the operator actually named.
+        conf = _tree(tmp_path)
+        other = tmp_path / "other"
+        other.mkdir()
+        monkeypatch.setenv("YACONFIGLIB_CONFINE_TO", f"{conf}{os.pathsep} {other}")
+        with pytest.raises(ConfigTypeError):
+            ConfigLoader(base_dir=str(conf))
+
+    def test_absolute_roots_are_unaffected(self, tmp_path):
+        conf = _tree(tmp_path)
+        _including(conf, "inside.yaml")
+        loader = ConfigLoader(base_dir=str(conf), confine_to=[str(conf)])
+        assert loader.load("app.yaml") == {"data": {"inside": True}}
+
+    def test_a_unc_share_root_contains_its_files(self):
+        # Lexical, so no share has to exist: `commonpath` treats a bare
+        # `\\host\share` as RELATIVE (a drive with no root component) and used
+        # to raise, which `_within_roots` read as "not contained" — denying a
+        # whole legitimate root.
+        from yaconfiglib.utils.source import _confinement_root_key, _within_roots
+
+        if sys.platform != "win32":
+            pytest.skip("UNC paths are a Windows spelling")
+        roots = (_confinement_root_key(r"\\srv\share"),)
+        assert _within_roots(r"\\srv\share\conf\app.yaml", roots)
+        assert _within_roots(r"\\srv\share\app.yaml", roots)
+        assert not _within_roots(r"\\srv\other\app.yaml", roots)
