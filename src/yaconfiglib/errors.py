@@ -28,9 +28,34 @@ __all__ = [
     "UnsupportedFormatError",
     "UnknownLoaderError",
     "CommandsDisabledError",
+    "CommandError",
+    "CommandTimeoutError",
     "ErrorFrame",
     "load_error_types",
 ]
+
+#: The last stderr lines a failing command's message carries, and the character
+#: cap on them. A tool prints its reason last, so the tail is the useful part;
+#: the cap keeps a traceback readable when a command logs thousands of lines.
+STDERR_TAIL_LINES = 20
+STDERR_TAIL_CHARS = 2000
+
+
+def _stderr_tail(stderr: object) -> str:
+    """The tail of *stderr*, as one ``stderr: ...`` block, or ``""``.
+
+    Only stderr: stdout is the command's payload, which is frequently the very
+    secret the command was run to fetch.
+    """
+    if isinstance(stderr, (bytes, bytearray)):
+        stderr = stderr.decode("utf-8", "replace")
+    if not isinstance(stderr, str) or not stderr.strip():
+        return ""
+    lines = [line for line in stderr.splitlines() if line.strip()]
+    tail = "\n".join(lines[-STDERR_TAIL_LINES:])
+    if len(tail) > STDERR_TAIL_CHARS:
+        tail = "..." + tail[-STDERR_TAIL_CHARS:]
+    return f"\nstderr: {tail}"
 
 
 class ErrorFrame(_ty.NamedTuple):
@@ -88,6 +113,39 @@ class CommandsDisabledError(ConfigError, ValueError):
     Raised for a ``cmd://``/``exec://``/``sh://`` URI, a ``+fmt`` variant, or a
     script-extension file, including one reached through a nested ``!include``.
     """
+
+
+class CommandError(ConfigError, _subprocess.CalledProcessError):
+    """A command source exited non-zero.
+
+    Also a `subprocess.CalledProcessError`, with the same constructor and the
+    same ``returncode``/``output``/``stderr`` attributes, so existing handling
+    keeps working. What is new is the message: the stdlib text says only
+    "returned non-zero exit status 3", so the reason — which the tool wrote to
+    stderr — used to be reachable only by inspecting the exception.
+    """
+
+    def __str__(self) -> str:
+        return (
+            _subprocess.CalledProcessError.__str__(self)
+            + _stderr_tail(self.stderr)
+            + _render_context(self)
+        )
+
+
+class CommandTimeoutError(ConfigError, _subprocess.TimeoutExpired):
+    """A command source did not finish within ``timeout=``.
+
+    Also a `subprocess.TimeoutExpired`, keeping its constructor, its
+    ``timeout``/``cmd`` attributes and its wording.
+    """
+
+    def __str__(self) -> str:
+        return (
+            _subprocess.TimeoutExpired.__str__(self)
+            + _stderr_tail(self.stderr)
+            + _render_context(self)
+        )
 
 
 def _render_key(key: "_ty.Sequence[_ty.Union[str, int]]") -> str:

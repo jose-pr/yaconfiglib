@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from .backends import ConfigBackend as ConfigBackend
 from .errors import (
+    CommandError as CommandError,
     CommandsDisabledError as CommandsDisabledError,
+    CommandTimeoutError as CommandTimeoutError,
     ConfigError as ConfigError,
     ConfigTypeError as ConfigTypeError,
     ConfigValueError as ConfigValueError,
@@ -38,6 +40,8 @@ __all__ = [
     "UnsupportedFormatError",
     "UnknownLoaderError",
     "CommandsDisabledError",
+    "CommandError",
+    "CommandTimeoutError",
     "ErrorFrame",
     "load_error_types",
     "DotAccessibleDict",

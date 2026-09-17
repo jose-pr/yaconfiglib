@@ -1704,3 +1704,189 @@ class TestCommandOutputDecoding:
             CommandBackend().load(source)
         assert excinfo.value.returncode == 3
         assert isinstance(excinfo.value.stderr, str)
+
+
+class TestCommandErrors:
+    """A wrapped tool is no harder to diagnose than the tool run directly.
+
+    A failing command reported only its exit status — the reason it printed to
+    stderr was reachable only by inspecting the exception — and format sniffing
+    swallowed every exception, so a missing `!include` inside a command's output
+    became an empty mapping instead of an error.
+    """
+
+    @staticmethod
+    def _emit(tmp_path, body, name="emit.py", scheme="cmd"):
+        script = tmp_path / name
+        script.write_text(body, encoding="utf-8")
+        return f'{scheme}://"{sys.executable}" "{script}"'
+
+    def test_nonzero_exit_raises_command_error_with_stderr_tail(self, tmp_path):
+        import subprocess
+
+        import yaconfiglib
+
+        source = self._emit(
+            tmp_path,
+            "import sys\n"
+            "sys.stderr.write('AccessDeniedException: token expired\\n')\n"
+            "sys.exit(3)\n",
+        )
+        with pytest.raises(yaconfiglib.CommandError) as caught:
+            CommandBackend().load(source, timeout=60)
+        error = caught.value
+        assert isinstance(error, subprocess.CalledProcessError)
+        assert error.returncode == 3
+        # The reason is in the message now, not only in .stderr.
+        assert "token expired" in str(error)
+
+    def test_command_error_still_caught_as_called_process_error(self, tmp_path):
+        import subprocess
+
+        source = self._emit(tmp_path, "import sys\nsys.exit(42)\n")
+        # The pin: code written against the stdlib type keeps working.
+        with pytest.raises(subprocess.CalledProcessError) as caught:
+            CommandBackend().load(source, timeout=60)
+        assert caught.value.returncode == 42
+
+    def test_stderr_tail_is_bounded(self, tmp_path):
+        import yaconfiglib
+
+        source = self._emit(
+            tmp_path,
+            "import sys\n"
+            "for i in range(500):\n"
+            "    sys.stderr.write('L%04d\\n' % i)\n"
+            "sys.exit(1)\n",
+        )
+        with pytest.raises(yaconfiglib.CommandError) as caught:
+            CommandBackend().load(source, timeout=60)
+        message = str(caught.value)
+        # The tail is what a tool puts its reason in; the head is noise.
+        assert "L0499" in message
+        assert "L0000" not in message
+        assert len(message) < 4000
+
+    def test_stdout_never_in_error_message(self, tmp_path):
+        import subprocess
+
+        source = self._emit(
+            tmp_path,
+            "import sys\nprint('TOPSECRET')\nsys.stderr.write('failed\\n')\n"
+            "sys.exit(1)\n",
+        )
+        # Caught as the stdlib type, so this is a true pin: it held before the
+        # stderr tail was added and must still hold after.
+        with pytest.raises(subprocess.CalledProcessError) as caught:
+            CommandBackend().load(source, timeout=60)
+        # stdout is the payload — frequently the very secret being fetched.
+        assert "TOPSECRET" not in str(caught.value)
+        assert "TOPSECRET" in caught.value.output
+
+    def test_timeout_raises_command_timeout_error(self, tmp_path):
+        import subprocess
+
+        import yaconfiglib
+
+        source = self._emit(tmp_path, "import time\ntime.sleep(15)\n")
+        with pytest.raises(yaconfiglib.CommandTimeoutError) as caught:
+            CommandBackend().load(source, timeout=1)
+        assert isinstance(caught.value, subprocess.TimeoutExpired)
+        assert isinstance(caught.value, yaconfiglib.ConfigError)
+
+    def test_successful_command_stderr_logged_at_debug(self, tmp_path, caplog):
+        import logging
+
+        caplog.set_level(logging.DEBUG, logger="yaconfiglib.backends.command")
+        source = self._emit(
+            tmp_path,
+            "import sys\nsys.stderr.write('deprecation warning\\n')\nprint('a: 1')\n",
+        )
+        assert CommandBackend().load(source, timeout=60) == {"a": 1}
+        # A tool's warning used to vanish entirely on a successful run.
+        assert any(
+            "deprecation warning" in record.getMessage() for record in caplog.records
+        )
+
+    def test_sniffing_propagates_missing_include_in_output(self, tmp_path):
+        from yaconfiglib import ConfigLoader
+
+        source = self._emit(
+            tmp_path, "print('db: !include nope_secret.yaml')\n", name="inc.py"
+        )
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        # Used to sniff past it and return {} — a missing secrets file must not
+        # read as an empty config.
+        with pytest.raises(FileNotFoundError):
+            loader.load(source, timeout=60)
+
+    def test_sniffing_propagates_nested_include_parse_error(self, tmp_path):
+        import json
+
+        from yaconfiglib import ConfigLoader
+
+        (tmp_path / "bad.json").write_text('{"a": }\n', encoding="utf-8")
+        source = self._emit(
+            tmp_path, "print('db: !include bad.json')\n", name="inc2.py"
+        )
+        loader = ConfigLoader(base_dir=str(tmp_path))
+        with pytest.raises(json.JSONDecodeError) as caught:
+            loader.load(source, timeout=60)
+        kinds = [f.kind for f in getattr(caught.value, "config_frames", ())]
+        assert "include" in kinds
+
+    def test_format_list_failure_names_command_each_format_and_chains(self, tmp_path):
+        import yaconfiglib
+
+        source = self._emit(tmp_path, "print('not structured at all')\n")
+        with pytest.raises(yaconfiglib.ConfigValueError) as caught:
+            CommandBackend().load(source, format="json,toml", timeout=60)
+        error = caught.value
+        assert isinstance(error, ValueError)
+        message = str(error)
+        assert "emit.py" in message
+        assert "json:" in message and "toml:" in message
+        assert error.__cause__ is not None
+
+    def test_single_format_failure_keeps_type_and_names_command(self, tmp_path):
+        import json
+
+        source = self._emit(tmp_path, "print('not json')\n")
+        with pytest.raises(json.JSONDecodeError) as caught:
+            CommandBackend().load(source, format="json", timeout=60)
+        assert "emit.py" in str(caught.value)
+
+    def test_empty_output_with_format_names_command(self, tmp_path):
+        import yaconfiglib
+
+        source = self._emit(tmp_path, "pass\n")
+        with pytest.raises(yaconfiglib.ConfigValueError) as caught:
+            CommandBackend().load(source, format="json", timeout=60)
+        assert "emit.py" in str(caught.value)
+
+    def test_sniffing_deeply_nested_output_does_not_raise(self, tmp_path):
+        source = self._emit(
+            tmp_path,
+            "print('[' * 5000)\n",
+            name="deep.py",
+        )
+        # The pin: a parser exhausted by depth is a parse failure, so sniffing
+        # falls through to the raw string rather than crashing the load.
+        result = CommandBackend().load(source, timeout=60)
+        assert isinstance(result, str)
+
+    def test_command_source_value_errors_are_config_errors(self, tmp_path):
+        import yaconfiglib
+
+        source = self._emit(
+            tmp_path,
+            "import sys\nsys.stdout.buffer.write(bytes([99, 97, 102, 233]))\n",
+            name="bad_codec.py",
+        )
+        with pytest.raises(yaconfiglib.ConfigValueError) as caught:
+            CommandBackend().load(source, timeout=60)
+        assert isinstance(caught.value, ValueError)
+        assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+        # An in-memory source with no script extension, through loads().
+        with pytest.raises(yaconfiglib.ConfigValueError):
+            yaconfiglib.loads("echo 1", loader="command")

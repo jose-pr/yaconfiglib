@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -16,13 +17,27 @@ try:
 except ImportError:
     from pathlib import Path
 
+import configparser
+
+from ..errors import (
+    CommandError,
+    CommandsDisabledError,
+    CommandTimeoutError,
+    ConfigValueError,
+    ErrorFrame,
+    UnknownLoaderError,
+    _add_error_context,
+    _stderr_tail,
+)
 from ..utils import source as _source
 from ..utils.source import _CMD_REGEX, CommandSource
-from ..utils.trust import CommandsDisabledError, current_policy
+from ..utils.trust import current_policy
 from .base import ConfigBackend
 from .dotenv import DotenvBackend
 
 __all__ = ["CommandBackend"]
+
+logger = logging.getLogger(__name__)
 
 
 def _kill_process_tree(process: subprocess.Popen) -> None:
@@ -68,13 +83,13 @@ def _script_command(path_str: str) -> "typing.Union[str, list[str]]":
 
     if suffix in (".bat", ".cmd"):
         if sys.platform != "win32":
-            raise ValueError(
+            raise ConfigValueError(
                 f"{path_str!r} is a Windows batch file and cannot run on this platform"
             )
         if "%" in path_str:
             # cmd expands %VAR% even inside quotes, so a path containing % can
             # rewrite the command line. There is no escape that survives it.
-            raise ValueError(
+            raise ConfigValueError(
                 f"refusing to run {path_str!r}: a batch file's path cannot contain '%'"
             )
         comspec = os.environ.get("COMSPEC", "cmd.exe")
@@ -135,8 +150,13 @@ def _run_command(
     behaviour) and False for a script file, whose launch line is built by
     `_script_command`.
 
-    Raises CalledProcessError on a non-zero exit and TimeoutExpired when
-    *timeout* elapses (after killing the whole process tree).
+    Raises `CommandError` on a non-zero exit and `CommandTimeoutError` when
+    *timeout* elapses (after killing the whole process tree). Both are still a
+    `subprocess.CalledProcessError` / `TimeoutExpired`.
+
+    stderr from a **successful** run is logged at DEBUG rather than dropped: a
+    tool's warnings used to vanish entirely. It is decoded non-strictly, since
+    a warning in another codec must not fail a load whose stdout decoded.
     """
     with subprocess.Popen(
         command,
@@ -154,7 +174,7 @@ def _run_command(
         except subprocess.TimeoutExpired:
             _kill_process_tree(process)
             process.communicate()
-            raise subprocess.TimeoutExpired(command, timeout) from None
+            raise CommandTimeoutError(command, timeout) from None
         except BaseException:
             # Interrupted (e.g. KeyboardInterrupt): never leave the command
             # running. Re-raised unchanged, as subprocess.run does.
@@ -163,13 +183,63 @@ def _run_command(
     if process.returncode:
         # A failing command's status wins over any decode complaint, and its
         # output is a diagnostic rather than configuration, so replace freely.
-        raise subprocess.CalledProcessError(
+        raise CommandError(
             process.returncode,
             command,
             output=_decode(stdout, encoding, strict=False),
             stderr=_decode(stderr, encoding, strict=False),
         )
+    if stderr and stderr.strip():
+        # A successful command that warned still said something worth seeing.
+        logger.debug(
+            "command %r wrote to stderr:%s",
+            command,
+            _stderr_tail(_decode(stderr, encoding, strict=False)),
+        )
     return stdout
+
+
+#: What "this candidate format does not fit" actually looks like. Measured, not
+#: guessed: every candidate format was run over INI, dotenv, prose, a bare
+#: number, YAML, TOML, tabs, PEM and control characters, and each failure was a
+#: `ValueError` subclass, a `configparser.Error` or a `yaml.YAMLError`.
+#: `RecursionError` is here because output nested thousands deep exhausts a
+#: parser rather than being the wrong format.
+_PARSE_FAILURES = (ValueError, configparser.Error, RecursionError)
+
+
+def _parse_failure_types() -> tuple:
+    """`_PARSE_FAILURES`, plus PyYAML's base error when PyYAML is imported.
+
+    Probed in `sys.modules` rather than imported: yaml can only have raised if
+    something already imported it.
+    """
+    yaml = sys.modules.get("yaml")
+    yaml_error = getattr(yaml, "YAMLError", None)
+    if isinstance(yaml_error, type):
+        return _PARSE_FAILURES + (yaml_error,)
+    return _PARSE_FAILURES
+
+
+def _is_wrong_format(error: BaseException, sniffing: bool) -> bool:
+    """Whether a caught parse failure really means "try the next format".
+
+    Sniffing used to swallow every exception, so a missing `!include` inside a
+    command's output became an empty mapping and a disabled command looked like
+    unparseable text. These three are parse-failure *types* that are not the
+    candidate's own verdict.
+    """
+    if isinstance(error, CommandsDisabledError):
+        return False
+    for frame in getattr(error, "config_frames", ()) or ():
+        if frame.kind == "include":
+            # Raised by a document the output included, not by parsing it.
+            return False
+    if isinstance(error, UnknownLoaderError):
+        # While sniffing, a format whose backend is not installed is simply not
+        # a candidate. Asked for by name, it is an error.
+        return sniffing
+    return True
 
 
 class CommandBackend(ConfigBackend):
@@ -251,8 +321,17 @@ class CommandBackend(ConfigBackend):
             format could be determined and sniffing failed.
 
         Raises:
-            subprocess.CalledProcessError: If the command exits non-zero.
-            subprocess.TimeoutExpired: If *timeout* elapses first.
+            CommandError: If the command exits non-zero. Also a
+                `subprocess.CalledProcessError`; its message ends with the tail
+                of the command's stderr.
+            CommandTimeoutError: If *timeout* elapses first. Also a
+                `subprocess.TimeoutExpired`.
+            ConfigValueError: If the output cannot be decoded, is empty when a
+                format was requested, or matches none of several requested
+                formats (chained to the last parser error). Also a `ValueError`.
+            Exception: Anything an `!include` inside the output raises, and
+                anything that is not a parse failure, propagates with its own
+                type rather than being treated as "wrong format".
             ValueError: If an explicit *format*/shebang format is
                 requested but the output cannot be parsed as that format,
                 or output is empty while a format was requested.
@@ -293,7 +372,7 @@ class CommandBackend(ConfigBackend):
             # whatever file happens to bear that virtual name on disk.
             suffix = path.suffix
             if not _SCRIPT_SUFFIX_REGEX.match(suffix or ""):
-                raise ValueError(
+                raise ConfigValueError(
                     f"in-memory source {path.name!r} has no script extension: "
                     "name it .sh/.bat/.ps1/.cmd, or use a cmd:// source to run a "
                     "shell command"
@@ -313,7 +392,7 @@ class CommandBackend(ConfigBackend):
         try:
             stdout = _decode(raw, codec, strict=True)
         except UnicodeDecodeError as exc:
-            raise ValueError(
+            raise ConfigValueError(
                 f"output of command source {path_str!r} is not valid {codec}; "
                 "pass encoding= (for example 'oem' on Windows for cmd/.bat/"
                 "PowerShell output, or the child's own code page)"
@@ -336,8 +415,10 @@ class CommandBackend(ConfigBackend):
 
         if not output:
             if explicit_format or shebang_format:
-                raise ValueError(
-                    f"Command output is empty, cannot parse as {explicit_format or shebang_format}"
+                raise ConfigValueError(
+                    "output of command "
+                    f"{path_str!r} is empty, cannot parse as "
+                    f"{explicit_format or shebang_format}"
                 )
             return ""
 
@@ -363,6 +444,7 @@ class CommandBackend(ConfigBackend):
             candidates = ["json", "yaml", "toml", "dotenv", "ini"]
 
         sniffing = not (explicit_format or shebang_format)
+        failures: "list[tuple[str, BaseException]]" = []
         for fmt in candidates:
             if fmt == "command":
                 continue
@@ -386,17 +468,35 @@ class CommandBackend(ConfigBackend):
                     # dict. JSON scalars are unambiguous and stay accepted.
                     continue
                 return result
-            except (
-                Exception
-            ):  # noqa: BLE001 - format sniffing must survive ANY parse error
-                # If explicit_format or shebang_format failed and is the only candidate,
-                # we want to propagate the error. Otherwise, continue.
+            except _parse_failure_types() as error:
+                # Only a parse failure is caught at all, so a TypeError, an
+                # OSError or a missing file propagates untouched rather than
+                # being read as "wrong format".
+                if not _is_wrong_format(error, sniffing):
+                    # Not "this format does not fit": a disabled command, an
+                    # error from an !include inside the output, or a real
+                    # failure such as a missing file. Falling through to
+                    # another candidate would turn it into a plausible but
+                    # wrong value.
+                    _add_error_context(error, frame=ErrorFrame("command", path_str))
+                    raise
+                failures.append((fmt, error))
+                # A single requested format's error is the answer, with its own
+                # type; only sniffing moves on to the next candidate.
                 if len(candidates) == 1 and (explicit_format or shebang_format):
+                    _add_error_context(error, frame=ErrorFrame("command", path_str))
                     raise
                 continue
 
         if explicit_format or shebang_format:
-            raise ValueError(f"Failed to parse command output as {candidates}")
+            detail = "; ".join(
+                f"{fmt}: {str(error).splitlines()[0][:200] if str(error) else type(error).__name__}"
+                for fmt, error in failures
+            )
+            raise ConfigValueError(
+                f"could not parse output of command {path_str!r} as any of "
+                f"{candidates}: {detail}"
+            ) from (failures[-1][1] if failures else None)
 
         # Sniffing fallback: return the raw output if no candidate parses successfully
         return output
