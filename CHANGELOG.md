@@ -320,6 +320,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- Under `confine_to=`, a **glob pattern** is checked before it is expanded, and a refused
+  match no longer reports the filename expansion found. Both were disclosure paths rather
+  than read paths: a pattern aimed outside the roots used to be expanded anyway — listing
+  directories outside them — and the refusal then named a real file, so a document could
+  discover filenames by guessing a prefix (`!include '/etc/*.yaml'`). The pattern's
+  literal base is now required to be inside a root, each match is checked as well (a
+  wildcard can still leave a root after a legal prefix), and a match refusal names the
+  **pattern**, with the resolved path logged at DEBUG. A refused stream or pattern can now
+  also be skipped by `ignore_error`, which only a refused *path* could before.
 - A `confine_to=` root must now be an **absolute** path; anything else raises
   `ConfigTypeError` instead of being resolved against the process working directory. That
   silent resolution was how a typo, a `""` list entry or a stray space after a separator

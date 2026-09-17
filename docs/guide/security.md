@@ -179,6 +179,26 @@ root can point a configuration outside it, but they could equally drop the
 configuration itself there. What `confine_to=` closes is a hostile
 *document*.
 
+### Glob patterns
+
+A pattern is checked twice, and neither check waits for the file to be read:
+the directory it names before its first wildcard must be inside a root, so a
+pattern aimed outside them is refused **without listing anything**, and each
+match is checked as well, because a wildcard can still leave a root after a
+legal prefix (`*/../../elsewhere/*`).
+
+A refusal for a match names the **pattern**, never the file expansion found:
+that file is a name the document did not write, and reporting it back turned a
+pattern plus a refusal into a way to discover filenames. The resolved path is
+logged at DEBUG instead, where this library already treats its records as
+sensitive.
+
+One residual, worth knowing if you accept untrusted documents: for a pattern
+whose wildcards escape a root *after* a legal prefix, **whether anything
+matched is still observable** — a match is refused, and no match loads
+nothing. No filename and no directory listing is disclosed either way, and
+nothing outside the roots is ever read.
+
 ### Either way
 
 Do not return, echo or log a loaded result verbatim, and run the process with

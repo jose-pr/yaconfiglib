@@ -530,6 +530,18 @@ distinguish merge branches.
   entered by `**` (`recurse_symlinks=False` upstream, and `True` raises
   `NotImplementedError`), so a symlinked loop cannot occur and a symlinked layer must be
   named as its own source.
+- **Confinement of sources** (private, driven by `ConfigLoader`): `_iter_sources` takes a
+  `confine=` hook and calls it at the three points `_load` cannot see — a **stream**'s own
+  file before it is read (`_stream_origin`, which is the full path, not
+  `_stream_filename`'s basename), a **pattern**'s literal base before expansion
+  (`_pattern_literal_base`, computed from the *source's* components so magic in `base_dir`
+  stays literal), and every **match** before it is yielded. The hook returns `True` when
+  the source should be skipped, which is how a refusal reaches `ignore_error` from inside
+  the generator; a match refusal names the pattern rather than the match, so expansion
+  cannot report filenames back to a document. `_confinement_root_key` is the root-side
+  spelling of `_confinement_key` (it appends a separator to a bare UNC share, which
+  `commonpath` treats as relative), and `_is_anchored_root` is why a relative root raises
+  instead of resolving against the working directory.
 - **`has_glob_pattern(path) -> bool`** — whether *path* contains glob magic characters.
 
 ## Errors (`errors.py`)
