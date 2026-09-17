@@ -65,6 +65,7 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
   `ConfigLoader._load()`, with a backstop in `CommandBackend.load()` during a load).
 - **`ConfigBackend`** — the pluggable-backend protocol; see `backends/base.py` below.
 - **`ConfigError`** and subclasses, **`load_error_types()`** — see "Errors" below.
+- **`ErrorFrame`** — one step in an error's `config_frames`; see "Errors" below.
 - **`MergeMethod`**, **`typed_merge`**, **`OpaqueMerge`**, **`opaque`**,
   **`TypedNamespace`** — re-exported from `utils.merge` / `utils.typing_merge`; see
   "Merge strategies" / "Typed merge".
@@ -478,10 +479,14 @@ predicates and `except` clauses on those types work. Each class below is a `Conf
   - `config_frames: Tuple[ErrorFrame, ...]` — innermost first.
     **`ErrorFrame(kind, source, line=None)`** is a NamedTuple whose `kind` is
     `"include"`, `"render"`, `"command"` or `"merge"`.
-  - `config_key: Tuple[Union[str, int], ...]` — a key or field path.
+  - `config_key: Tuple[Union[str, int], ...]` — a key or field path. Built from the
+    inside out, so it reads relative to the document or the model asked for.
+  - `config_model: str` — the model a `typed_merge`/`load_as` failure was building. The
+    **outermost** model wins, for the same reason.
   The suffix reads
   `[in <source>; included from <src>, line <n>; rendered from <src>; output of command
-  <src!r>; while merging <src>; at <a.b[0].c>]`, and is **re-rendered from the record**
+  <src!r>; while merging <src>; at <a.b[0].c> (<Model>)]` — the model alone as
+  `(<Model>)` when there is no key — and is **re-rendered from the record**
   each time, never appended twice. `in <source>` is omitted when the error's own message
   already names it (a PyYAML mark, an INI source, an `OSError` whose `filename` matches);
   a `render` frame naming the source itself renders as bare `rendered`. An unknown error

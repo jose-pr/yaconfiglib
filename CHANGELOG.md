@@ -278,6 +278,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- `typed_merge()` and `load_as()` errors name the field path and the model
+  (`... [at db.port (AppConfig)]`, and `ports[1]` for a list item), readable as
+  `error.config_key` and `error.config_model`. A coercion failure reported only the
+  value, which in a large configuration could have been any field. Exception types are
+  unchanged, and `typed_merge`'s own refusals are now `yaconfiglib.ConfigError`
+  subclasses as well.
+- `load_as()` says when **no source was loaded**, instead of giving a glob that matched
+  nothing the same message as a document of the wrong shape. That message now also names
+  the model and the type actually loaded: `load_as(AppConfig) needs a mapping, got list`.
 - A failing command source's error message now ends with the tail of the command's
   stderr — the reason the tool gave — where before it said only "returned non-zero exit
   status N" and the reason was reachable only by inspecting the exception. stdout is

@@ -86,4 +86,12 @@ settings = yaconfiglib.load_as(
 ```
 
 The loaded document must be a mapping (`dict`) — `load_as` raises
-`TypeError` if the merged/interpolated result isn't one.
+`TypeError` if the merged/interpolated result isn't one. The message names the
+model and what was actually loaded
+(`load_as(AppConfig) needs a mapping, got list`), and says
+`; no source was loaded` when nothing matched, which is a different problem
+from a document of the wrong shape.
+
+A field that fails to build names its path and model, the same way
+[`typed_merge`](merging.md#when-a-field-does-not-fit) does
+(`... [at db (AppConfig)]`), with the type the model itself raised.

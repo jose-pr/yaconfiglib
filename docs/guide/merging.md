@@ -256,6 +256,23 @@ so reach for `OpaqueMerge` to skip the introspection, not to survive it. The
 hook is found through `Optional[Zone]` and other unions, not only on a direct
 class hint.
 
+### When a field does not fit
+
+A value the target type cannot accept keeps its own exception type — `int("abc")`
+is still a `ValueError` — and the message now says **which field of which
+model**:
+
+```
+invalid literal for int() with base 10: 'abc' [at db.port (Outer)]
+```
+
+List and tuple items appear by index (`ports[1]`), the path is relative to the
+model you asked for, and it is also readable as `error.config_key` with
+`error.config_model`. `typed_merge`'s own refusals — a scalar where a sequence
+is declared, a tuple-length mismatch, a string that is not a boolean — are
+`yaconfiglib.ConfigError` subclasses as well as the `TypeError`/`ValueError`
+they always were.
+
 ### `_parse_<field>` — coerce a field as it is merged
 
 If a source object defines a `_parse_<name>(value)` method, `typed_merge`
