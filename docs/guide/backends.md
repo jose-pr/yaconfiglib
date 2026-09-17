@@ -179,6 +179,26 @@ keeps its `./`, and `print(10/4)` still divides. Only a *string* source can be
 a command: a path object is always a file, so a data file named
 `sh:hosts.json` loads by its extension instead of being run.
 
+### When a command fails
+
+A non-zero exit raises `yaconfiglib.CommandError`, which is also a
+`subprocess.CalledProcessError` (so `returncode`, `output` and `stderr` are
+where they always were). Its message ends with the **tail of the command's
+stderr** — the last 20 non-empty lines — because that is where a tool puts the
+reason it failed. stdout is never in the message: it is the payload, often the
+secret the command was run to fetch. A `timeout=` that elapses raises
+`CommandTimeoutError`, a `subprocess.TimeoutExpired`.
+
+stderr from a command that *succeeded* is logged at DEBUG, so a tool's
+warnings are visible without changing what loads.
+
+Anything that is not a parse failure propagates with its own type instead of
+being read as "wrong format". In particular, an `!include` inside the output
+that cannot be resolved raises — a missing secrets file used to be sniffed
+past and the whole document came back empty. When several formats are
+requested (`format="json,toml"`) and all fail, the error names the command and
+each format's first line, chained to the last parser error.
+
 Command stdout is decoded with `encoding=` (default `utf-8`), and a byte that
 does not decode **raises** rather than being silently replaced with `U+FFFD` —
 a corrupted secret should not reach your configuration unnoticed. On Windows,

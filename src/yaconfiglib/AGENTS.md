@@ -454,6 +454,13 @@ predicates and `except` clauses on those types work. Each class below is a `Conf
   the hint, then `; registered: ...`.
 - **`CommandsDisabledError(ConfigError, ValueError)`** — a command source under
   `allow_commands=False`.
+- **`CommandError(ConfigError, subprocess.CalledProcessError)`** — a command source
+  exited non-zero. Stdlib constructor and attributes; its `__str__` is the stdlib text,
+  then `stderr: <last 20 non-empty lines, capped at 2000 chars>`, then the context
+  suffix. **stdout is never in the message** (it is the payload, often the secret) — it
+  stays on `.output`.
+- **`CommandTimeoutError(ConfigError, subprocess.TimeoutExpired)`** — `timeout=` elapsed;
+  the process tree was killed. Both classes pickle.
 - **`load_error_types() -> Tuple[Type[BaseException], ...]`** — one tuple for
   `except yaconfiglib.load_error_types() as error:`. Always `ConfigError`, `OSError`,
   `UnicodeError`, `json.JSONDecodeError`, `configparser.Error`,
@@ -631,20 +638,34 @@ marker, and would add a BOM there.
   extension and is written to a private temp directory, run, and removed — so the
   promised body runs rather than a same-named file on disk. `.load(..., timeout=None)`: an opt-in number of seconds (reachable per call,
   e.g. `loader.load("cmd://...", timeout=30)`) after which the command and its child
-  processes are killed and `subprocess.TimeoutExpired` is raised; no timeout by default.
+  processes are killed and `CommandTimeoutError` (a `subprocess.TimeoutExpired`) is
+  raised; no timeout by default.
   Stdout is captured as **bytes** and decoded with `encoding=` (default `utf-8`)
-  **strictly**: an undecodable byte raises `ValueError` naming `encoding=`, instead of
-  substituting U+FFFD (`Popen(errors="replace")` would swallow it before this layer
-  could object). CR/CRLF are then normalized. A **non-zero exit wins**: its output is
-  decoded with `errors="replace"` and attached to `CalledProcessError`, since that text
-  is a diagnostic rather than configuration.
+  **strictly**: an undecodable byte raises `ConfigValueError` (a `ValueError`) naming
+  `encoding=`, instead of substituting U+FFFD (`Popen(errors="replace")` would swallow it
+  before this layer could object). CR/CRLF are then normalized. A **non-zero exit wins**:
+  its output is decoded with `errors="replace"` and attached to `CommandError` (a
+  `CalledProcessError`), since that text is a diagnostic rather than configuration; the
+  message carries the **stderr tail**, never stdout. stderr from a *successful* run is
+  logged at DEBUG. Every `ValueError` this backend raises is a `ConfigValueError`; the
+  missing-interpreter `FileNotFoundError` stays a plain `OSError`, since it is about the
+  host rather than the configuration.
   With no `format=`/`+fmt`/shebang it **sniffs**: json (any value), yaml **only for a
   mapping or list**, toml, dotenv **strict** (every non-comment line an assignment), ini,
   else the raw stdout string. The yaml and dotenv restrictions are what make the later
   candidates reachable — YAML turns any text into a scalar and lenient dotenv turns a
   word into a bare key — so a candidate's result must be *checked*, not just produced.
   Explicit `format=`, `+fmt` and shebang routes keep lenient dotenv and propagate a
-  single candidate's parse error.
+  single candidate's parse error, with an `ErrorFrame("command", ...)` added.
+  **Only a parse failure means "try the next format"**: the loop catches
+  `(ValueError, configparser.Error, RecursionError)` plus `yaml.YAMLError` when PyYAML is
+  imported — the measured failure set — and within that re-raises a
+  `CommandsDisabledError`, anything carrying an `include` frame (raised by a document the
+  output included, not by parsing it) and, outside sniffing, an `UnknownLoaderError`.
+  Everything else never enters the handler. Sniffing used to swallow every exception, so
+  a missing `!include` in the output became an empty mapping. Several requested formats
+  that all fail raise `ConfigValueError` naming the command and each format's first line
+  (capped at 200 characters), chained `from` the last parser error.
 - **`PythonBackend`** (`NAME="python"`) — passes an in-memory Python object straight
   through as the parsed document. Use it **on its own** —
   `loader.load(loader=PythonBackend(data))`, no pathname — and merge the result with the

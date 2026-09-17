@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a command source is refused while `allow_commands=False`.
 
 ### Added
+- `yaconfiglib.CommandError` (also a `subprocess.CalledProcessError`) and
+  `yaconfiglib.CommandTimeoutError` (also a `subprocess.TimeoutExpired`), so a command
+  failure can be caught either as the stdlib type it always was or as a
+  `yaconfiglib.ConfigError`.
 - `parse_sources(on_error=...)`: a callback `(error, directory) -> bool` called when glob
   expansion cannot list a directory. Return `True` to skip that directory and keep
   expanding; anything falsy lets the `OSError` propagate. It is asked once per directory,
@@ -79,6 +83,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also apply to nested `!include` targets.
 
 ### Changed
+- While sniffing a command's output format, only a parse failure now means "try the next
+  format". Anything else — a disabled command, an error from an `!include` inside the
+  output, a `TypeError`, a missing file — propagates instead of falling through to
+  another format or to the raw output. Fix the reported error, or pass
+  `format=`/`cmd+<fmt>://` to choose the format outright.
 - With `ConfigLoader(ignore_error=...)`, `load_all()` yields a document with the failing
   value unrendered instead of skipping the document entirely, and an interpolation
   failure is offered to a predicate once per failing value with `phase="interpolate"` and
@@ -269,6 +278,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- A failing command source's error message now ends with the tail of the command's
+  stderr — the reason the tool gave — where before it said only "returned non-zero exit
+  status N" and the reason was reachable only by inspecting the exception. stdout is
+  never included, since it is the payload. stderr from a command that *succeeded* is
+  logged at DEBUG instead of being dropped.
+- When no output format is given, an `!include` that fails inside a command's output now
+  raises instead of being treated as "this format does not fit". A missing secrets file
+  used to be sniffed past, and the document came back empty.
+- A parse failure now names the command and every format tried, and chains the parser's
+  own error as `__cause__`; it said only `Failed to parse command output as [...]` with
+  no cause.
 - With `ignore_error`, one failing template no longer deletes the rest of its section.
   Only that value is left unrendered, with its template text as written, and everything
   else in the document still renders; previously the failing key and every sibling in its

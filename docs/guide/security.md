@@ -144,6 +144,11 @@ The WARNING line that `ignore_error=True` emits for a skipped source carries
 only the source, the phase and the error's type — never the message text — so
 it is safe in a shipped log.
 
+**A failing command's stderr tail is part of its exception message**, so it
+reaches any traceback or error report. A tool that prints credentials to
+stderr when it fails will expose them there. Its stdout — the payload — is
+never in the message, only in the exception's `output` attribute.
+
 ## Loading third-party configuration — checklist
 
 ```python
