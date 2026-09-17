@@ -104,7 +104,7 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
 ## `ConfigLoader` (`loader.py`)
 
 `ConfigLoader(base_dir="", *, encoding=None, path_factory=None, loader_factory=None,
-recursive=None, bound_loops=False, key_factory=None, log_level=None, interpolate=None,
+recursive=None, bound_loops=True, key_factory=None, interpolate=None,
 merge=ConfigLoaderMergeMethod.Simple, merge_options=None, ignore_error=False,
 inject_env=False, strict=False, allow_commands=True, sandbox=False, confine_to=None)`
 
@@ -223,8 +223,6 @@ that re-resolves its roots). Notable ones:
 - `!include` mapping form — accepts only `pathname`, `encoding`, `transform`,
   `key_factory` (`"%<expr>"` form only), `default`, `flatten`, `merge`, `merge_options`,
   `recursive`; other keys are dropped with a WARNING.
-- `log_level` — **deprecated and ignored**; it never changed anything. Passing it warns
-  (`DeprecationWarning`); configure the `yaconfiglib` logger with `logging` instead.
 - `inject_env=True` — with `interpolate`, exposes a read-only snapshot of `os.environ` to
   templates as `env` (templates cannot change the process environment); also exposed to
   `.j2` source rendering.
@@ -461,7 +459,7 @@ distinguish merge branches.
 ## Source resolution (`utils/source.py`)
 
 - **`parse_sources(sources, base_dir=None, encoding=None, memo=None, path_factory=None,
-  recursive=None, on_error=None, bound_loops=False) -> Iterator[Path]`** — flattens `sources` (paths — a `str`, a
+  recursive=None, on_error=None, bound_loops=True) -> Iterator[Path]`** — flattens `sources` (paths — a `str`, a
   pathlib-next path, or any other `os.PathLike` such as `pathlib.Path`; glob patterns,
   command URIs — yielded as a `CommandSource`, a `str` subclass carrying the text
   **verbatim** (a path factory would rewrite `/` on Windows and collapse `//`, `/./`
@@ -481,10 +479,12 @@ distinguish merge branches.
   (anything else raises `TypeError` naming `read()`). Being materialized, an `!include`
   inside it resolves against `base_dir`. Command URIs (`exec://`, `cmd://`,
   `sh://`, `+fmt` variants) pass through unresolved/unexpanded. In-memory content and
-  streams materialize to a `pathlib_next` `MemPath` (a tracked temp file is the fallback
-  where that import fails, best-effort cleaned at interpreter exit — but **pathlib-next is
-  a required dependency**, so that path is not a supported configuration: the stdlib glob
-  fallback beside it cannot expand `**` at all). `memo` dedupes repeat sources across
+  streams materialize to a `pathlib_next` `MemPath`. **pathlib-next is a required
+  dependency and every import of it is unconditional** — there is no stdlib fallback to
+  fall into and no `HAS_PATHLIB_NEXT` flag to branch on. A caller may still pass
+  `path_factory=pathlib.Path`, and stdlib paths still expand simple globs, but a
+  `recursive=`/`**` source built that way expands to **nothing**: stdlib `glob` cannot do
+  it, which is a limit of that factory rather than of a fallback. `memo` dedupes repeat sources across
   recursive calls (mutated in place; logs and skips a duplicate rather than erroring).
   Its keys are **lexical**: `os.path.normcase(os.path.abspath(...))` for a
   `pathlib.PurePath` (so `./x`, `x/../x` and, on Windows, `X` are one file),

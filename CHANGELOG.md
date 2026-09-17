@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **The stdlib path fallback.** Every `from pathlib_next import ...` is now unconditional,
+  in all eleven modules that had a `try`/`except ImportError` around it, and the
+  `HAS_PATHLIB_NEXT` flag, the temp-file materializer it fed and its `atexit` cleanup are
+  gone. pathlib-next is a declared dependency, so a missing one now raises `ImportError`
+  at import time like any other — where before the package imported and then answered
+  *differently*: a `**` source expanded to nothing instead of failing. Measured on the
+  current suite with pathlib-next absent: 33 failures and 7 errors, against the 5 on
+  record when the fallback was last examined.
+- **`ConfigLoader(log_level=...)`.** It accepted a value, warned, and did nothing for one
+  release; passing it now raises `TypeError`. Configure the `yaconfiglib` logger through
+  the `logging` module.
+- **The `envoriment=` alias** on the Jinja2 backend, a historical misspelling kept beside
+  `environment=`. Use `environment=`.
+
+Note for anyone passing `path_factory=pathlib.Path`: stdlib paths are still accepted and
+still expand simple globs, but a `recursive=`/`**` source with a stdlib factory expands to
+**nothing** — a limit of stdlib `glob` rather than of the removed fallback, and unchanged
+by this release.
+
 ## [0.12.0] - 2026-09-17
 
 ### Security
