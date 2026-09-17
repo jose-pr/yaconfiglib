@@ -655,7 +655,7 @@ class ConfigLoader(ConfigBackend):
             "typing.Optional[typing.Callable[[_SourcePath], ConfigBackend]]"
         ) = None,
         recursive: typing.Optional[bool] = None,
-        bound_loops: bool = False,
+        bound_loops: bool = True,
         key_factory: "typing.Optional[typing.Union[str, typing.Callable[[_SourcePath, typing.Any], str]]]" = None,
         log_level: typing.Optional[typing.Any] = None,
         interpolate: typing.Optional[bool] = None,
@@ -692,16 +692,23 @@ class ConfigLoader(ConfigBackend):
                 dispatch.
             recursive: Whether glob sources should recurse into
                 subdirectories by default.
-            bound_loops: If True, each ``**`` descends any one directory at
-                most once. Set it when a tree contains a **Windows junction
-                loop** — a junction pointing at one of its own ancestors,
-                which otherwise walks until the filesystem refuses the path,
-                failing the load. The cost: a directory deliberately reachable
-                under two names is then read under only one of them, because
-                the bound is by directory identity. A POSIX directory symlink
-                is never descended by ``**``, so this changes nothing there.
-                Instance-wide, with no per-call override, since a loop is a
-                property of the tree rather than of one call.
+            bound_loops: Whether each ``**`` bounds a directory **loop** —
+                a Windows junction pointing at one of its own ancestors.
+                Defaults to `True`, because the alternative is a walk that
+                continues until the filesystem refuses the path: the load then
+                fails with `OSError`, or under *ignore_error* merges the
+                loop's files once per lap. Pass `False` for pathlib's own
+                unbounded walk.
+
+                Bounding costs nothing else: a directory deliberately
+                reachable under two names is still read under both, since the
+                bound is the current descent path rather than every directory
+                seen (pathlib-next 0.9.9, which is why the floor is
+                ``>=0.9.9``; 0.9.7 and 0.9.8 dropped the second name). A POSIX
+                directory symlink is never descended by ``**`` at all, so
+                this changes nothing there. Instance-wide, with no per-call
+                override, since a loop is a property of the tree rather than
+                of one call.
             key_factory: How to name each loaded document for merging
                 (e.g. for :attr:`ConfigLoaderMergeMethod.Hash`). Either a
                 callable ``(path, value) -> str``, which receives the source

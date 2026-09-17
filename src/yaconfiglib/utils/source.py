@@ -800,7 +800,7 @@ def parse_sources(
     path_factory: "_ty.Optional[_ty.Callable[[str], _os.PathLike]]" = None,
     recursive: _ty.Optional[bool] = None,
     on_error: "_ty.Optional[_ty.Callable[[OSError, _ty.Any], bool]]" = None,
-    bound_loops: bool = False,
+    bound_loops: bool = True,
 ) -> _ty.Iterator[Path]:
     """Resolve *sources* into a flat stream of loadable :class:`Path`-like objects.
 
@@ -832,7 +832,7 @@ def _iter_sources(
     path_factory: "_ty.Optional[_ty.Callable[[str], _os.PathLike]]" = None,
     recursive: _ty.Optional[bool] = None,
     on_error: "_ty.Optional[_ty.Callable[[OSError, _ty.Any], bool]]" = None,
-    bound_loops: bool = False,
+    bound_loops: bool = True,
     *,
     text_fallback: bool = False,
     confine: "_ty.Optional[_ty.Callable[[object], None]]" = None,
@@ -911,17 +911,21 @@ def _iter_sources(
             the `OSError` propagate. Without it the directory is skipped
             silently, as pathlib does. Asked once per directory, and only on
             the pathlib-next path: the stdlib fallback has no hook.
-        bound_loops: If True, each ``**`` descends any one directory at most
-            once, keyed on its ``(st_dev, st_ino)`` identity. That bounds a
-            **Windows junction loop** — a junction pointing at one of its own
-            ancestors, which otherwise walks until the filesystem refuses the
-            path. The cost is that identity cannot tell a loop from a
-            directory deliberately reachable under two names: with this set,
-            the second name yields nothing. Off by default, so every expansion
-            keeps its current results. A POSIX directory **symlink** is never
-            descended by ``**`` in the first place, so there is nothing to
-            bound there. Forwarded to ``Path.glob(bound_loops=)``; the stdlib
-            fallback ignores it, having no ``**`` to bound.
+        bound_loops: Whether each ``**`` bounds a directory **loop** — a
+            Windows junction pointing at one of its own ancestors, which
+            otherwise walks until the filesystem refuses the path. `True` by
+            default: the unbounded walk raises `OSError` rather than
+            returning, so it is not a useful default. Pass `False` for
+            pathlib's own behaviour.
+
+            A directory deliberately reachable under two names is still
+            reached under both — the bound is the current **descent path**,
+            not every directory seen, which is what pathlib-next 0.9.9
+            changed and why the floor is ``>=0.9.9``. A POSIX directory
+            **symlink** is never descended by ``**`` in the first place, so
+            there is nothing to bound there. Forwarded to
+            ``Path.glob(bound_loops=)``; the stdlib fallback ignores it,
+            having no ``**`` to bound.
         text_fallback: Store in-memory text as UTF-8 when *encoding* cannot
             represent it, reporting that codec back, instead of raising
             `UnicodeEncodeError`.

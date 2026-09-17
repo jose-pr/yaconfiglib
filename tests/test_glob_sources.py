@@ -476,47 +476,36 @@ def twice_named_tree(tmp_path):
 
 @requires_descended_links
 class TestGlobLoopBounding:
-    """`bound_loops=` bounds a directory loop, and is off by default.
+    """A ``**`` bounds a directory loop by default, and costs nothing for it.
 
-    A ``**`` that crosses a loop walks it until the filesystem refuses the
-    path, which fails the load outright. pathlib-next 0.9.7's
-    `glob(bound_loops=)` descends each directory once per ``**`` instead —
-    but it keys on directory identity, so it cannot tell a loop from a
-    directory deliberately reachable under two names. That is why this is a
-    setting and not the default.
+    Unbounded, a ``**`` that crosses a loop walks it until the filesystem
+    refuses the path — the load **fails** — so "off" was never a useful
+    default; it was chosen only because pathlib-next 0.9.7's bound keyed on
+    every directory seen and therefore dropped a directory deliberately
+    reachable under two names. 0.9.9 keys on the current **descent path**
+    instead (this project asked for that rule), so the cost is gone and the
+    bound is on. `bound_loops=False` still buys pathlib's own walk.
 
     Windows only, because only a junction is descended at all — see
     `_LINKS_ARE_DESCENDED` and `TestPosixSymlinksAreNotDescended`.
     """
 
-    def test_loop_without_bounding_raises(self, looped_tree):
+    def test_loop_is_bounded_by_default(self, looped_tree):
         loader = ConfigLoader(base_dir=str(looped_tree), recursive=True)
-        with pytest.raises(OSError):
-            loader.load("**/*.json")
-
-    def test_bound_loops_yields_each_file_once(self, looped_tree):
-        loader = ConfigLoader(
-            base_dir=str(looped_tree), recursive=True, bound_loops=True
-        )
         assert loader.load("**/*.json") == {"a": 1, "b": 2}
         assert list(loader.load_all("**/*.json")) == [{"a": 1}, {"b": 2}]
 
-    def test_bound_loops_drops_a_twice_named_directory(self, twice_named_tree):
-        from yaconfiglib.utils.source import Path as SourcePath
-
-        matches = list(
-            parse_sources(
-                ["**/*.json"],
-                base_dir=SourcePath(str(twice_named_tree)),
-                recursive=True,
-                bound_loops=True,
-            )
+    def test_bound_loops_false_walks_the_loop_until_it_fails(self, looped_tree):
+        # The hazard the default exists to avoid, kept under test so it stays
+        # measured rather than remembered: WinError 1921 on a ~4000-character
+        # path, after merging the loop's files once per lap.
+        loader = ConfigLoader(
+            base_dir=str(looped_tree), recursive=True, bound_loops=False
         )
-        # The documented cost: one of the two site names is not descended, so
-        # its copy of common.json never appears.
-        assert sorted(p.name for p in matches) == ["common.json", "own.json"]
+        with pytest.raises(OSError):
+            loader.load("**/*.json")
 
-    def test_bound_loops_is_off_by_default(self, twice_named_tree):
+    def test_bounding_keeps_a_directory_named_twice(self, twice_named_tree):
         from yaconfiglib.utils.source import Path as SourcePath
 
         matches = list(
@@ -526,6 +515,29 @@ class TestGlobLoopBounding:
                 recursive=True,
             )
         )
+        # Both junctions onto one shared directory are read. This is the test
+        # that pins the floor: on pathlib-next 0.9.7/0.9.8 the bound dropped
+        # `site-b` and this returned two names, which is why `>=0.9.9` is a
+        # load-bearing bound and not housekeeping.
+        assert sorted(p.name for p in matches) == [
+            "common.json",
+            "common.json",
+            "own.json",
+        ]
+
+    def test_bound_loops_false_keeps_it_too(self, twice_named_tree):
+        from yaconfiglib.utils.source import Path as SourcePath
+
+        matches = list(
+            parse_sources(
+                ["**/*.json"],
+                base_dir=SourcePath(str(twice_named_tree)),
+                recursive=True,
+                bound_loops=False,
+            )
+        )
+        # So the two settings now differ on loops ONLY, which is the whole
+        # point of the upstream change.
         assert sorted(p.name for p in matches) == [
             "common.json",
             "common.json",
