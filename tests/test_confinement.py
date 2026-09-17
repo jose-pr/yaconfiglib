@@ -7,7 +7,9 @@ control works and that it stays off unless asked for.
 """
 
 import io
+import logging
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -145,6 +147,40 @@ class TestConfinement:
         assert loader.load("#!doc.yaml\nk: v\n") == {"k": "v"}
         cmd = f'cmd://"{sys.executable}" -c "print(\'k: v\')"'
         assert loader.load(cmd, timeout=60) == {"k": "v"}
+
+    def test_load_all_is_confined_too(self, tmp_path):
+        # It reaches the check by calling the same `_load`, which is an
+        # implementation detail: a `load_all` that grew its own source loop
+        # would lose confinement silently, and nothing else would notice.
+        conf = _tree(tmp_path)
+        _write(conf / "second.yaml", "second: 1\n")
+        loader = ConfigLoader(base_dir=str(conf), confine_to=[str(conf)])
+        assert list(loader.load_all("inside.yaml", "second.yaml")) == [
+            {"inside": True},
+            {"second": 1},
+        ]
+        with pytest.raises(ConfinementError):
+            list(loader.load_all(str(tmp_path / "secret.yaml")))
+
+    def test_the_skip_warning_names_no_configuration_text(self, tmp_path, caplog):
+        # Plan 12's log-hygiene rule, for this error: source, phase and error
+        # TYPE, never the message — which here would list every allowed root.
+        conf = _tree(tmp_path)
+        loader = ConfigLoader(
+            base_dir=str(conf), confine_to=[str(conf)], ignore_error=True
+        )
+        with caplog.at_level(logging.WARNING):
+            assert loader.load("inside.yaml", str(tmp_path / "secret.yaml")) == {
+                "inside": True
+            }
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        text = warnings[0].getMessage()
+        assert "secret.yaml" in text and "ConfinementError" in text
+        assert "load" in text
+        # The refusal's own wording, and so the root list, must not be in it.
+        assert "refusing to read" not in text
+        assert "confine_to=" not in text
 
     def test_symlink_inside_root_to_outside_loads(self, tmp_path):
         # Directive 5, and the reason the check is lexical: a link inside a
@@ -448,6 +484,66 @@ class TestConfinementRootForms:
         _including(conf, "inside.yaml")
         loader = ConfigLoader(base_dir=str(conf), confine_to=[str(conf)])
         assert loader.load("app.yaml") == {"data": {"inside": True}}
+
+    def test_a_single_path_object_is_one_root(self, tmp_path):
+        # Not a sequence and not a string: the branch that neither splits on
+        # os.pathsep nor iterates.
+        conf = _tree(tmp_path)
+        _including(conf, "inside.yaml")
+        loader = ConfigLoader(base_dir=str(conf), confine_to=pathlib.Path(conf))
+        assert loader.load("app.yaml") == {"data": {"inside": True}}
+        with pytest.raises(ConfinementError):
+            loader.load(str(tmp_path / "secret.yaml"))
+
+    def test_confine_to_false_is_off(self, tmp_path):
+        # `False` and `None` differ from an empty allowlist, which refuses
+        # everything; a test says so because the three are one keyword.
+        conf = _tree(tmp_path)
+        loader = ConfigLoader(base_dir=str(conf), confine_to=False)
+        assert loader.load(str(tmp_path / "secret.yaml")) == {"secret": "s3cr3t"}
+
+    def test_an_empty_string_argument_fails_closed(self, tmp_path):
+        # The argument side of the rule the env var already has a test for.
+        conf = _tree(tmp_path)
+        _including(conf, "inside.yaml")
+        loader = ConfigLoader(base_dir=str(conf), confine_to="")
+        assert loader._confine_roots == ()
+        with pytest.raises(ConfinementError) as caught:
+            loader.load("app.yaml")
+        assert "allowlist is empty" in str(caught.value)
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [(5, "confine_to="), ([5], "every confine_to= root")],
+        ids=["wrong_type", "wrong_element_type"],
+    )
+    def test_a_non_path_value_is_rejected(self, tmp_path, value, expected):
+        with pytest.raises(ConfigTypeError) as caught:
+            ConfigLoader(base_dir=str(tmp_path), confine_to=value)
+        message = str(caught.value)
+        assert expected in message
+        # The message has to name the type it got, or a caller cannot see
+        # which of several roots is wrong.
+        assert "int" in message
+
+    @pytest.mark.skipif(
+        sys.platform != "win32", reason="extended-length paths are a Windows spelling"
+    )
+    @pytest.mark.parametrize("side", ["target", "root"])
+    def test_extended_length_prefix_is_stripped_on_either_side(self, tmp_path, side):
+        # `commonpath` raises for `\\?\C:\...` against `C:\...`, so without
+        # stripping a legitimately-spelled path is refused. Reachable from
+        # either side, which is why both are pinned — the plan that shipped
+        # the stripping recorded it as unreachable without a probe.
+        conf = _tree(tmp_path)
+        extended = "\\\\?\\" + str(conf)
+        if side == "target":
+            loader = ConfigLoader(base_dir=str(conf), confine_to=[str(conf)])
+            target = extended + "\\inside.yaml"
+        else:
+            loader = ConfigLoader(base_dir=str(conf), confine_to=[extended])
+            target = str(conf / "inside.yaml")
+        assert loader.load(target) == {"inside": True}
 
     def test_a_unc_share_root_contains_its_files(self):
         # Lexical, so no share has to exist: `commonpath` treats a bare
