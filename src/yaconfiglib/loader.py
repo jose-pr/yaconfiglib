@@ -968,13 +968,42 @@ class ConfigLoader(ConfigBackend):
             return (_confinement_root_key(str(self.base_dir) or os.getcwd()),)
         return roots
 
-    def _check_confinement(self, path: "_SourcePath") -> None:
+    def _confine_source(
+        self, path: "_SourcePath", pattern: typing.Optional[object] = None
+    ) -> bool:
+        """Check *path*, offering a refusal to ``ignore_error``; True = skip it.
+
+        Sources checked inside :meth:`_load` are offered by the source loop's
+        own handler. These are checked *earlier* — a stream before it is read,
+        a glob pattern before it is expanded, and each match before it is
+        yielded — so the offer has to happen here, or they would be the only
+        refusals a predicate could not skip.
+
+        *pattern* is the glob a match came from, if any: a refusal then names
+        that pattern rather than the file expansion found, since the file is
+        something the document did not write and may not be allowed to learn.
+        """
+        try:
+            self._check_confinement(path, pattern)
+        except ConfinementError as error:
+            if self._offer_error(error, phase="load", path=path):
+                return True
+            raise
+        return False
+
+    def _check_confinement(
+        self, path: "_SourcePath", pattern: typing.Optional[object] = None
+    ) -> None:
         """Refuse *path* unless ``confine_to=`` allows reading it.
 
         Called for every source before its backend runs, so an `!include`
         target and a top-level source are governed by one rule. Nothing has
         been read when this raises, which is what makes skipping it through
         ``ignore_error`` safe.
+
+        *pattern* is the glob *path* was expanded from, when it was: the
+        message then names that pattern instead of the match, because the
+        match is a filename the document did not write.
         """
         roots = self._confinement_roots()
         if roots is None:
@@ -998,8 +1027,21 @@ class ConfigLoader(ConfigBackend):
         # a reader needs to see. A remote source has no such form, so it is
         # named as written.
         named = str(path) if kind == "remote" else _confinement_key(path)
-        error = ConfinementError(f"refusing to read {named}: {detail}")
-        _add_error_context(error, source=str(path))
+        if pattern is not None:
+            # A match, not a named source. Naming it would report a filename
+            # the document never wrote — expansion found it — which is how a
+            # pattern plus a refusal became a filename oracle. The operator
+            # still gets the full path, at DEBUG, where this library already
+            # documents its records as sensitive.
+            logger.debug("confinement refused %s, matched by %s", named, pattern)
+            error = ConfinementError(f"refusing to read a match of {pattern}: {detail}")
+            # The attribution has to name the pattern too: plan 12 appends the
+            # source to the message, so leaving the match here would put the
+            # discovered filename straight back into the text.
+            _add_error_context(error, source=str(pattern))
+        else:
+            error = ConfinementError(f"refusing to read {named}: {detail}")
+            _add_error_context(error, source=str(path))
         raise error
 
     @property
@@ -1258,7 +1300,7 @@ class ConfigLoader(ConfigBackend):
                 ),
                 bound_loops=self.bound_loops,
                 text_fallback=True,
-                confine=self._check_confinement,
+                confine=self._confine_source,
             ):
                 # Which step this source reached, so the one handler below can
                 # name the phase and add the frame without a second offer.
@@ -1472,7 +1514,7 @@ class ConfigLoader(ConfigBackend):
             ),
             bound_loops=self.bound_loops,
             text_fallback=True,
-            confine=self._check_confinement,
+            confine=self._confine_source,
         ):
             value = None
             # Set when an interpolation failure was already offered and

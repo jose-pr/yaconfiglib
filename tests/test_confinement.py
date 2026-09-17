@@ -305,6 +305,91 @@ class TestConfinementCannotFailOpenSilently:
 
 
 @pytest.mark.usefixtures("needs_yaml")
+class TestConfinementGlobPatterns:
+    """A pattern must not become a filename oracle.
+
+    Expansion stats and lists real directories, and it runs *before* the
+    check, so a document could aim a pattern outside the roots, let expansion
+    discover a real filename there, and read that name back out of the
+    refusal — learning what exists on disk without ever reading a byte.
+    """
+
+    def _tree(self, tmp_path):
+        conf = tmp_path / "conf"
+        (conf / "sub").mkdir(parents=True)
+        _write(conf / "sub" / "ok.yaml", "ok: 1\n")
+        _write(tmp_path / "outside" / "secret_token.yaml", "p: SECRET\n")
+        return conf
+
+    def _load(self, conf, pattern):
+        _write(conf / "app.yaml", f"x: !include '{pattern}'\n")
+        return ConfigLoader(
+            base_dir=str(conf), recursive=True, confine_to=[str(conf)]
+        ).load("app.yaml")
+
+    def test_pattern_outside_roots_is_refused_without_naming_a_match(self, tmp_path):
+        conf = self._tree(tmp_path)
+        outside = (tmp_path / "outside" / "secret_tok*").as_posix()
+        with pytest.raises(ConfinementError) as caught:
+            self._load(conf, outside)
+        # The document guessed a prefix; it must not be told the rest.
+        assert "secret_token.yaml" not in str(caught.value)
+
+    def test_a_right_and_a_wrong_guess_are_indistinguishable(self, tmp_path):
+        conf = self._tree(tmp_path)
+        messages = []
+        for guess in ("secret_tok*", "nothing_her*"):
+            with pytest.raises(ConfinementError) as caught:
+                self._load(conf, (tmp_path / "outside" / guess).as_posix())
+            messages.append(str(caught.value).replace(guess, "<guess>"))
+        # Same outcome, same text: whether the file exists is no longer
+        # observable, and the directory was never listed to find out.
+        assert messages[0] == messages[1]
+
+    def test_a_wildcard_escaping_after_a_legal_prefix_names_only_the_pattern(
+        self, tmp_path
+    ):
+        # `*/../..` leaves the root *after* a prefix inside it, so the prefix
+        # check cannot catch it and each match is checked instead. The
+        # refusal names the pattern the document wrote, never the match.
+        conf = self._tree(tmp_path)
+        with pytest.raises(ConfinementError) as caught:
+            self._load(conf, "*/../../outside/secret_tok*")
+        message = str(caught.value)
+        assert "secret_token.yaml" not in message
+        assert "secret_tok*" in message
+
+    def test_a_pattern_inside_the_roots_still_expands(self, tmp_path):
+        conf = self._tree(tmp_path)
+        assert self._load(conf, "sub/*.yaml") == {"x": {"ok": 1}}
+
+    def test_a_refused_pattern_is_skippable(self, tmp_path):
+        conf = self._tree(tmp_path)
+        _write(conf / "own.yaml", "own: 1\n")
+        loader = ConfigLoader(
+            base_dir=str(conf),
+            recursive=True,
+            confine_to=[str(conf)],
+            ignore_error=True,
+        )
+        assert loader.load(
+            "own.yaml", (tmp_path / "outside" / "*.yaml").as_posix()
+        ) == {"own": 1}
+
+    def test_a_refused_stream_is_skippable(self, tmp_path):
+        # Checked in _iter_sources rather than _load, so the offer has to be
+        # made there — otherwise this was the one refusal a predicate could
+        # not skip, while a refused path and a refused pattern both could.
+        conf = self._tree(tmp_path)
+        _write(conf / "own.yaml", "own: 1\n")
+        loader = ConfigLoader(
+            base_dir=str(conf), confine_to=[str(conf)], ignore_error=True
+        )
+        with open(tmp_path / "outside" / "secret_token.yaml", encoding="utf-8") as fp:
+            assert loader.load("own.yaml", fp) == {"own": 1}
+
+
+@pytest.mark.usefixtures("needs_yaml")
 class TestConfinementRootForms:
     """What counts as a root, and what is refused rather than guessed at.
 

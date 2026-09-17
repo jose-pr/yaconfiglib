@@ -491,6 +491,34 @@ def _caller_components(path) -> "list[str]":
     return components
 
 
+def _pattern_literal_base(path, glob_base, source) -> str:
+    r"""The deepest directory a pattern names before its first wildcard.
+
+    Confinement checks this **before** expanding, so a pattern pointing
+    outside the allowed roots is refused without listing a single directory —
+    otherwise expansion discovers real filenames outside them, and the
+    refusal that follows reports one back.
+
+    Computed from the components of the *source* — the caller's own pattern
+    text — for the same reason `has_glob_pattern` is: magic characters in
+    *base_dir* are literal (a directory really named ``proj [v2]``), and
+    treating one as a wildcard would truncate this prefix to the parent and
+    refuse a legitimate pattern.
+    """
+    literal = []
+    for component in _caller_components(source):
+        if _glob.has_magic(component):
+            break
+        literal.append(component)
+    if glob_base is not None:
+        base = str(glob_base)
+    else:
+        # An absolute pattern carries its own anchor, and `path` is that
+        # pattern; its components are all in `literal` above.
+        base = str(getattr(path, "anchor", "") or "") or _os.sep
+    return _os.path.join(base, *literal) if literal else base
+
+
 def has_glob_pattern(path: "_ty.Union[str, _os.PathLike]") -> bool:
     """Check whether *path* holds glob pattern characters outside its anchor.
 
@@ -868,7 +896,7 @@ def _iter_sources(
     bound_loops: bool = True,
     *,
     text_fallback: bool = False,
-    confine: "_ty.Optional[_ty.Callable[[object], None]]" = None,
+    confine: "_ty.Optional[_ty.Callable[[object], bool]]" = None,
 ) -> "_ty.Iterator[_ty.Tuple[_ty.Any, _ty.Optional[str]]]":
     """Resolve *sources* into loadable paths, each with the codec to read it with.
 
@@ -1006,8 +1034,8 @@ def _iter_sources(
             # (``<stdin>``, a descriptor) stays exempt.
             if confine is not None and payload[1] is None:
                 origin = _stream_origin(payload[0])
-                if origin is not None:
-                    confine(origin)
+                if origin is not None and confine(origin):
+                    continue
             yield _materialize_inline(
                 payload[0], payload[1], encoding, text_fallback=text_fallback
             )
@@ -1030,6 +1058,14 @@ def _iter_sources(
             continue
 
         path, glob_base, source = payload
+        # Before expanding: expansion stats and lists real directories, so a
+        # pattern aimed outside the roots would discover names there and the
+        # refusal would hand one back — an oracle for whatever the caller of
+        # the document can guess a prefix of.
+        if confine is not None and confine(
+            _pattern_literal_base(path, glob_base, source)
+        ):
+            continue
         matches = _expand_pattern(
             path, glob_base, source, recursive, glob_error, bound_loops
         )
@@ -1040,6 +1076,12 @@ def _iter_sources(
                 continue
             if key in memo:
                 logger.debug("skipping duplicate glob match %s", match)
+                continue
+            # A wildcard can still leave the roots *after* a literal prefix
+            # inside them (`*/../../elsewhere/*`), so each match is checked
+            # here as well — with the pattern, so the refusal names what the
+            # document wrote rather than what expansion found.
+            if confine is not None and confine(match, source):
                 continue
             memo.add(key)
             yield match, None
