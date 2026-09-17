@@ -330,3 +330,133 @@ class TestFloorResolvableSignatures:
         hints = _hints(_IgnoreError.__call__)
         assert hints["phase"] is str
         assert hints["return"] is bool
+
+
+class TestBackendContractTypes:
+    """`ConfigBackend` is a base class, and backend hints say what they return.
+
+    As a `typing.Protocol` it made `issubclass()` raise `TypeError` on every
+    interpreter while type checkers called `ConfigLoader()`, `EnvVarBackend()`
+    and every custom backend abstract — registration has always been nominal,
+    walking `type.__subclasses__`.
+    """
+
+    def test_config_backend_is_nominal_base(self):
+        import yaconfiglib.backends as backends
+        from yaconfiglib.backends.base import ConfigBackend
+        from yaconfiglib.backends.json import JsonConfig
+        from yaconfiglib.loader import ConfigLoader
+
+        assert not getattr(ConfigBackend, "_is_protocol", False)
+        # Only built-in classes: defining one here would register it for the
+        # rest of the session.
+        for name in ("JsonConfig", "IniConfig", "DotenvBackend", "EnvVarBackend"):
+            backend = getattr(backends, name, None)
+            if backend is not None:
+                assert issubclass(backend, ConfigBackend), name
+        assert isinstance(JsonConfig(), ConfigBackend)
+        # ConfigLoader IS a backend subclass, which is why the Protocol made
+        # checkers call the library's own entry point abstract.
+        assert issubclass(ConfigLoader, ConfigBackend)
+
+    def test_backend_load_hints_return_any(self):
+        import typing
+
+        import yaconfiglib.backends as backends
+        from yaconfiglib.backends.base import ConfigBackend
+
+        assert _hints(ConfigBackend.load)["return"] is typing.Any
+        assert typing.get_args(_hints(ConfigBackend.load_all)["return"]) == (
+            typing.Any,
+        )
+        for name in (
+            "YamlConfig",
+            "JsonConfig",
+            "IniConfig",
+            "TomlConfig",
+            "DotenvBackend",
+            "EnvVarBackend",
+            "CommandBackend",
+            "PythonBackend",
+            "Jinja2ConfigLoader",
+        ):
+            backend = getattr(backends, name, None)
+            if backend is None:
+                continue
+            returns = _hints(backend.load)["return"]
+            # `Any`, or something more precise where the backend really always
+            # produces it (dotenv values are always strings). What must NOT
+            # appear is `object` — which makes every documented attribute
+            # access an error — or `None`, which `Jinja2ConfigLoader` claimed
+            # while returning the parsed document.
+            assert returns is not object, name
+            assert returns is not type(None), name
+            assert returns is typing.Any or typing.get_origin(returns) is dict, (
+                name,
+                returns,
+            )
+
+    def test_dumps_data_hint_is_any(self):
+        import typing
+
+        import yaconfiglib.backends as backends
+        from yaconfiglib.backends.base import ConfigBackend
+        from yaconfiglib.backends.json import JsonConfig
+
+        targets = [ConfigBackend.dumps, JsonConfig.dumps]
+        yaml_backend = getattr(backends, "YamlConfig", None)
+        if yaml_backend is not None:
+            targets.append(yaml_backend.dumps)
+        for obj in targets:
+            # Under `object`, a custom dumps(self, data: dict) is an
+            # incompatible override.
+            assert _hints(obj)["data"] is typing.Any, obj
+
+    def test_yaml_backend_class_parameter_hints(self):
+        import typing
+
+        yaml = pytest.importorskip("yaml")
+        from yaconfiglib.backends.yaml import YamlConfig
+
+        hints = _hints(YamlConfig.load)
+        loader_cls = [
+            m for m in _flatten_union(hints["loader_cls"]) if m is not type(None)
+        ]
+        assert loader_cls and typing.get_origin(loader_cls[0]) is type
+        assert typing.get_args(loader_cls[0]) == (yaml.constructor.BaseConstructor,)
+        master = [m for m in _flatten_union(hints["master"]) if m is not type(None)]
+        assert master == [yaml.constructor.BaseConstructor]
+
+        dumper = [
+            m
+            for m in _flatten_union(_hints(YamlConfig.dumps)["dumper_cls"])
+            if m is not type(None)
+        ]
+        assert dumper and typing.get_origin(dumper[0]) is type
+        assert typing.get_args(dumper[0]) == (yaml.representer.BaseRepresenter,)
+        # The reason those bases and not BaseLoader/BaseDumper: SafeLoader does
+        # not subclass BaseLoader, but every loader is a BaseConstructor.
+        assert issubclass(yaml.SafeLoader, yaml.constructor.BaseConstructor)
+
+    def test_class_attribute_hints_allow_name_only_backends(self):
+        import typing
+
+        from yaconfiglib.backends.base import ConfigBackend
+
+        hints = typing.get_type_hints(ConfigBackend)
+        # EnvVarBackend is selected by name only and sets PATHNAME_REGEX = None.
+        for name in ("PATHNAME_REGEX", "NAME"):
+            assert type(None) in _flatten_union(hints[name]), name
+
+    def test_get_class_by_name_hint_is_optional(self):
+        import typing
+
+        from yaconfiglib.backends.base import ConfigBackend
+
+        assert type(None) in _flatten_union(
+            _hints(ConfigBackend.get_class_by_name)["return"]
+        )
+        assert ConfigBackend.get_class_by_name("no-such-backend") is None
+        assert typing.get_origin(_hints(ConfigBackend.get_class_by_path)["return"]) is (
+            type
+        )

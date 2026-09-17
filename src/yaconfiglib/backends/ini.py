@@ -76,7 +76,7 @@ class IniConfig(ConfigBackend):
         ini_default_section: "_ty.Optional[str]" = None,
         ini_interpolation: "_ty.Any" = _UNSET,
         **options: object,
-    ) -> object:
+    ) -> _ty.Any:
         """Parse *path* as INI and return a ``{section: {key: value}}`` dict.
 
         Args:

@@ -44,7 +44,7 @@ class PythonBackend(ConfigBackend):
         self,
         path: _ty.Any = None,
         **_options: _ty.Any,
-    ) -> object:
+    ) -> _ty.Any:
         """Return the wrapped object, ignoring any file I/O.
 
         If constructed with ``data=...``, that object is always returned.

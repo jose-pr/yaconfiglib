@@ -59,7 +59,7 @@ class Jinja2ConfigLoader(ConfigBackend):
         environment: "_ty.Optional[Environment]" = None,
         path_factory: "_ty.Optional[_ty.Callable[[str], Path]]" = None,
         **kwargs: _ty.Any,
-    ) -> None:
+    ) -> _ty.Any:
         """Render *path* as a Jinja2 template, then load the result with the matching backend.
 
         Args:

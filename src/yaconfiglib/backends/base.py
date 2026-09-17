@@ -137,8 +137,8 @@ def _filter_include_kwargs(kwargs: dict) -> dict:
     return kept
 
 
-class ConfigBackend(_ty.Protocol):
-    """Base contract for a pluggable configuration format backend.
+class ConfigBackend:
+    """Base class for a pluggable configuration format backend.
 
     A backend is responsible for turning a source (typically a file path,
     but also strings, streams, or in-memory data depending on the backend)
@@ -146,6 +146,13 @@ class ConfigBackend(_ty.Protocol):
     instantiated automatically by :class:`~yaconfiglib.loader.ConfigLoader`
     based on either an explicit ``loader=`` name/instance or by matching
     :attr:`PATHNAME_REGEX` against the source path.
+
+    A plain base class, not a `typing.Protocol`: registration walks
+    ``type.__subclasses__`` and is therefore nominal already, while the
+    Protocol spelling made `issubclass` raise `TypeError` and made every
+    backend that does not define ``dumps`` look abstract to a type checker.
+    Subclasses that forget ``load`` still fail where they are used, not
+    where they are constructed.
 
     To implement a new backend, subclass :class:`ConfigBackend` and override
     :meth:`load` (required) and optionally :meth:`dumps` (for round-trip
@@ -170,8 +177,8 @@ class ConfigBackend(_ty.Protocol):
             when the caller passes a bare string rather than a ``Path``.
     """
 
-    PATHNAME_REGEX: _re.Pattern = None
-    NAME: str = None
+    PATHNAME_REGEX: "_ty.Optional[_re.Pattern[str]]" = None
+    NAME: "_ty.Optional[str]" = None
     DEFAULT_ENCODING = "utf-8"
     DEFAULT_PATH_FACTORY = _LocalPath
 
@@ -302,6 +309,9 @@ class ConfigBackend(_ty.Protocol):
         for scls in cls.__subclasses__(recursive=True):
             if cls._derived_name(scls) == name:
                 return scls
+        # Explicit, because the hint promises it: a caller has to handle
+        # an unknown name.
+        return None
 
     @staticmethod
     def _derived_name(backend_cls: type) -> str:
@@ -330,7 +340,7 @@ class ConfigBackend(_ty.Protocol):
         return sorted(name for name in names if name)
 
     @classmethod
-    def can_load_path(cls, path: "_ty.Union[str, _os.PathLike]") -> bool:
+    def can_load_path(cls, path: _ty.Any) -> bool:
         """Return True if this backend's :attr:`PATHNAME_REGEX` matches *path*'s filename."""
         return (
             cls.PATHNAME_REGEX.match(path.name) is not None
@@ -361,7 +371,7 @@ class ConfigBackend(_ty.Protocol):
 
     @classmethod
     def get_class_by_path(
-        cls: "_ty.Type[_BackendT]", path: "_ty.Union[str, _os.PathLike]"
+        cls: "_ty.Type[_BackendT]", path: _ty.Any
     ) -> "_ty.Type[_BackendT]":
         """Find the first registered backend class whose :meth:`can_load_path` matches *path*.
 

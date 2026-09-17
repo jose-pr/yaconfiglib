@@ -299,7 +299,7 @@ class CommandBackend(ConfigBackend):
         path_factory: "_ty.Optional[_ty.Callable[[str], _os.PathLike]]" = None,
         timeout: typing.Optional[float] = None,
         **options: _ty.Any,
-    ) -> object:
+    ) -> _ty.Any:
         """Run the command encoded in *path* and parse its stdout.
 
         Args:

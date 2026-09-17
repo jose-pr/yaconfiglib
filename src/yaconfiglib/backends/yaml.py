@@ -105,8 +105,10 @@ class YamlConfig(ConfigBackend):
         self,
         path: "typing.Union[str, os.PathLike]",
         encoding: typing.Optional[str] = None,
-        master: "typing.Optional[yaml.Loader]" = None,
-        loader_cls: "typing.Optional[typing.Type[yaml.Loader]]" = None,
+        master: "typing.Optional[yaml.constructor.BaseConstructor]" = None,
+        loader_cls: (
+            "typing.Optional[typing.Type[yaml.constructor.BaseConstructor]]"
+        ) = None,
         path_factory: "typing.Optional[typing.Callable[[str], os.PathLike]]" = None,
         loader: "typing.Optional[ConfigBackend]" = None,
         origin: "typing.Optional[typing.Union[str, os.PathLike]]" = None,
@@ -193,9 +195,9 @@ class YamlConfig(ConfigBackend):
 
     @staticmethod
     def _register_include_tags(
-        loader_cls: type[yaml.Loader],
-        loader,
-        path_factory,
+        loader_cls: "typing.Type[yaml.constructor.BaseConstructor]",
+        loader: typing.Any,
+        path_factory: typing.Any,
     ) -> None:
         """Register ``!include`` and ``!load`` constructors on *loader_cls*.
 
@@ -289,7 +291,9 @@ class YamlConfig(ConfigBackend):
     def dumps(
         self,
         data: typing.Any,
-        dumper_cls: "typing.Optional[typing.Type[yaml.Dumper]]" = None,
+        dumper_cls: (
+            "typing.Optional[typing.Type[yaml.representer.BaseRepresenter]]"
+        ) = None,
         **options: typing.Any,
     ) -> str:
         """Serialize *data* to a YAML string using *dumper_cls*.
