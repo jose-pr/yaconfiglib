@@ -582,11 +582,13 @@ def _glob_error_hook(on_error, path_factory):
     return hook
 
 
-def _expand_pattern(path, glob_base, source, recursive, on_error=None):
+def _expand_pattern(
+    path, glob_base, source, recursive, on_error=None, bound_loops=False
+):
     """Ask pathlib-next (or the stdlib fallback) to expand one pattern.
 
     *on_error* is the already-adapted hook (see `_glob_error_hook`), or None to
-    keep pathlib's silent skip.
+    keep pathlib's silent skip. *bound_loops* is passed straight through.
     """
     if HAS_PATHLIB_NEXT and isinstance(path, Path):
         # The test is isinstance, not hasattr("glob"): a STDLIB path has .glob
@@ -597,17 +599,26 @@ def _expand_pattern(path, glob_base, source, recursive, on_error=None):
             # Only a RELATIVE source can go this way: glob() rejects a
             # non-relative pattern, which is what an absolute include source is
             # after rebasing.
-            return glob_base.glob(str(source), recursive=recursive, on_error=on_error)
+            return glob_base.glob(
+                str(source),
+                recursive=recursive,
+                on_error=on_error,
+                bound_loops=bound_loops,
+            )
         # No base to expand from (an absolute pattern, or no base_dir):
         # glob(None) expands the pattern the path itself carries, splitting at
         # the first wildcard. Added in pathlib-next 0.9.6, which is why the
         # floor is >=0.9.6 — 0.9.4 removed the glob("") spelling for pathlib
         # parity, and on 0.9.0-0.9.3 glob(None) returns silently partial
         # matches.
-        return path.glob(None, recursive=recursive, on_error=on_error)
+        return path.glob(
+            None, recursive=recursive, on_error=on_error, bound_loops=bound_loops
+        )
     # Fallback path traversal: stdlib glob takes the pattern as an argument, so
     # separate it from its directory. It has no error hook and swallows a
-    # listing failure itself, so *on_error* cannot be honoured here.
+    # listing failure itself, so *on_error* cannot be honoured here — and
+    # neither can *bound_loops*: `parent.glob(name)` cannot expand ``**`` at
+    # all, so it has no descent to bound.
     return path.parent.glob(path.name)
 
 
@@ -670,6 +681,7 @@ def parse_sources(
     path_factory: "_ty.Optional[_ty.Callable[[str], _os.PathLike]]" = None,
     recursive: _ty.Optional[bool] = None,
     on_error: "_ty.Optional[_ty.Callable[[OSError, _ty.Any], bool]]" = None,
+    bound_loops: bool = False,
 ) -> _ty.Iterator[Path]:
     """Resolve *sources* into a flat stream of loadable :class:`Path`-like objects.
 
@@ -688,6 +700,7 @@ def parse_sources(
         path_factory=path_factory,
         recursive=recursive,
         on_error=on_error,
+        bound_loops=bound_loops,
     ):
         yield item
 
@@ -700,6 +713,7 @@ def _iter_sources(
     path_factory: "_ty.Optional[_ty.Callable[[str], _os.PathLike]]" = None,
     recursive: _ty.Optional[bool] = None,
     on_error: "_ty.Optional[_ty.Callable[[OSError, _ty.Any], bool]]" = None,
+    bound_loops: bool = False,
     *,
     text_fallback: bool = False,
 ) -> "_ty.Iterator[_ty.Tuple[_ty.Any, _ty.Optional[str]]]":
@@ -777,6 +791,17 @@ def _iter_sources(
             the `OSError` propagate. Without it the directory is skipped
             silently, as pathlib does. Asked once per directory, and only on
             the pathlib-next path: the stdlib fallback has no hook.
+        bound_loops: If True, each ``**`` descends any one directory at most
+            once, keyed on its ``(st_dev, st_ino)`` identity. That bounds a
+            **Windows junction loop** — a junction pointing at one of its own
+            ancestors, which otherwise walks until the filesystem refuses the
+            path. The cost is that identity cannot tell a loop from a
+            directory deliberately reachable under two names: with this set,
+            the second name yields nothing. Off by default, so every expansion
+            keeps its current results. A POSIX directory **symlink** is never
+            descended by ``**`` in the first place, so there is nothing to
+            bound there. Forwarded to ``Path.glob(bound_loops=)``; the stdlib
+            fallback ignores it, having no ``**`` to bound.
         text_fallback: Store in-memory text as UTF-8 when *encoding* cannot
             represent it, reporting that codec back, instead of raising
             `UnicodeEncodeError`.
@@ -839,7 +864,9 @@ def _iter_sources(
             continue
 
         path, glob_base, source = payload
-        matches = _expand_pattern(path, glob_base, source, recursive, glob_error)
+        matches = _expand_pattern(
+            path, glob_base, source, recursive, glob_error, bound_loops
+        )
         for match in _ordered_file_matches(matches):
             key = _dedup_key(match)
             if key in literal_keys:

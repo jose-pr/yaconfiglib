@@ -3,6 +3,7 @@
 import json
 import os
 import pathlib
+import subprocess
 import sys
 
 import pytest
@@ -408,3 +409,156 @@ class TestGlobExpansionErrors:
                     on_error=lambda error, directory: False,
                 )
             )
+
+
+#: Only a **junction** is walked by ``**``. A POSIX directory symlink is not:
+#: pathlib-next defaults to ``recurse_symlinks=False`` and raises
+#: `NotImplementedError` for ``True`` (measured on 0.9.8), so a symlinked loop
+#: is never entered and there is nothing for `bound_loops` to bound. Junctions
+#: are the reverse case — they report ``is_symlink() == False``, so no symlink
+#: check sees them and ``**`` walks straight into them.
+_LINKS_ARE_DESCENDED = sys.platform == "win32"
+
+requires_descended_links = pytest.mark.skipif(
+    not _LINKS_ARE_DESCENDED,
+    reason="only a Windows junction is descended by **; a POSIX symlink is not",
+)
+
+
+def _make_dir_link(link, target):
+    """Point *link* at the directory *target*, or skip the calling test.
+
+    A junction (``mklink /J``) and a POSIX directory symlink both need no
+    privilege, so this normally runs; a filesystem or container that refuses
+    one is a reason to skip rather than to fail.
+    """
+    if sys.platform == "win32":
+        completed = subprocess.run(
+            ["cmd", "/d", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+        )
+        if completed.returncode != 0:
+            pytest.skip("cannot create a directory junction here")
+    else:
+        try:
+            os.symlink(str(target), str(link), target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("cannot create a directory symlink here")
+
+    from yaconfiglib.utils.source import Path as SourcePath
+
+    is_junction = getattr(SourcePath(str(link)), "is_junction", None)
+    # A fixture that quietly made a plain directory would make every assertion
+    # below pass without ever crossing a link.
+    assert os.path.islink(str(link)) or (is_junction is not None and is_junction())
+
+
+@pytest.fixture
+def looped_tree(tmp_path):
+    """A tree whose ``deep/loop`` points back at its own root."""
+    conf = tmp_path / "conf"
+    _write(conf / "10-base.json", {"a": 1})
+    _write(conf / "deep" / "20-extra.json", {"b": 2})
+    _make_dir_link(conf / "deep" / "loop", conf)
+    return conf
+
+
+@pytest.fixture
+def twice_named_tree(tmp_path):
+    """One shared directory reachable under two sibling names — not a loop."""
+    conf = tmp_path / "conf"
+    _write(conf / "own.json", {"a": 1})
+    _write(tmp_path / "shared" / "common.json", {"b": 2})
+    _make_dir_link(conf / "site-a", tmp_path / "shared")
+    _make_dir_link(conf / "site-b", tmp_path / "shared")
+    return conf
+
+
+@requires_descended_links
+class TestGlobLoopBounding:
+    """`bound_loops=` bounds a directory loop, and is off by default.
+
+    A ``**`` that crosses a loop walks it until the filesystem refuses the
+    path, which fails the load outright. pathlib-next 0.9.7's
+    `glob(bound_loops=)` descends each directory once per ``**`` instead —
+    but it keys on directory identity, so it cannot tell a loop from a
+    directory deliberately reachable under two names. That is why this is a
+    setting and not the default.
+
+    Windows only, because only a junction is descended at all — see
+    `_LINKS_ARE_DESCENDED` and `TestPosixSymlinksAreNotDescended`.
+    """
+
+    def test_loop_without_bounding_raises(self, looped_tree):
+        loader = ConfigLoader(base_dir=str(looped_tree), recursive=True)
+        with pytest.raises(OSError):
+            loader.load("**/*.json")
+
+    def test_bound_loops_yields_each_file_once(self, looped_tree):
+        loader = ConfigLoader(
+            base_dir=str(looped_tree), recursive=True, bound_loops=True
+        )
+        assert loader.load("**/*.json") == {"a": 1, "b": 2}
+        assert list(loader.load_all("**/*.json")) == [{"a": 1}, {"b": 2}]
+
+    def test_bound_loops_drops_a_twice_named_directory(self, twice_named_tree):
+        from yaconfiglib.utils.source import Path as SourcePath
+
+        matches = list(
+            parse_sources(
+                ["**/*.json"],
+                base_dir=SourcePath(str(twice_named_tree)),
+                recursive=True,
+                bound_loops=True,
+            )
+        )
+        # The documented cost: one of the two site names is not descended, so
+        # its copy of common.json never appears.
+        assert sorted(p.name for p in matches) == ["common.json", "own.json"]
+
+    def test_bound_loops_is_off_by_default(self, twice_named_tree):
+        from yaconfiglib.utils.source import Path as SourcePath
+
+        matches = list(
+            parse_sources(
+                ["**/*.json"],
+                base_dir=SourcePath(str(twice_named_tree)),
+                recursive=True,
+            )
+        )
+        assert sorted(p.name for p in matches) == [
+            "common.json",
+            "common.json",
+            "own.json",
+        ]
+
+
+@pytest.mark.skipif(
+    _LINKS_ARE_DESCENDED, reason="Windows junctions ARE descended; see the class above"
+)
+class TestPosixSymlinksAreNotDescended:
+    """On POSIX a ``**`` never enters a symlinked directory, so it cannot loop.
+
+    The other half of the platform split, pinned so a change upstream is
+    visible here rather than only in the documentation: pathlib-next defaults
+    to ``recurse_symlinks=False`` and raises `NotImplementedError` for
+    ``True``, which means `bound_loops` has nothing to bound on this side.
+    """
+
+    def test_symlinked_directory_contributes_nothing(self, twice_named_tree):
+        from yaconfiglib.utils.source import Path as SourcePath
+
+        matches = list(
+            parse_sources(
+                ["**/*.json"],
+                base_dir=SourcePath(str(twice_named_tree)),
+                recursive=True,
+            )
+        )
+        # Neither site name is entered, so the shared layer is invisible to a
+        # recursive glob — pass the shared directory as its own source instead.
+        assert [p.name for p in matches] == ["own.json"]
+
+    def test_symlinked_loop_neither_raises_nor_repeats(self, looped_tree):
+        loader = ConfigLoader(base_dir=str(looped_tree), recursive=True)
+        assert loader.load("**/*.json") == {"a": 1, "b": 2}

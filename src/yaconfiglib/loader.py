@@ -570,6 +570,7 @@ class ConfigLoader(ConfigBackend):
             "typing.Optional[typing.Callable[[_SourcePath], ConfigBackend]]"
         ) = None,
         recursive: typing.Optional[bool] = None,
+        bound_loops: bool = False,
         key_factory: "typing.Optional[typing.Union[str, typing.Callable[[_SourcePath, typing.Any], str]]]" = None,
         log_level: typing.Optional[typing.Any] = None,
         interpolate: typing.Optional[bool] = None,
@@ -603,6 +604,16 @@ class ConfigLoader(ConfigBackend):
                 dispatch.
             recursive: Whether glob sources should recurse into
                 subdirectories by default.
+            bound_loops: If True, each ``**`` descends any one directory at
+                most once. Set it when a tree contains a **Windows junction
+                loop** — a junction pointing at one of its own ancestors,
+                which otherwise walks until the filesystem refuses the path,
+                failing the load. The cost: a directory deliberately reachable
+                under two names is then read under only one of them, because
+                the bound is by directory identity. A POSIX directory symlink
+                is never descended by ``**``, so this changes nothing there.
+                Instance-wide, with no per-call override, since a loop is a
+                property of the tree rather than of one call.
             key_factory: How to name each loaded document for merging
                 (e.g. for :attr:`ConfigLoaderMergeMethod.Hash`). Either a
                 callable ``(path, value) -> str``, which receives the source
@@ -688,6 +699,7 @@ class ConfigLoader(ConfigBackend):
         self.base_dir = base_dir or ""
         self.encoding = encoding or self.DEFAULT_ENCODING
         self.recursive = False if recursive is None else recursive
+        self.bound_loops = bool(bound_loops)
         self.loader_factory = loader_factory or (
             lambda path: ConfigBackend.get_class_by_path(path)()
         )
@@ -995,6 +1007,7 @@ class ConfigLoader(ConfigBackend):
                 on_error=lambda error, directory: self._offer_error(
                     error, phase="glob", path=directory
                 ),
+                bound_loops=self.bound_loops,
                 text_fallback=True,
             ):
                 # Which step this source reached, so the one handler below can
@@ -1206,6 +1219,7 @@ class ConfigLoader(ConfigBackend):
             on_error=lambda error, directory: self._offer_error(
                 error, phase="glob", path=directory
             ),
+            bound_loops=self.bound_loops,
             text_fallback=True,
         ):
             value = None
