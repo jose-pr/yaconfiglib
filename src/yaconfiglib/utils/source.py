@@ -701,12 +701,23 @@ def _glob_error_hook(on_error, path_factory):
 
 
 def _expand_pattern(
-    path, glob_base, source, recursive, on_error=None, bound_loops=False
+    path,
+    glob_base,
+    source,
+    recursive,
+    on_error=None,
+    bound_loops=False,
+    path_factory=None,
 ):
-    """Ask pathlib-next (or the stdlib fallback) to expand one pattern.
+    """Ask pathlib-next to expand one pattern.
 
     *on_error* is the already-adapted hook (see `_glob_error_hook`), or None to
     keep pathlib's silent skip. *bound_loops* is passed straight through.
+
+    A **stdlib** path — what a caller gets from ``path_factory=pathlib.Path`` —
+    is converted to a `LocalPath` for the walk, and its matches converted back
+    with *path_factory*, so ``recursive=``, ``on_error=`` and ``bound_loops=``
+    behave the same whichever factory is in use.
     """
     if isinstance(path, Path):
         # The test is isinstance, not hasattr("glob"): a STDLIB path has .glob
@@ -733,13 +744,25 @@ def _expand_pattern(
             None, recursive=recursive, on_error=on_error, bound_loops=bound_loops
         )
     # A stdlib path, which a caller gets by passing `path_factory=pathlib.Path`.
-    # NOT a no-pathlib-next fallback: pathlib-next is a required dependency and
-    # its import is unconditional. stdlib glob takes the pattern as an argument,
-    # so separate it from its directory. It has no error hook and swallows a
-    # listing failure itself, so *on_error* cannot be honoured here — and
-    # neither can *bound_loops*, nor `recursive`: `parent.glob(name)` cannot
-    # expand ``**`` at all, so such a source expands to nothing (measured).
-    return path.parent.glob(path.name)
+    # Expansion still goes through pathlib-next: stdlib `glob` cannot expand
+    # ``**`` at all (`parent.glob(name)` looks inside a literal ``**``
+    # directory, so a `recursive=` source expanded to *nothing*, silently), has
+    # no error hook for `on_error`, and nothing to bound a directory loop with.
+    # Converting for the walk gives every local source one expansion path,
+    # whatever factory the caller chose.
+    matches = _expand_pattern(
+        LocalPath(str(path)),
+        LocalPath(str(glob_base)) if glob_base is not None else None,
+        source,
+        recursive,
+        on_error,
+        bound_loops,
+    )
+    # Handed back in the caller's own type: they asked for stdlib paths, and
+    # how expansion is implemented is not their concern. The round trip is safe
+    # because `path_factory` is documented as `(str) -> os.PathLike`.
+    rebuild = path_factory or type(path)
+    return [rebuild(str(match)) for match in matches]
 
 
 def _materialize_inline(
@@ -1007,7 +1030,7 @@ def _iter_sources(
         ):
             continue
         matches = _expand_pattern(
-            path, glob_base, source, recursive, glob_error, bound_loops
+            path, glob_base, source, recursive, glob_error, bound_loops, path_factory
         )
         for match in _ordered_file_matches(matches):
             key = _dedup_key(match)

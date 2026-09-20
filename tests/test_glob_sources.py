@@ -72,6 +72,66 @@ class TestPathLikeSources:
         assert ConfigLoader().load(LocalPath(str(tmp_path / "app.json"))) == {"a": 1}
 
 
+class TestStdlibPathFactory:
+    """`path_factory=pathlib.Path` gets pathlib-next's expansion too.
+
+    Expansion used to fall to `path.parent.glob(path.name)` for a stdlib path,
+    which cannot expand ``**`` — it looks inside a literal ``**`` directory —
+    so a `recursive=` source expanded to **nothing**, silently, and `on_error`
+    and `bound_loops` were inert. The path is converted for the walk and the
+    matches converted back, so the factory decides the *type* a caller sees and
+    not which glob they get.
+    """
+
+    def test_recursive_glob_works(self, tmp_path):
+        _write(tmp_path / "a.json", {"a": 1})
+        _write(tmp_path / "sub" / "b.json", {"b": 2})
+        loader = ConfigLoader(
+            base_dir=str(tmp_path), path_factory=pathlib.Path, recursive=True
+        )
+        assert loader.load("**/*.json") == {"a": 1, "b": 2}
+
+    def test_matches_keep_the_callers_path_type(self, tmp_path):
+        _write(tmp_path / "a.json", {"a": 1})
+        _write(tmp_path / "sub" / "b.json", {"b": 2})
+        matches = list(
+            parse_sources(
+                ["**/*.json"],
+                base_dir=pathlib.Path(tmp_path),
+                path_factory=pathlib.Path,
+                recursive=True,
+            )
+        )
+        assert [p.name for p in matches] == ["a.json", "b.json"]
+        # The caller asked for stdlib paths; how expansion is implemented is
+        # not their concern, so no LocalPath may leak out of it.
+        assert all(isinstance(p, pathlib.Path) for p in matches)
+        assert not any(type(p).__name__ == "LocalPath" for p in matches)
+
+    def test_simple_glob_still_works(self, tmp_path):
+        _write(tmp_path / "a.json", {"a": 1})
+        _write(tmp_path / "b.json", {"b": 2})
+        loader = ConfigLoader(base_dir=str(tmp_path), path_factory=pathlib.Path)
+        assert loader.load("*.json") == {"a": 1, "b": 2}
+
+    def test_on_error_reaches_a_stdlib_factory_walk(self, locked_tree):
+        # Impossible before: stdlib glob swallows a listing failure, so the
+        # predicate was never called and the layer vanished silently.
+        seen = []
+
+        def record(error, **context):
+            seen.append((context["phase"], context["path"].name))
+            return True
+
+        loader = ConfigLoader(
+            base_dir=str(locked_tree),
+            path_factory=pathlib.Path,
+            ignore_error=record,
+        )
+        assert loader.load("lock/**/*.json", recursive=True) == {"a": 1}
+        assert seen == [("glob", "locked")]
+
+
 class TestGlobExpansion:
     """The rules yaconfiglib owns: order, directories, literal-vs-pattern.
 
