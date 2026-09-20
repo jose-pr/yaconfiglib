@@ -22,10 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The `envoriment=` alias** on the Jinja2 backend, a historical misspelling kept beside
   `environment=`. Use `environment=`.
 
-Note for anyone passing `path_factory=pathlib.Path`: stdlib paths are still accepted and
-still expand simple globs, but a `recursive=`/`**` source with a stdlib factory expands to
-**nothing** — a limit of stdlib `glob` rather than of the removed fallback, and unchanged
-by this release.
+Passing `path_factory=pathlib.Path` remains fully supported, and is now better than it
+was: see Fixed.
 
 ## [0.12.0] - 2026-09-17
 
@@ -344,6 +342,13 @@ by this release.
   documented nor used anywhere. Use `logging.getLogger` and `logging.Logger`.
 
 ### Fixed
+- **A glob under `path_factory=pathlib.Path` expands like any other.** Such a source was
+  handed to stdlib `glob` as `parent.glob(name)`, which cannot expand `**` — it looks
+  inside a directory literally named `**` — so a `recursive=` source expanded to
+  **nothing at all**, silently, while `on_error=` and `bound_loops=` were inert. A stdlib
+  path is now converted to a `LocalPath` for the walk and every match converted back with
+  the caller's own factory, so the factory decides the path *type* a caller receives and
+  never which glob runs. Matches are still `pathlib.Path` instances.
 - Under `confine_to=`, a **glob pattern** is checked before it is expanded, and a refused
   match no longer reports the filename expansion found. Both were disclosure paths rather
   than read paths: a pattern aimed outside the roots used to be expanded anyway — listing

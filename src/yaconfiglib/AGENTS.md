@@ -481,10 +481,12 @@ distinguish merge branches.
   `sh://`, `+fmt` variants) pass through unresolved/unexpanded. In-memory content and
   streams materialize to a `pathlib_next` `MemPath`. **pathlib-next is a required
   dependency and every import of it is unconditional** — there is no stdlib fallback to
-  fall into and no `HAS_PATHLIB_NEXT` flag to branch on. A caller may still pass
-  `path_factory=pathlib.Path`, and stdlib paths still expand simple globs, but a
-  `recursive=`/`**` source built that way expands to **nothing**: stdlib `glob` cannot do
-  it, which is a limit of that factory rather than of a fallback. `memo` dedupes repeat sources across
+  fall into and no `HAS_PATHLIB_NEXT` flag to branch on. A `path_factory` that returns
+  **stdlib** paths (`path_factory=pathlib.Path`) is fully supported: such a path is
+  converted to a `LocalPath` for the walk and each match is converted back with that same
+  factory, so `recursive=`, `on_error=` and `bound_loops=` behave identically and a caller
+  still receives the path type they asked for. The factory decides the *type*, never which
+  glob runs. `memo` dedupes repeat sources across
   recursive calls (mutated in place; logs and skips a duplicate rather than erroring).
   Its keys are **lexical**: `os.path.normcase(os.path.abspath(...))` for a
   `pathlib.PurePath` (so `./x`, `x/../x` and, on Windows, `X` are one file),
