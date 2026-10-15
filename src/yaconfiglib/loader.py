@@ -12,9 +12,9 @@ import sys
 import types
 import typing
 
-# pathlib-next is a required dependency; see utils/source.py for why this
+# pathapi is a required dependency; see utils/source.py for why this
 # import is unconditional.
-from pathlib_next import Path
+from pathapi import Path
 
 from pathlib import PurePosixPath
 
@@ -84,7 +84,7 @@ T = typing.TypeVar("T")
 #: `CommandSource`. `key_factory` and `loader_factory` are called with this.
 _SourcePath = typing.Union[Path, CommandSource]
 
-#: Anything with `__fspath__`, so a stdlib `pathlib.Path` and a pathlib-next
+#: Anything with `__fspath__`, so a stdlib `pathlib.Path` and a pathapi
 #: path are both accepted, as the runtime already does.
 _PathLike = typing.Union[str, "os.PathLike[str]"]
 
@@ -701,7 +701,7 @@ class ConfigLoader(ConfigBackend):
                 ``#!`` strings, streams, command output). A relative
                 ``!include`` inside a YAML *file* resolves against that
                 file's own directory. Accepts a string or any
-                `os.PathLike` — a stdlib `pathlib.Path` and a pathlib-next
+                `os.PathLike` — a stdlib `pathlib.Path` and a pathapi
                 path both qualify.
             encoding: Default text encoding for reading sources.
             path_factory: Callable used to build a ``Path`` from a bare
@@ -723,8 +723,7 @@ class ConfigLoader(ConfigBackend):
                 Bounding costs nothing else: a directory deliberately
                 reachable under two names is still read under both, since the
                 bound is the current descent path rather than every directory
-                seen (pathlib-next 0.9.9, which is why the floor is
-                ``>=0.9.9``; 0.9.7 and 0.9.8 dropped the second name). A POSIX
+                seen. A POSIX
                 directory symlink is never descended by ``**`` at all, so
                 this changes nothing there. Instance-wide, with no per-call
                 override, since a loop is a property of the tree rather than
@@ -1976,7 +1975,7 @@ def dump(
 
     *fp* may be a text file object, a binary one (`io.BytesIO`,
     ``open(path, "wb")``, `gzip.open`), a path as `str`/`bytes`, a
-    `pathlib.Path`, or a pathlib-next path such as a ``MemPath``.
+    `pathlib.Path`, or a pathapi path such as a ``MemPath``.
 
     *encoding* (UTF-8 by default) applies to everything this function opens or
     encodes itself. It is **not** used for a text file object, which writes in

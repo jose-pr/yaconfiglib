@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import typing as _ty
 
-# pathlib-next is a required dependency; see utils/source.py for why this
+# pathapi is a required dependency; see utils/source.py for why this
 # import is unconditional.
-from pathlib_next import Path as _Path
+from pathapi import Path as _Path
 
 from .base import ConfigBackend
 

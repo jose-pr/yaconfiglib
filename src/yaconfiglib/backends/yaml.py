@@ -7,8 +7,8 @@ import typing
 
 import yaml
 
-# pathlib-next is a required dependency; see utils/source.py.
-from pathlib_next import Path, Pathname
+# pathapi is a required dependency; see utils/source.py.
+from pathapi import Path, Pathname
 
 from yaconfiglib.backends.base import ConfigBackend, _include_call
 from yaconfiglib.errors import ErrorFrame, _add_error_context

@@ -111,9 +111,9 @@ class TestRegistryBackends:
 
     @pytest.mark.usefixtures("needs_jinja2")
     def test_jinja_backend_renders_to_a_mempath(self, tmp_path):
-        # Was `..._falls_back_to_temp_file_without_pathlib_next`, which
+        # Was `..._falls_back_to_temp_file_without_pathapi`, which
         # monkeypatched `MemPath` to None to simulate a missing import. That
-        # cannot happen now — pathlib-next is a required dependency and the
+        # cannot happen now — pathapi is a required dependency and the
         # import is unconditional — so what is left worth pinning is that a
         # rendered template is still dispatched by its STRIPPED filename
         # rather than read as text.
@@ -722,7 +722,7 @@ class TestJinja2SourceTrust:
         if source_kind == "template_file":
             # A `.j2` FILE whose rendered name is a command source. This case
             # used to be spelled by patching `MemPath` to None to simulate a
-            # missing pathlib-next; the template file is what it was actually
+            # missing pathapi; the template file is what it was actually
             # covering, and that is kept.
             self._write(tmp_path / "x.cmd.j2", "echo pwned> pwned.marker\n")
             source = "x.cmd.j2"
@@ -1393,7 +1393,7 @@ class TestCommandSourceText:
     def test_parse_sources_yields_command_source(self):
         import pathlib
 
-        from pathlib_next import LocalPath
+        from pathapi import LocalPath
 
         from yaconfiglib.utils.source import CommandSource, parse_sources
 
@@ -1423,7 +1423,7 @@ class TestCommandSourceText:
         ],
     )
     def test_scheme_named_file_dispatches_by_extension(self, name, expected):
-        from pathlib_next import LocalPath
+        from pathapi import LocalPath
 
         got = ConfigBackend.get_class_by_path(LocalPath("conf") / name)
         assert got.__name__ == expected

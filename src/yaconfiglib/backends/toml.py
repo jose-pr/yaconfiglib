@@ -11,9 +11,9 @@ except ImportError:
     # parse a TOML 1.0 document differently from 3.11+.
     import tomli as tomllib  # type: ignore[no-redef]
 
-# pathlib-next is a required dependency; see utils/source.py for why this
+# pathapi is a required dependency; see utils/source.py for why this
 # import is unconditional.
-from pathlib_next import Path
+from pathapi import Path
 
 from yaconfiglib.backends.base import ConfigBackend
 

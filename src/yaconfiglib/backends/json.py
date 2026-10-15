@@ -3,9 +3,9 @@ import os as _os
 import re
 import typing as _ty
 
-# pathlib-next is a required dependency; see utils/source.py for why this
+# pathapi is a required dependency; see utils/source.py for why this
 # import is unconditional.
-from pathlib_next import Path
+from pathapi import Path
 
 from yaconfiglib.backends.base import ConfigBackend
 

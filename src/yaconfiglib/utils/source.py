@@ -18,14 +18,14 @@ import glob as _glob
 import tempfile as _tempfile
 import re as _re
 
-# pathlib-next is a REQUIRED dependency (`pyproject.toml`), so this import is
+# pathapi is a REQUIRED dependency (`pyproject.toml`), so this import is
 # unconditional: a missing one is an ImportError here, like any other declared
 # dependency. It used to fall back to stdlib `pathlib` with a HAS_PATHLIB_NEXT
 # flag, which was dead code that also answered differently — a `**` source
 # silently expanded to nothing, and the suite measured 33 failures without the
 # package installed.
-from pathlib_next import LocalPath, Path, Pathname
-from pathlib_next.mempath import MemPath
+from pathapi import LocalPath, Path, Pathname
+from pathapi.mempath import MemPath
 
 logger = logging.getLogger(__name__)
 
@@ -299,13 +299,14 @@ def _confinement_kind(path: object) -> str:
       template): neither has a location on disk to confine.
     * ``"check"`` — a local filesystem path, which is what every ordinary file
       source resolves to.
-    * ``"remote"`` — any other path type, such as a pathlib-next ``sftp://``
-      URI path. It is inside no local root by definition, so confinement
+    * ``"remote"`` — any other path type, such as an ``sftp://``
+      URI path from ``sftppath``. It is inside no local root by definition, so confinement
       refuses it rather than leaving a category the caller has to reason
       about. Reached only when a *path object* of that kind arrives: with the
       default ``path_factory`` (``LocalPath``) a ``scheme://…`` **string**
       becomes an ordinary relative local path and is ``"check"``-ed, because
-      pathlib-next's URI paths need extras this package does not require.
+      the URI layer is a separate distribution (``pathapi-uri``) this
+      package does not require.
     """
     if isinstance(path, CommandSource):
         return "exempt"
@@ -314,7 +315,7 @@ def _confinement_kind(path: object) -> str:
     if isinstance(path, LocalPath):
         return "check"
     if isinstance(path, Path):
-        # A pathlib-next path that is not local: a URI scheme. Tested before
+        # A pathapi path that is not local, such as a URI scheme. Tested before
         # the os.PathLike fallback below, because a remote path may implement
         # __fspath__ and would otherwise be checked as if its URI text were a
         # filename.
@@ -460,10 +461,10 @@ def _pattern_literal_base(path, glob_base, source) -> str:
 def has_glob_pattern(path: "_ty.Union[str, _os.PathLike]") -> bool:
     """Check whether *path* holds glob pattern characters outside its anchor.
 
-    Accepts a ``str``, a pathlib-next path, or any other ``os.PathLike``.
+    Accepts a ``str``, a pathapi path, or any other ``os.PathLike``.
 
     The check is done here for every path type rather than delegated to
-    pathlib-next's own ``has_glob_pattern()``, because that one scans the anchor
+    pathapi's own ``has_glob_pattern()``, because that one scans the anchor
     too and so calls every extended-length path a pattern (reported upstream).
     Delegate again once that is fixed.
     """
@@ -555,11 +556,11 @@ def _flatten_sources(sources, encoding):
             yield source
             continue
 
-        # An os.PathLike that is NOT a pathlib-next path (a pathlib.Path, a
+        # An os.PathLike that is NOT a pathapi path (a pathlib.Path, a
         # PurePath, anything else with __fspath__) becomes the string it spells,
         # so it gets the same command check, path_factory, base_dir join, memo
         # and glob handling a caller would get by passing that string.
-        # pathlib-next paths keep their own branch on purpose: MemPath is an
+        # pathapi paths keep their own branch on purpose: MemPath is an
         # os.PathLike whose __fspath__ raises NotImplementedError.
         # os.fsdecode, not encoding=: path bytes use the filesystem encoding,
         # while encoding= describes file *content*.
@@ -672,7 +673,7 @@ def _glob_error_hook(on_error, path_factory):
     should not have to know which attribute holds the directory, and it gets a
     path object rather than the string upstream fills in.
 
-    The directory is remembered: pathlib-next reports the same unreadable
+    The directory is remembered: pathapi reports the same unreadable
     directory **twice** for a ``**`` pattern (measured on 0.9.7), and a
     predicate that counts or prompts must be asked once per directory.
     """
@@ -709,7 +710,7 @@ def _expand_pattern(
     bound_loops=False,
     path_factory=None,
 ):
-    """Ask pathlib-next to expand one pattern.
+    """Ask pathapi to expand one pattern.
 
     *on_error* is the already-adapted hook (see `_glob_error_hook`), or None to
     keep pathlib's silent skip. *bound_loops* is passed straight through.
@@ -724,7 +725,7 @@ def _expand_pattern(
         # too, but no `recursive` keyword, and base_dir may be one.
         if glob_base is not None:
             # Expand from the literal base, passing the caller's own pattern
-            # text. Multi-segment patterns and `**` are pathlib-next's job.
+            # text. Multi-segment patterns and `**` are pathapi's job.
             # Only a RELATIVE source can go this way: glob() rejects a
             # non-relative pattern, which is what an absolute include source is
             # after rebasing.
@@ -736,15 +737,12 @@ def _expand_pattern(
             )
         # No base to expand from (an absolute pattern, or no base_dir):
         # glob(None) expands the pattern the path itself carries, splitting at
-        # the first wildcard. Added in pathlib-next 0.9.6, which is why the
-        # floor is >=0.9.6 — 0.9.4 removed the glob("") spelling for pathlib
-        # parity, and on 0.9.0-0.9.3 glob(None) returns silently partial
-        # matches.
+        # the first wildcard.
         return path.glob(
             None, recursive=recursive, on_error=on_error, bound_loops=bound_loops
         )
     # A stdlib path, which a caller gets by passing `path_factory=pathlib.Path`.
-    # Expansion still goes through pathlib-next: stdlib `glob` cannot expand
+    # Expansion still goes through pathapi: stdlib `glob` cannot expand
     # ``**`` at all (`parent.glob(name)` looks inside a literal ``**``
     # directory, so a `recursive=` source expanded to *nothing*, silently), has
     # no error hook for `on_error`, and nothing to bound a directory loop with.
@@ -868,7 +866,7 @@ def _iter_sources(
 
     Each item in *sources* may be:
 
-    * A file path: a ``str``, a pathlib-next path, or any other
+    * A file path: a ``str``, a pathapi path, or any other
       ``os.PathLike`` such as :class:`pathlib.Path` — resolved against
       *base_dir* if relative and not a command URI, and glob-expanded if it
       contains glob magic characters.
@@ -901,7 +899,7 @@ def _iter_sources(
     optional layers can be passed unconditionally:
     ``load("base.yaml", os.environ.get("OVERRIDE"))``.
 
-    Glob expansion belongs to the path type (pathlib-next, or the stdlib
+    Glob expansion belongs to the path type (pathapi, or the stdlib
     fallback). What this function adds: a pattern is recognized by the
     *caller's own* components, so glob characters in *base_dir* or in a
     Windows extended-length anchor are literal; a pattern that names an
@@ -934,7 +932,7 @@ def _iter_sources(
             the rest of the pattern still expands — or anything falsy to let
             the `OSError` propagate. Without it the directory is skipped
             silently, as pathlib does. Asked once per directory, and only on
-            the pathlib-next path: the stdlib fallback has no hook.
+            the pathapi path: the stdlib fallback has no hook.
         bound_loops: Whether each ``**`` bounds a directory **loop** — a
             Windows junction pointing at one of its own ancestors, which
             otherwise walks until the filesystem refuses the path. `True` by
@@ -944,8 +942,7 @@ def _iter_sources(
 
             A directory deliberately reachable under two names is still
             reached under both — the bound is the current **descent path**,
-            not every directory seen, which is what pathlib-next 0.9.9
-            changed and why the floor is ``>=0.9.9``. A POSIX directory
+            not every directory seen. A POSIX directory
             **symlink** is never descended by ``**`` in the first place, so
             there is nothing to bound there. Forwarded to
             ``Path.glob(bound_loops=)``; the stdlib fallback ignores it,

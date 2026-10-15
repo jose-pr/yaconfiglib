@@ -9,10 +9,10 @@ import typing as _ty
 from jinja2 import Environment
 from jinja2.sandbox import SandboxedEnvironment
 
-# pathlib-next is a required dependency; see utils/source.py for why this
+# pathapi is a required dependency; see utils/source.py for why this
 # import is unconditional.
-from pathlib_next import Path, PosixPathname
-from pathlib_next.mempath import MemPath
+from pathapi import Path, PosixPathname
+from pathapi.mempath import MemPath
 
 from yaconfiglib.backends.base import ConfigBackend
 from yaconfiglib.errors import (
@@ -38,7 +38,7 @@ class Jinja2ConfigLoader(ConfigBackend):
     variant of each backend.
 
     The rendered output is written to an in-memory path (``MemPath``, or a
-    real temp file when ``pathlib_next`` is unavailable) before being
+    real temp file when ``pathapi`` is unavailable) before being
     handed to the resolved backend, so downstream backends see ordinary
     file content and don't need any Jinja2-specific handling.
     """
@@ -112,7 +112,7 @@ class Jinja2ConfigLoader(ConfigBackend):
         # Resolve the backend for the name minus the .j2/.jinja2 suffix before
         # reading or rendering anything: a template called "config.j2" names no
         # format, and the old failure pointed at a stripped path the user never
-        # wrote (or, without pathlib_next, at an unrelated temp file).
+        # wrote (or, without pathapi, at an unrelated temp file).
         stripped = path.with_name(path.stem)
         try:
             rendered_cls = ConfigBackend.get_class_by_path(stripped)

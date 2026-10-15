@@ -58,14 +58,14 @@ class TestPathLikeSources:
         )
         assert ConfigLoader(base_dir=str(tmp_path)).load(source) == {"a": 1}
 
-    def test_pathlib_next_path_source_passes_through(self, tmp_path):
-        mempath = pytest.importorskip("pathlib_next.mempath")
-        from pathlib_next import LocalPath
+    def test_pathapi_path_source_passes_through(self, tmp_path):
+        mempath = pytest.importorskip("pathapi.mempath")
+        from pathapi import LocalPath
 
         m = mempath.MemPath("memdir/a.json")
         m.parent.mkdir(parents=True, exist_ok=True)
         m.write_text(json.dumps({"a": 1}), encoding="utf-8")
-        # A pathlib-next path is yielded as itself: its __fspath__ may raise.
+        # A pathapi path is yielded as itself: its __fspath__ may raise.
         assert list(parse_sources([m])) == [m]
 
         _write(tmp_path / "app.json", {"a": 1})
@@ -73,7 +73,7 @@ class TestPathLikeSources:
 
 
 class TestStdlibPathFactory:
-    """`path_factory=pathlib.Path` gets pathlib-next's expansion too.
+    """`path_factory=pathlib.Path` gets pathapi's expansion too.
 
     Expansion used to fall to `path.parent.glob(path.name)` for a stdlib path,
     which cannot expand ``**`` — it looks inside a literal ``**`` directory —
@@ -135,7 +135,7 @@ class TestStdlibPathFactory:
 class TestGlobExpansion:
     """The rules yaconfiglib owns: order, directories, literal-vs-pattern.
 
-    Expansion itself is pathlib-next's; these pin what this package does with
+    Expansion itself is pathapi's; these pin what this package does with
     what it gets back.
     """
 
@@ -223,7 +223,7 @@ class TestGlobExpansion:
         assert loader.load("base.json", pattern) == {"base": 1}
 
     def test_hidden_names_are_matched(self, tmp_path):
-        """pathlib-next 0.9.4+ includes hidden entries, as pathlib does."""
+        """pathapi includes hidden entries, as pathlib does."""
         _write(tmp_path / "a.json", {"a": 1})
         _write(tmp_path / ".h.json", {"h": 1})
         loader = ConfigLoader(base_dir=str(tmp_path))
@@ -246,7 +246,7 @@ class TestGlobExpansion:
         assert loader.load("**/conf/**/*.json") == {"a": 1, "b": 1, "c": 1}
 
     def test_mempath_glob_without_base_dir_keeps_spelling(self):
-        mempath = pytest.importorskip("pathlib_next.mempath")
+        mempath = pytest.importorskip("pathapi.mempath")
 
         # Everything must come off ONE MemPath instance: each constructor call
         # creates its own in-memory filesystem, so a second MemPath("memdir")
@@ -358,7 +358,7 @@ class TestHashKeyCollisions:
 def locked_tree(tmp_path, monkeypatch):
     """A tree with one directory whose listing raises `PermissionError`.
 
-    Patches `_scandir`, **not** `iterdir`: pathlib-next 0.9.4+ lists through
+    Patches `_scandir`, **not** `iterdir`: pathapi lists through
     `_scandir`, so an `iterdir` patch is never reached and makes an unreadable
     directory look readable. A monkeypatch rather than real ACLs, so this runs
     the same on Windows and in a root-owned CI container.
@@ -385,8 +385,8 @@ class TestGlobExpansionErrors:
     """A directory glob expansion cannot list is reported, not silently dropped.
 
     pathlib skips an unreadable directory without a word, so a whole
-    configuration layer could disappear. pathlib-next 0.9.7 added
-    `glob(on_error=)`, which is what lets `ignore_error` see it.
+    configuration layer could disappear. pathapi's
+    `glob(on_error=)` is what lets `ignore_error` see it.
     """
 
     def test_unreadable_directory_raises_by_default(self, locked_tree):
@@ -472,7 +472,7 @@ class TestGlobExpansionErrors:
 
 
 #: Only a **junction** is walked by ``**``. A POSIX directory symlink is not:
-#: pathlib-next defaults to ``recurse_symlinks=False`` and raises
+#: pathapi defaults to ``recurse_symlinks=False`` and raises
 #: `NotImplementedError` for ``True`` (measured on 0.9.8), so a symlinked loop
 #: is never entered and there is nothing for `bound_loops` to bound. Junctions
 #: are the reverse case — they report ``is_symlink() == False``, so no symlink
@@ -540,10 +540,10 @@ class TestGlobLoopBounding:
 
     Unbounded, a ``**`` that crosses a loop walks it until the filesystem
     refuses the path — the load **fails** — so "off" was never a useful
-    default; it was chosen only because pathlib-next 0.9.7's bound keyed on
-    every directory seen and therefore dropped a directory deliberately
-    reachable under two names. 0.9.9 keys on the current **descent path**
-    instead (this project asked for that rule), so the cost is gone and the
+    default; it was chosen only because a bound keyed on
+    every directory seen would drop a directory deliberately
+    reachable under two names. pathapi keys on the current **descent path**
+    instead, so the cost is gone and the
     bound is on. `bound_loops=False` still buys pathlib's own walk.
 
     Windows only, because only a junction is descended at all — see
@@ -576,9 +576,8 @@ class TestGlobLoopBounding:
             )
         )
         # Both junctions onto one shared directory are read. This is the test
-        # that pins the floor: on pathlib-next 0.9.7/0.9.8 the bound dropped
-        # `site-b` and this returned two names, which is why `>=0.9.9` is a
-        # load-bearing bound and not housekeeping.
+        # that pins the bound's rule: keyed on every directory seen, it would
+        # drop `site-b` and return one name.
         assert sorted(p.name for p in matches) == [
             "common.json",
             "common.json",
@@ -612,7 +611,7 @@ class TestPosixSymlinksAreNotDescended:
     """On POSIX a ``**`` never enters a symlinked directory, so it cannot loop.
 
     The other half of the platform split, pinned so a change upstream is
-    visible here rather than only in the documentation: pathlib-next defaults
+    visible here rather than only in the documentation: pathapi defaults
     to ``recurse_symlinks=False`` and raises `NotImplementedError` for
     ``True``, which means `bound_loops` has nothing to bound on this side.
     """
