@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The path layer is `pathapi`, not `pathlib-next`.** `pathlib-next` was renamed and
+  split: its core is now the `pathapi` distribution, and `pathlib-next` 0.10.1 is only a
+  deprecation shim over it. The dependency is `pathapi>=0.1.0,<0.2`, and yaconfiglib no
+  longer installs `pathlib-next`. The paths a load accepts and returns (`Path`,
+  `LocalPath`, and the `MemPath` that stands for an in-memory document) are now
+  `pathapi` classes. Nothing about how sources resolve, glob or merge changed.
+
+  What to do: if your code imports `pathlib_next` for these types, import them from
+  `pathapi` instead (`from pathapi import Path, LocalPath`, `from pathapi.mempath import
+  MemPath`), and depend on `pathapi` yourself rather than relying on yaconfiglib to
+  bring `pathlib_next`. A path object made by `pathlib-next` 0.9 is not a `pathapi`
+  `Path`, so build such paths with `pathapi` (or `pathlib-next` 0.10.1, whose names are
+  the `pathapi` classes). A URI source (`sftp://`, `http://`) needs the distribution
+  that provides it (`pathapi-uri`, `sftppath`).
+
 ## [0.13.0] - 2026-09-20
 
 ### Removed

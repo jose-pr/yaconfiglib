@@ -79,12 +79,11 @@ ConfigLoader(base_dir="conf", recursive=True).load("**/*.yaml")
     names is still read under both, because the bound is the **current descent
     path** — a loop is a directory reachable below itself — and not every
     directory the walk has seen. That is the rule `find -L` uses, and it
-    arrived in pathlib-next 0.9.9, which is why this package requires
-    `>=0.9.9`; on 0.9.7 and 0.9.8 bounding dropped the second name.
+    is what `pathapi` implements.
 
     Only junctions are affected. A **POSIX symlink** to a directory is never
     descended by `**` at all — `pathlib` does not follow one, and neither does
-    pathlib-next — so a symlinked loop cannot arise, and a symlinked layer is
+    pathapi — so a symlinked loop cannot arise, and a symlinked layer is
     invisible to a recursive glob (name it as its own source instead). A
     junction is the reverse case: Windows reports it as *not* a symlink, so
     `**` walks straight into it.

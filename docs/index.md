@@ -6,9 +6,8 @@ It loads, merges, and interpolates configuration from YAML, TOML, JSON, INI,
 hands you back a single object you can traverse with dot-notation or hydrate
 straight into a Pydantic model or dataclass.
 
-It has one runtime dependency, `pathlib-next`, which provides the path layer —
-recursive `**` expansion, a glob's error hook, directory-loop bounding and URI
-paths. Every format-specific integration (PyYAML, `tomllib`/`tomli`, Jinja2,
+It has one runtime dependency, `pathapi`, which provides the path layer —
+recursive `**` expansion, a glob's error hook and directory-loop bounding. Every format-specific integration (PyYAML, `tomllib`/`tomli`, Jinja2,
 Pydantic) is strictly optional and only imported when you actually use it.
 
 ## Why yaconfiglib
@@ -37,7 +36,7 @@ Pydantic) is strictly optional and only imported when you actually use it.
 pip install yaconfiglib
 ```
 
-That brings `pathlib-next` with it. Add extras for the backends you need:
+That brings `pathapi` with it. Add extras for the backends you need:
 
 ```bash
 pip install "yaconfiglib[yaml,toml,jinja2]"

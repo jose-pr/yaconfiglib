@@ -44,7 +44,7 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
   `dump(..., encoding=...)`.
   **`dump` targets**, in dispatch order: an object with `write` (a binary one is detected
   by the `TypeError` it raises before writing anything, then handed `content.encode(enc)`);
-  a `str`/`bytes` path; an object with `write_text` (`pathlib.Path`, pathlib-next
+  a `str`/`bytes` path; an object with `write_text` (`pathlib.Path`, pathapi
   `LocalPath`/`MemPath`, remote paths — before the `os.PathLike` branch, because
   `os.fspath(MemPath(...))` raises); any other `os.PathLike`; else `TypeError`. `encoding`
   (default `utf-8`) covers everything `dump` opens or encodes itself, and is **ignored for
@@ -91,7 +91,7 @@ features, and code layout, see <https://github.com/jose-pr/yaconfiglib>.
   `TypeVar`, so `Backend.get_class_by_name` still narrows to that subclass. Every name
   used in a hint is importable at runtime, not only under `TYPE_CHECKING`.
 - **Path parameters accept `os.PathLike`**, so a stdlib `pathlib.Path` works everywhere a
-  pathlib-next path does; `path_factory` is a `(str) -> os.PathLike` callable.
+  pathapi path does; `path_factory` is a `(str) -> os.PathLike` callable.
 - **`loader_factory` is a `(path) -> ConfigBackend` callable**, not `type[ConfigBackend]`:
   the class spelling type-checked but crashed, since backends take no constructor
   argument from the loader.
@@ -114,7 +114,7 @@ All constructor args become instance defaults, overridable per-call — except
 backend. Assigning `loader.confine_to = …` afterwards **is** honoured (it is a property
 that re-resolves its roots). Notable ones:
 
-- `base_dir` — a `str` or any `os.PathLike` (a stdlib `pathlib.Path` and a pathlib-next
+- `base_dir` — a `str` or any `os.PathLike` (a stdlib `pathlib.Path` and a pathapi
   path both qualify): the directory relative file-path sources you pass to `.load()` resolve
   against; also the anchor for includes inside documents that are not files (`loads()`,
   `#!` strings, streams, command output). A relative `!include` inside a YAML **file**
@@ -128,7 +128,7 @@ that re-resolves its roots). Notable ones:
   refuses the path and the load raises `OSError`. Default **`True`**; `False` buys
   pathlib's own unbounded walk. Instance-wide, with **no** per-call override, since a loop
   is a property of the tree. Bounding keeps a directory reachable under two names (the
-  bound is the descent path, pathlib-next 0.9.9+) and does nothing on POSIX, where a
+  bound is the descent path) and does nothing on POSIX, where a
   directory symlink is never descended — see `parse_sources` below.
 - `key_factory` — `(path, value) -> str` merge/document key (default: filename stem).
   The callable receives what `parse_sources` yielded: a path object, or — for a command
@@ -460,7 +460,7 @@ distinguish merge branches.
 
 - **`parse_sources(sources, base_dir=None, encoding=None, memo=None, path_factory=None,
   recursive=None, on_error=None, bound_loops=True) -> Iterator[Path]`** — flattens `sources` (paths — a `str`, a
-  pathlib-next path, or any other `os.PathLike` such as `pathlib.Path`; glob patterns,
+  pathapi path, or any other `os.PathLike` such as `pathlib.Path`; glob patterns,
   command URIs — yielded as a `CommandSource`, a `str` subclass carrying the text
   **verbatim** (a path factory would rewrite `/` on Windows and collapse `//`, `/./`
   and trailing slashes on POSIX), with `scheme`/`format`/`command` properties and
@@ -479,7 +479,7 @@ distinguish merge branches.
   (anything else raises `TypeError` naming `read()`). Being materialized, an `!include`
   inside it resolves against `base_dir`. Command URIs (`exec://`, `cmd://`,
   `sh://`, `+fmt` variants) pass through unresolved/unexpanded. In-memory content and
-  streams materialize to a `pathlib_next` `MemPath`. **pathlib-next is a required
+  streams materialize to a `pathapi` `MemPath`. **pathapi is a required
   dependency and every import of it is unconditional** — there is no stdlib fallback to
   fall into and no `HAS_PATHLIB_NEXT` flag to branch on. A `path_factory` that returns
   **stdlib** paths (`path_factory=pathlib.Path`) is fully supported: such a path is
@@ -506,17 +506,16 @@ distinguish merge branches.
   byte-for-byte, so a byte-oriented backend reads exactly what was passed. A `bytes`
   source that is not an in-memory document raises `TypeError` — a path belongs in a
   `str` or a path object.
-  **Glob expansion is pathlib-next's**, not reimplemented here: a relative pattern is
+  **Glob expansion is pathapi's**, not reimplemented here: a relative pattern is
   expanded by `base_dir.glob(pattern, recursive=...)` so the base stays literal (a
   `proj [v2]` base_dir needs no escaping), and an absolute one by `path.glob(None, ...)`
   (0.9.6+). **`on_error(error, directory) -> bool`** is called when a directory cannot be
   listed: return `True` to skip it (logged at DEBUG) and keep expanding, anything falsy to
   let the `OSError` propagate. Without it the directory is skipped silently, as pathlib
-  does. It is asked **once per directory** — pathlib-next reports the same one twice for a
+  does. It is asked **once per directory** — pathapi reports the same one twice for a
   `**` pattern — and `FileNotFoundError`/`NotADirectoryError` are never offered, since a
   missing or non-directory parent simply matches nothing. It rides on
-  `glob(on_error=)`, added in pathlib-next **0.9.7**, which is why the floor is `>=0.9.7`;
-  the stdlib fallback has no such hook. What this package adds on top: a source is classified as a pattern by its
+  `glob(on_error=)`; the stdlib fallback has no such hook. What this package adds on top: a source is classified as a pattern by its
   **own** components only (anchor excluded, so `\\?\C:\...` is a literal path); a
   pattern that names an **existing** path loads literally; **directory** matches are
   dropped (no backend reads a directory); and matches are **sorted** by component, since
@@ -525,9 +524,7 @@ distinguish merge branches.
   loop** — a junction pointing at one of its own ancestors — which unbounded walks until
   the filesystem refuses the path and the load raises `OSError`. The bound is the
   **current descent path**, so a directory deliberately reachable under two sibling names
-  is still reached under both; that rule arrived in pathlib-next **0.9.9** (reported by
-  this project against 0.9.7, where the bound keyed on every directory seen and dropped
-  the second name), and it is why the floor is `>=0.9.9`. `bound_loops=False` restores
+  is still reached under both. `bound_loops=False` restores
   pathlib's unbounded walk. Forwarded to `glob(bound_loops=)`; the stdlib fallback ignores
   it, having no `**` to bound. **Platform split:** only a junction is descended at all —
   Windows reports one as *not* a symlink — while a POSIX directory **symlink** is never
